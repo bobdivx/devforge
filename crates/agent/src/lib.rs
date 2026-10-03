@@ -1,3 +1,4 @@
+pub mod sdd;
 mod tools;
 
 use async_trait::async_trait;
@@ -20,7 +21,7 @@ use tools::{
     ListProjectsTool, LocalPreviewStatusTool, McpCallTool, McpListRemoteToolsTool,
     McpListServersTool, ProposePlanTool, PublishToGitHubTool, ReadGitHubFileTool,
     ReadProjectFileTool, ReviewProjectSecurityTool, RunApplicationTestsTool, RunWorkdirCommandTool,
-    StartLocalPreviewTool,
+    SddLoopTool, StartLocalPreviewTool,
     StopLocalPreviewTool, SyncWorkdirToGitHubTool, TriggerDeployTool, UpsertEnvVarsTool,
     WriteProjectFileTool,
 };
@@ -164,7 +165,8 @@ pub fn build_core_registry(
     }));
     registry.register(Arc::new(ListAgentToolFailuresTool { pool: pool.clone() }));
     registry.register(Arc::new(CreateProjectAgentTool { pool: pool.clone() }));
-    registry.register(Arc::new(ReviewProjectSecurityTool { pool }));
+    registry.register(Arc::new(ReviewProjectSecurityTool { pool: pool.clone() }));
+    registry.register(Arc::new(SddLoopTool { pool }));
     registry
 }
 
@@ -596,9 +598,32 @@ fn local_first_rules(publish_ok: bool) -> String {
     let gate = if publish_ok {
         "L'utilisateur a VALIDÉ explicitement une publication. Tu PEUX maintenant : create_github_pr, sync_workdir_to_github, publish_to_github, ou trigger_deploy. Travaille toujours depuis les fichiers locaux déjà écrits.".to_string()
     } else {
-        "❌ INTERDIT (pas de validation PR) : create_github_pr, create_pull_request, publish_to_github, sync_workdir_to_github, create_github_repo, mcp_call_tool create_pull_request / create_or_update_file / create_branch. « go », « oui », « améliore le site » NE sont PAS une validation de PR. ✅ AUTORISÉ : propose_plan, list_project_files, read_project_file, write_project_file mode=local, run_workdir_command, start_local_preview, get_project, get_deployment_logs, run_application_tests, http_smoke, list_env_vars, review_project_security (seulement si l'utilisateur demande une revue sécurité). ❌ N’invente PAS un MCP « devforge-workdir » — shell = run_workdir_command (allowlist npm/node/astro…), fichiers = tools natifs.".to_string()
+        "❌ INTERDIT (pas de validation PR) : create_github_pr, create_pull_request, publish_to_github, sync_workdir_to_github, create_github_repo, mcp_call_tool create_pull_request / create_or_update_file / create_branch. « go », « oui », « améliore le site » NE sont PAS une validation de PR. ✅ AUTORISÉ : propose_plan, sdd_loop, list_project_files, read_project_file, write_project_file mode=local, run_workdir_command, start_local_preview, get_project, get_deployment_logs, run_application_tests, http_smoke, list_env_vars, review_project_security (seulement si l'utilisateur demande une revue sécurité). ❌ N’invente PAS un MCP « devforge-workdir » — shell = run_workdir_command (allowlist npm/node/astro…), fichiers = tools natifs.".to_string()
     };
     format!("WORKFLOW OBLIGATOIRE (autonomie locale, PR en dernier) :\n1. PLAN : appelle propose_plan (titre + étapes) AVANT d'écrire des fichiers.\n2. EXÉCUTE EN LOCAL : list_project_files, read_project_file, write_project_file mode='local', run_workdir_command (build/test). Ne te contente pas de conseiller.\n3. PREVIEW : après des edits, appelle start_local_preview. Si public_ok=false ou logs_tail montre une erreur, corrige et relance (force=true). Ne dis jamais que la preview marche sans public_ok=true.\n4. RAPPORT : résume les fichiers touchés, puis UNE SEULE question : « Valide pour ouvrir une PR ? »\n{gate}")
+}
+
+fn sdd_overlay(role: &str, latest: &str) -> String {
+    if latest.contains("SDD-SPECIFY:") {
+        return "\nSDD : la spec est dans specs/<slug>/spec.md. ARRÊT. Pas de code, pas de create_project_agent, pas de dépôt, pas de publication, pas de déploiement. Demande une validation explicite de la spec. « oui » et « go » ne suffisent pas.\n".into();
+    }
+    if latest.contains("SDD-APPROVED:") {
+        return "\nSDD : spec validée, plan.md et tasks.md sont écrits. Si un worker est déjà indiqué, n'en crée pas un second. Sinon create_project_agent (role=worker) avec le message d'implémentation locale. Publication toujours interdite.\n".into();
+    }
+    if latest.contains("SDD-REJECT:") {
+        return "\nSDD : spec rejetée. Pas de code. Attends une nouvelle description.\n".into();
+    }
+    if latest.contains("SDD-IMPLEMENT:") {
+        return "\nSDD : tu es le worker de cette spec. Implémente seulement en local. Interdit : dépôt, pull request, publication, déploiement. Termine par specs/<slug>/convergence.md, première ligne CONVERGED: yes ou CONVERGED: no (ou CONVERGED: fail si blocage clair).\n".into();
+    }
+    if latest.contains("SDD-CONVERGED:") || latest.contains("SDD-FAILED:") {
+        return "\nSDD : boucle terminée. Résume le résultat. N'ouvre pas de pull request sans une demande explicite et séparée.\n".into();
+    }
+    if role == "coordinator" {
+        "\nSDD : pour une fonctionnalité, sdd_loop action=specify (titre + description). Cela écrit specs/constitution.md une fois et specs/<slug>/spec.md, puis tu t'arrêtes. « oui » et « go » ne valident pas la spec. Après un « j'approuve la spec », sdd_loop action=approve puis create_project_agent (role=worker, initial_message=implement_prompt). Le worker écrit specs/<slug>/convergence.md. Tu restes en local.\n".into()
+    } else {
+        String::new()
+    }
 }
 
 fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
@@ -615,6 +640,7 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
     let has_template_applied = ctx.history.iter().any(|(hist_role, content)| {
         hist_role == "user" && ((content.contains("Template") && content.contains("déjà appliqué")) || (content.contains("template") && content.contains("already applied")))
     });
+    let sdd = sdd_overlay(role, latest);
     let role_focus = match role {
         "deploy" => {
             let template_nudge = if has_template_applied {
@@ -631,9 +657,9 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
         "ops" => format!("Tu es l'agent Ops. Priorité : santé du projet, logs, variables d'environnement, smoke HTTP (get_project, get_deployment_logs, list_env_vars, http_smoke). Corrige le workdir seulement si on te le demande.\n{local}"),
         // Coordinateur = fil permanent du projet. Les tâches lourdes passent par des subagents éphémères.
         "coordinator" => format!(
-            "Tu es le Coordinateur — fil permanent de ce projet. Tu accumules le contexte, restes proactif sur les événements (échec deploy, santé dégradée), et orchestres.\nWORKERS : pour une tâche lourde ou isolée, appelle l’outil create_project_agent (kind=subagent, parent_agent_uuid=ton uuid injecté par défaut). Ne crée PAS un nouveau fil permanent / required par tâche. Optionnel : initial_message pour démarrer le worker. Tu coordonnes Deploy / Ops / Reviewer sans les remplacer.\n{local}"
+            "Tu es le Coordinateur — fil permanent de ce projet. Tu accumules le contexte, restes proactif sur les événements (échec deploy, santé dégradée), et orchestres.\nWORKERS : pour une tâche lourde ou isolée, appelle l’outil create_project_agent (kind=subagent, parent_agent_uuid=ton uuid injecté par défaut). Ne crée PAS un nouveau fil permanent / required par tâche. Optionnel : initial_message pour démarrer le worker. Tu coordonnes Deploy / Ops / Reviewer sans les remplacer.\n{sdd}{local}"
         ),
-        _ => format!("Tu es un agent DevForge : planifie, agis dans le workdir, preview, puis PR sur validation.\n{local}"),
+        _ => format!("Tu es un agent DevForge : planifie, agis dans le workdir, preview, puis PR sur validation.\n{sdd}{local}"),
     };
     let nudge = if security_review {
         "\nL'utilisateur demande une revue sécurité. Appelle review_project_security maintenant, une seule fois. Résume les findings (gravité, fichier, correctif). N'invente rien. Ne décris pas d'exploit. Ne réécris pas le code.\n"
@@ -645,7 +671,7 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
     let scoped = if ctx.project_brief.is_some() || ctx.project_uuid.is_some() {
         "\nLe projet courant est déjà dans le contexte — ne demande pas l'UUID. Agis."
     } else { "" };
-    let mcp_guidance = "\n\nTOOLS LOCAUX (prioritaires, PAS du MCP) : propose_plan, list_project_files, read_project_file, write_project_file (mode=local), run_workdir_command, start_local_preview, local_preview_status, list_project_agents, list_agent_messages, list_agent_tool_failures, create_project_agent, review_project_security (revue statique, seulement si demandée).\nIl n’existe PAS de serveur MCP « devforge-workdir » / « workdir » / « atelier » — n’invente pas ce nom, ne bloque PAS en attendant un MCP manquant, et ne demande JAMAIS à l’utilisateur de le configurer. Pour npm/build/test : run_workdir_command. Pour la preview : start_local_preview (npm install inclus).\nMCP distants (mcp_list_servers / mcp_call_tool) : uniquement GitHub, Turso, Slack… après validation PR pour GitHub. Pas besoin de lister les serveurs MCP à chaque tour.";
+    let mcp_guidance = "\n\nTOOLS LOCAUX (prioritaires, PAS du MCP) : propose_plan, sdd_loop, list_project_files, read_project_file, write_project_file (mode=local), run_workdir_command, start_local_preview, local_preview_status, list_project_agents, list_agent_messages, list_agent_tool_failures, create_project_agent, review_project_security (revue statique, seulement si demandée).\nIl n’existe PAS de serveur MCP « devforge-workdir » / « workdir » / « atelier » — n’invente pas ce nom, ne bloque PAS en attendant un MCP manquant, et ne demande JAMAIS à l’utilisateur de le configurer. Pour npm/build/test : run_workdir_command. Pour la preview : start_local_preview (npm install inclus).\nMCP distants (mcp_list_servers / mcp_call_tool) : uniquement GitHub, Turso, Slack… après validation PR pour GitHub. Pas besoin de lister les serveurs MCP à chaque tour.";
     format!("Tu es {name} ({role}) sur DevForge. {role_focus}{nudge}{scoped}{mcp_guidance}\nRéponds en français, concret, orienté ACTION. N'invente pas de résultats. Le panneau Preview du workspace est l'endroit où l'utilisateur voit tes changements.")
 }
 

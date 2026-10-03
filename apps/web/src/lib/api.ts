@@ -282,6 +282,16 @@ export type Deployment = {
   created_at?: string;
 };
 
+export type SpecFeature = {
+  slug: string;
+  title: string;
+  phase: string;
+  attempts: number;
+  worker_uuid?: string;
+  note?: string;
+  updated_at: string;
+};
+
 export type ProjectAgent = {
   uuid: string;
   project_uuid: string;
@@ -606,6 +616,27 @@ export const api = {
     ),
   projectAgents: (projectUuid: string) =>
     request<{ data: ProjectAgent[] }>(`/projects/${projectUuid}/agents`),
+  projectSpecs: (projectUuid: string) =>
+    request<{ data: SpecFeature[] }>(`/projects/${projectUuid}/specs`),
+  createProjectSpec: (projectUuid: string, body: { title: string; description: string }) =>
+    request<{ data: SpecFeature }>(`/projects/${projectUuid}/specs`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  decideProjectSpec: (
+    projectUuid: string,
+    slug: string,
+    body: { decision: 'approve' | 'reject'; note?: string },
+  ) =>
+    request<{ data: SpecFeature }>(`/projects/${projectUuid}/specs/${slug}/decision`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  convergeProjectSpec: (projectUuid: string, slug: string) =>
+    request<{ data: SpecFeature }>(`/projects/${projectUuid}/specs/${slug}/converge`, {
+      method: 'POST',
+      body: '{}',
+    }),
   agentMessages: (projectUuid: string, agentUuid: string) =>
     request<{
       data: Array<{

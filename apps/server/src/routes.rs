@@ -2137,7 +2137,7 @@ pub(crate) async fn wake_project_agent(
 }
 
 /// Poste un message dans le fil coordinateur et enqueue un tour (dédupe par marqueur).
-async fn wake_coordinator(
+pub(crate) async fn wake_coordinator(
     state: &AppState,
     project_uuid: &str,
     marker: &str,
@@ -2414,7 +2414,7 @@ async fn auto_trigger_repair(state: &AppState, dep_uuid: &str) -> Result<(), Str
 
 /// Déclenche un tour d'agent de manière interne (sans requête HTTP).
 /// Le message utilisateur est déjà dans `agent_messages`. Le run est repris au boot s'il est coupé.
-async fn trigger_agent_turn(
+pub(crate) async fn trigger_agent_turn(
     state: &AppState,
     project_uuid: &str,
     agent_uuid: &str,
@@ -2540,6 +2540,12 @@ async fn execute_claimed_run(
         run.agent_uuid.clone(),
         run.content.clone(),
         tools_json,
+    );
+    crate::spec_routes::schedule_after_implement(
+        state.clone(),
+        run.project_uuid.clone(),
+        run.agent_uuid.clone(),
+        run.content.clone(),
     );
     Ok(())
 }

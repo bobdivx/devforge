@@ -39,6 +39,7 @@ mod routes;
 mod runner_routes;
 mod runner_store;
 mod security;
+mod spec_routes;
 mod sso;
 mod sso_routes;
 mod state;
@@ -338,6 +339,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(domain_catalog::router())
         .merge(update_routes::router())
         .merge(cron_routes::router())
+        .merge(spec_routes::router())
         .merge(cluster_routes::router())
         .merge(worker::exec_route())
         .route("/", get(auth_routes::marketing_home))

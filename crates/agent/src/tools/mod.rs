@@ -12,6 +12,7 @@ mod preview;
 mod project_files;
 mod projects;
 mod publish;
+mod sdd;
 mod security;
 mod sync_workdir;
 mod tests;
@@ -34,6 +35,7 @@ pub use preview::{LocalPreviewStatusTool, StartLocalPreviewTool, StopLocalPrevie
 pub use project_files::{ListProjectFilesTool, ReadProjectFileTool, WriteProjectFileTool};
 pub use projects::{GetProjectTool, ListProjectsTool};
 pub use publish::PublishToGitHubTool;
+pub use sdd::SddLoopTool;
 pub use security::ReviewProjectSecurityTool;
 pub use sync_workdir::SyncWorkdirToGitHubTool;
 pub use tests::RunApplicationTestsTool;
