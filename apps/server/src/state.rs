@@ -794,9 +794,11 @@ impl AppState {
 
     /// Worker de spec. Ne passe pas par la chaîne des agents : celle-ci ne garde que les
     /// providers dont la sonde est OK, met « Ollama NAS » en tête (préférence Agents),
-    /// et s'arrête sur la première réponse non vide. Ollama a donc répondu seul
-    /// (colonne provider = « Ollama NAS ») avec un JSON d'exemple, sans appeler les outils.
-    /// Ici on appelle les autres modèles configurés, même si leur sonde n'est plus fraîche.
+    /// et s'arrête sur la première réponse non vide. Ollama NAS a donc répondu seul
+    /// avec un JSON d'exemple, sans appeler les outils.
+    /// Ici on appelle les autres modèles configurés (Gemini, xAI, Demeter), même si
+    /// leur sonde n'est plus fraîche. Demeter reste inclus : il parle Ollama mais
+    /// appelle les outils. Seul un fournisseur dont le nom contient « Ollama » est écarté.
     pub async fn llm_for_spec_worker(
         &self,
         user_uuid: &str,

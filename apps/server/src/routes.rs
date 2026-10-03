@@ -2547,9 +2547,40 @@ async fn execute_claimed_run(
     let result = match result {
         Ok(result) => result,
         Err(e) => {
-            crate::agent_runs::fail_run(&state.pool, &run.uuid, &run.agent_uuid, &e.to_string())
+            let message = e.to_string();
+            if spec_turn {
+                crate::spec_routes::fail_spec_provider(
+                    state,
+                    &run.project_uuid,
+                    &run.content,
+                    &message,
+                )
                 .await;
-            return Err(e.to_string());
+                let note = devforge_agent::sdd::provider_failure_note(&message);
+                if let Err(save_err) = crate::agent_runs::save_assistant_and_finish(
+                    &state.pool,
+                    &run.uuid,
+                    &run.project_uuid,
+                    &run.agent_uuid,
+                    &note,
+                    "[]",
+                    "",
+                )
+                .await
+                {
+                    crate::agent_runs::fail_run(
+                        &state.pool,
+                        &run.uuid,
+                        &run.agent_uuid,
+                        &save_err.to_string(),
+                    )
+                    .await;
+                    return Err(save_err.to_string());
+                }
+                return Ok(());
+            }
+            crate::agent_runs::fail_run(&state.pool, &run.uuid, &run.agent_uuid, &message).await;
+            return Err(message);
         }
     };
     let tools_json = serde_json::to_string(&result.tool_calls).unwrap_or_else(|_| "[]".into());

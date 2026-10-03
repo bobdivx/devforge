@@ -311,6 +311,33 @@ pub async fn block_spec_no_provider(state: &AppState, project_uuid: &str, conten
     let _ = sdd::write_status(&root, &next);
 }
 
+/// Le chat des fournisseurs a échoué avant toute réponse (quota, crédits, hôte down).
+/// La spec ne reste pas « En cours » sans message.
+pub async fn fail_spec_provider(state: &AppState, project_uuid: &str, content: &str, error: &str) {
+    let Some(slug) = content
+        .split("SDD-IMPLEMENT:")
+        .nth(1)
+        .and_then(|rest| rest.split([':', ' ', '\n']).next())
+        .map(|s| s.to_string())
+    else {
+        return;
+    };
+    if !sdd::is_slug(&slug) {
+        return;
+    }
+    let Ok(root) = project_root(state, project_uuid).await else {
+        return;
+    };
+    let Ok(Some(current)) = sdd::read_status(&root, &slug) else {
+        return;
+    };
+    if current.phase != sdd::PHASE_IMPLEMENT {
+        return;
+    }
+    let next = sdd::fail_from_provider_error(&current, error);
+    let _ = sdd::write_status(&root, &next);
+}
+
 async fn spec_worker_ready(state: &AppState, project_uuid: &str) -> bool {
     let Some(owner) = project_owner(state, project_uuid).await else {
         return false;

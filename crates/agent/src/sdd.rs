@@ -39,7 +39,7 @@ pub struct FeatureStatus {
     /// Retirée de la liste par l'utilisateur.
     #[serde(default)]
     pub dismissed: bool,
-    /// Pourquoi la phase `failed` : empty, no_provider, no_feature, stopped, gave_up.
+    /// Pourquoi la phase `failed` : empty, no_provider, no_feature, stopped, gave_up, provider.
     #[serde(default)]
     pub blocker: String,
     pub updated_at: String,
@@ -354,20 +354,20 @@ pub fn empty_work_note(provider: &str) -> String {
 }
 
 /// `Some(raison)` si ce fournisseur ne doit pas exécuter SDD-IMPLEMENT.
-/// Ollama (nom ou driver), y compris « Ollama NAS », est toujours écarté.
-/// Tout autre modèle activé (Gemini, Demeter, xAI, …) peut appeler les outils.
+/// Seul le nom « Ollama » (Ollama NAS) est écarté : ce modèle répond par un JSON
+/// d'exemple et n'appelle pas les outils. Demeter parle le protocole Ollama
+/// (`provider=ollama`) mais sait appeler les outils, donc il reste éligible.
+/// Gemini, Demeter, xAI et tout autre modèle activé peuvent exécuter la spec.
 pub fn spec_provider_skip_reason(
     name: &str,
-    provider: &str,
-    catalog_id: &str,
+    _provider: &str,
+    _catalog_id: &str,
     enabled: bool,
 ) -> Option<&'static str> {
     if !enabled {
         return Some("désactivé");
     }
-    let blob = format!("{name} {provider} {catalog_id}").to_ascii_lowercase();
-    let driver = provider.trim().to_ascii_lowercase();
-    if driver == "ollama" || blob.contains("ollama") {
+    if name.to_ascii_lowercase().contains("ollama") {
         return Some(SKIP_OLLAMA);
     }
     None
@@ -645,6 +645,31 @@ pub fn apply_implement_turn(
         }
     }
     Ok(next)
+}
+
+
+/// Le tour n'a même pas produit de réponse (quota, crédits, hôte injoignable).
+/// On n'incrémente pas les essais : ce n'est pas un travail vide du modèle.
+pub fn provider_failure_note(error: &str) -> String {
+    let clean: String = error
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(500)
+        .collect();
+    if clean.trim().is_empty() {
+        "Aucun modèle n'a répondu.".into()
+    } else {
+        format!("Aucun modèle n'a pu écrire la fonctionnalité. {clean}")
+    }
+}
+
+pub fn fail_from_provider_error(status: &FeatureStatus, error: &str) -> FeatureStatus {
+    let mut next = status.clone();
+    next.phase = PHASE_FAILED.to_string();
+    next.blocker = "provider".into();
+    next.note = provider_failure_note(error);
+    next.updated_at = now_stamp();
+    next
 }
 
 /// Spec de contrôle laissée par un essai interne : pas une fonctionnalité de l'utilisateur.
@@ -1012,7 +1037,7 @@ mod tests {
         let rows = [
             ("ollama", "Ollama NAS", "ollama", "ollama", true),
             ("gem", "Gemini", "gemini", "gemini", true),
-            ("dem", "Demeter", "openai", "custom", true),
+            ("dem", "Demeter", "ollama", "ollama", true),
             ("x", "xAI", "xai", "xai", true),
             ("old", "Ancien", "openai", "openai", false),
         ];
@@ -1028,6 +1053,23 @@ mod tests {
         let (used, _) = choose_spec_providers(&rows, "dem");
         assert_eq!(used[0].name, "Demeter");
         assert!(provider_label_for_user("stub").is_empty());
+    }
+
+    #[test]
+    fn provider_outage_fails_the_feature_without_burning_attempts() {
+        let dir = scratch();
+        let created = specify(&dir, "Page bonjour", "Affiche Bonjour.").unwrap();
+        let approved = approve(&dir, &created.slug).unwrap();
+        let failed = fail_from_provider_error(
+            &approved,
+            "tous les providers ont échoué — Gemini: quota | Demeter: connexion interrompue",
+        );
+        assert_eq!(failed.phase, PHASE_FAILED);
+        assert_eq!(failed.blocker, "provider");
+        assert_eq!(failed.attempts, approved.attempts);
+        assert!(failed.note.contains("Demeter"));
+        assert!(failed.note.contains("Gemini"));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
