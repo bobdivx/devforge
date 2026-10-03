@@ -14,6 +14,9 @@ const STOP: &str = "stop";
 pub fn start(url: &str) -> watch::Receiver<bool> {
     let (tx, rx) = watch::channel(false);
     if !tray_wanted() {
+        // Sans émetteur vivant, `changed()` échoue tout de suite et le serveur s’arrête
+        // (conteneur Docker : pas de barre des tâches, donc pas de thread tray).
+        std::mem::forget(tx);
         return rx;
     }
     ensure_linux_autostart();
