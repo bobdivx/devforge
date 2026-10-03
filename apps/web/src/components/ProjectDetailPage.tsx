@@ -9,6 +9,7 @@ import { AppIcon, statusDotClass } from './AppIcon';
 import { AppShell } from './AppShell';
 import { ModelSentence } from './ModelSentence';
 import { ProjectAgentsHub } from './ProjectAgentsHub';
+import { ProjectSpecsModal } from './ProjectSpecsModal';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
 import { ProjectOidcPanel } from './ProjectOidcPanel';
@@ -63,7 +64,7 @@ type Tab =
 
 type Props = { uuid?: string; tab?: Tab };
 
-function readQuery(): { uuid: string; tab: Tab; builder?: boolean; agent?: string } {
+function readQuery(): { uuid: string; tab: Tab; builder?: boolean; agent?: string; spec?: string } {
   if (typeof window === 'undefined') {
     return { uuid: '', tab: 'overview' };
   }
@@ -88,6 +89,7 @@ function readQuery(): { uuid: string; tab: Tab; builder?: boolean; agent?: strin
     tab: allowed.includes(tab) ? tab : 'overview',
     builder: q.get('builder') === '1',
     agent: q.get('agent') || undefined,
+    spec: q.get('spec') || undefined,
   };
 }
 
@@ -151,6 +153,8 @@ export function ProjectDetailPage(props: Props) {
   const tab = props.tab ?? initial.tab;
   const builderMode = initial.builder;
   const builderAgentUuid = initial.agent;
+  const pendingSpec = initial.spec;
+  const [featureOpen, setFeatureOpen] = useState(!!pendingSpec);
   const [project, setProject] = useState<Project | null>(null);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -267,6 +271,11 @@ export function ProjectDetailPage(props: Props) {
           ? 'Agents autonomes réveillés par cron ou événement — le chat reste sur le Coordinateur / Workspace.'
           : undefined
       }
+      actions={
+        <Button size="sm" onClick={() => setFeatureOpen(true)}>
+          Nouvelle fonctionnalité
+        </Button>
+      }
       belowTitle={
         <ProjectActivityStrip
           uuid={uuid}
@@ -354,6 +363,11 @@ export function ProjectDetailPage(props: Props) {
         onClose={() => setRulesModalOpen(false)}
         projectUuid={uuid}
         projectName={project?.name}
+      />
+      <ProjectSpecsModal
+        projectUuid={uuid}
+        open={featureOpen}
+        onClose={() => setFeatureOpen(false)}
       />
     </AppShell>
   );

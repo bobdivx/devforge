@@ -188,8 +188,8 @@ export function EmptyAppGrid({
         <EmptyActionTile
           index={0}
           invite
-          title="Créer avec un agent"
-          detail="Décris l’app, l’agent prépare le projet."
+          title="Nouvelle application"
+          detail="Écrire la spec, puis l’approuver. Rien n’est publié."
           onClick={onAgent}
           icon={
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden>
@@ -422,9 +422,9 @@ export function HomePage() {
               <HubAddTile
                 settle
                 index={groups.length + solo.length}
-                label="Ajouter"
+                label="Nouvelle application"
                 lines={3}
-                onClick={() => openWizard()}
+                onClick={() => openWizard(agentBuilder ? 'builder' : 'choice')}
               />
             )}
           </HubGrid>
@@ -490,8 +490,17 @@ export function HomePage() {
                 <p class="mt-1 text-sm text-[var(--color-ink-muted)]">
                   {wizardMode === 'choice' && 'Choisis ta méthode'}
                   {wizardMode === 'github' && 'Importer depuis GitHub'}
-                  {wizardMode === 'builder' && 'Créer avec un agent'}
+                  {wizardMode === 'builder' && 'Prochaine étape : approuver la spec. Le modèle reste en local, rien n’est publié.'}
                 </p>
+                {wizardMode === 'builder' && (
+                  <button
+                    type="button"
+                    class="mt-2 text-xs text-[var(--color-ink-muted)] underline"
+                    onClick={() => setWizardMode('github')}
+                  >
+                    Importer un dépôt à la place
+                  </button>
+                )}
               </div>
               <button
                 type="button"
@@ -519,11 +528,11 @@ export function HomePage() {
                         <path d="M12 20h9M12 4L4 8l8 4 8-4-8-4zM4 12l8 4 8-4" stroke-linecap="round" stroke-linejoin="round" />
                       </svg>
                     </div>
-                    <span class="font-semibold">Créer avec un agent</span>
+                    <span class="font-semibold">Nouvelle application</span>
                     <BetaBadge />
                   </div>
                   <p class="text-sm text-[var(--color-ink-muted)]">
-                    Décris ton app en français, l'agent DevForge scaffold le projet et configure le build.
+                    Décris l’app. DevForge écrit la spec et s’arrête. Tu approuves, ensuite preview locale. Aucun dépôt tant que tu ne le demandes pas.
                   </p>
                 </button>
                 )}
