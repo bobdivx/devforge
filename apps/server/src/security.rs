@@ -51,7 +51,7 @@ pub fn cors_layer() -> CorsLayer {
 
 /// HTML / routes app : pas de cache (évite page blanche après MAJ Flatpak).
 /// Assets fingerprinted `/_astro/*` : cache long.
-pub async fn static_cache_headers(req: Request<Body>, next: Next) -> Response {
+pub async fn static_cache_headers(req: Request<Body>, next: Next) -> Response<Body> {
     let path = req.uri().path().to_string();
     let mut res = next.run(req).await;
     let value = if path.starts_with("/_astro/") {

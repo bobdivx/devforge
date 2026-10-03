@@ -340,6 +340,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(cron_routes::router())
         .merge(cluster_routes::router())
         .merge(worker::exec_route())
+        .route("/", get(auth_routes::marketing_home))
+        .route("/index.html", get(auth_routes::marketing_home))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             token_routes::enforce_api_token_write,
@@ -370,10 +372,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             app = app.fallback_service(ServeDir::new(&root));
         }
     }
-    if !serving_web {
-        app = app.route("/", get(api_root));
-    }
-
     serve_http(app, "server").await?;
     Ok(())
 }
