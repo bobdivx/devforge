@@ -5,10 +5,23 @@ export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+const SESSION_COOKIE = 'df_session';
+
+function writeSessionCookie(token: string | null) {
+  if (typeof document === 'undefined') return;
+  const secure = location.protocol === 'https:' ? '; Secure' : '';
+  if (token && token.startsWith('df_') && !token.startsWith('dfat_')) {
+    document.cookie = `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=2592000; SameSite=Lax${secure}`;
+  } else {
+    document.cookie = `${SESSION_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+  }
+}
+
 export function setToken(token: string | null) {
   if (typeof window === 'undefined') return;
   if (token) localStorage.setItem(TOKEN_KEY, token);
   else localStorage.removeItem(TOKEN_KEY);
+  writeSessionCookie(token);
 }
 
 export type Bootstrap = {

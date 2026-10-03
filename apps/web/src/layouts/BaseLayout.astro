@@ -5,14 +5,38 @@ import '../styles/global.css';
 interface Props {
   title?: string;
   description?: string;
+  /** Vitrine : session déjà ouverte → /app avant le premier affichage. */
+  redirectIfSession?: boolean;
 }
 
-const { title = 'DevForge', description = 'Deploy with clarity. Agents that work.' } = Astro.props;
+const {
+  title = 'DevForge',
+  description = 'Deploy with clarity. Agents that work.',
+  redirectIfSession = false,
+} = Astro.props;
 ---
 
 <!doctype html>
 <html lang="fr">
   <head>
+    {redirectIfSession && (
+      <script is:inline>
+        (function () {
+          try {
+            if (/(?:^|[?&])vitrine=1(?:&|$)/.test(location.search)) return;
+            var token = localStorage.getItem('devforge_token');
+            if (!token || token.indexOf('df_') !== 0 || token.indexOf('dfat_') === 0) return;
+            var secure = location.protocol === 'https:' ? '; Secure' : '';
+            document.cookie =
+              'df_session=' +
+              encodeURIComponent(token) +
+              '; Path=/; Max-Age=2592000; SameSite=Lax' +
+              secure;
+            location.replace('/app');
+          } catch (e) {}
+        })();
+      </script>
+    )}
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />

@@ -1,4 +1,5 @@
 import { useState } from 'preact/hooks';
+import { getToken } from '../../lib/auth';
 import { Button } from '../ui';
 import { cn } from '../../lib/cn';
 
@@ -16,7 +17,7 @@ export function SiteHeader() {
       class="sticky top-0 z-30 border-b border-[var(--color-line)] bg-[var(--color-bg)]/70 backdrop-blur-xl"
     >
       <div class="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
-        <a href="/" class="flex items-center gap-2.5 transition-opacity duration-200 hover:opacity-90">
+        <a href={getToken() ? '/app' : '/'} class="flex items-center gap-2.5 transition-opacity duration-200 hover:opacity-90">
           <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)] transition-transform duration-200 hover:scale-105">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
               <path

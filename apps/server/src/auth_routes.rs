@@ -2,7 +2,8 @@
 
 use axum::{
     extract::{Path, State},
-    http::{header::AUTHORIZATION, HeaderMap},
+    http::{header::AUTHORIZATION, header::LOCATION, header::SET_COOKIE, HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
     routing::{get, patch, post},
     Json, Router,
 };
@@ -125,6 +126,94 @@ async fn load_settings(
     .fetch_one(&state.pool)
     .await
     .map_err(internal)
+}
+
+/// Cookie de session navigateur (`df_…`, jamais un jeton d’API).
+/// Pas HttpOnly : le jeton est déjà dans le stockage local, et la page doit pouvoir
+/// poser le cookie pour une session déjà ouverte, sans nouveau login.
+pub const SESSION_COOKIE: &str = "df_session";
+
+pub fn session_from_cookie_header(raw: &str) -> Option<String> {
+    for part in raw.split(';') {
+        let Some((name, value)) = part.trim().split_once('=') else {
+            continue;
+        };
+        if name.trim() != SESSION_COOKIE {
+            continue;
+        }
+        let value = value.trim().trim_matches('"');
+        let decoded = urlencoding::decode(value).ok()?.into_owned();
+        if decoded.starts_with("df_") && !decoded.starts_with("dfat_") && decoded.len() < 200 {
+            return Some(decoded);
+        }
+    }
+    None
+}
+
+fn session_cookie_from(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
+    session_from_cookie_header(raw)
+}
+
+pub fn session_set_cookie(token: &str, headers: &HeaderMap) -> String {
+    let mut c = format!("{SESSION_COOKIE}={token}; Path=/; Max-Age=2592000; SameSite=Lax");
+    if cookie_secure(headers) {
+        c.push_str("; Secure");
+    }
+    c
+}
+
+pub fn session_clear_cookie(headers: &HeaderMap) -> String {
+    let mut c = format!("{SESSION_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax");
+    if cookie_secure(headers) {
+        c.push_str("; Secure");
+    }
+    c
+}
+
+fn cookie_secure(headers: &HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("https"))
+}
+
+fn json_with_cookie(body: Value, cookie: String) -> Response {
+    let mut res = Json(body).into_response();
+    if let Ok(v) = axum::http::HeaderValue::from_str(&cookie) {
+        res.headers_mut().insert(SET_COOKIE, v);
+    }
+    res
+}
+
+/// `GET /` (et `/index.html`) : session valide → 302 `/app`. `?vitrine=1` garde la vitrine.
+pub async fn marketing_home(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+) -> Response {
+    let force_vitrine = uri
+        .query()
+        .unwrap_or("")
+        .split('&')
+        .any(|p| p == "vitrine=1");
+    if !force_vitrine {
+        if let Some(token) = session_cookie_from(&headers) {
+            if let Ok(Some(_)) = resolve_auth(&state, &token).await {
+                return (StatusCode::FOUND, [(LOCATION, "/app")]).into_response();
+            }
+        }
+    }
+    if let Some(root) = crate::paths::web_dir() {
+        if let Ok(bytes) = std::fs::read(root.join("index.html")) {
+            return (
+                [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                bytes,
+            )
+                .into_response();
+        }
+    }
+    Json(json!({"name":"DevForge Server","docs":"/api/v1/health"})).into_response()
 }
 
 /// Resolve user from session (`df_…`) or API token (`dfat_…`).
@@ -421,8 +510,9 @@ pub struct RegisterBody {
 
 async fn register(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<RegisterBody>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+) -> Result<Response, (axum::http::StatusCode, Json<Value>)> {
     let count = user_count(&state).await?;
     // Après le premier compte : inscription fermée sauf DEVFORGE_ALLOW_REGISTER=1
     if count > 0 && !registration_open() {
@@ -531,7 +621,7 @@ async fn register(
 
     let token = create_session(&state, &user_uuid).await?;
 
-    Ok(Json(json!({
+    let payload = json!({
         "ok": true,
         "token": token,
         "user": { "uuid": user_uuid, "email": email, "name": name, "role": role },
@@ -550,7 +640,11 @@ async fn register(
             "plan": plan,
         },
         "onboarding": { "required": show_boarding == 1 }
-    })))
+    });
+    Ok(json_with_cookie(
+        payload,
+        session_set_cookie(&token, &headers),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -561,8 +655,9 @@ pub struct LoginBody {
 
 async fn login(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<LoginBody>,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+) -> Result<Response, (axum::http::StatusCode, Json<Value>)> {
     let email = body.email.trim().to_lowercase();
     let user = sqlx::query_as::<_, UserRow>(
         "SELECT uuid, email, name, password_hash, role FROM users WHERE email = $1",
@@ -594,7 +689,7 @@ async fn login(
     let token = create_session(&state, &user.uuid).await?;
     let team = user_team(&state, &user.uuid).await?;
 
-    Ok(Json(json!({
+    let payload = json!({
         "ok": true,
         "token": token,
         "user": to_user(&user),
@@ -602,21 +697,28 @@ async fn login(
         "onboarding": {
             "required": team.as_ref().map(|t| t.show_boarding != 0).unwrap_or(false)
         }
-    })))
+    });
+    Ok(json_with_cookie(
+        payload,
+        session_set_cookie(&token, &headers),
+    ))
 }
 
 async fn logout(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    if let Some(token) = bearer_from(&headers) {
+) -> Result<Response, (axum::http::StatusCode, Json<Value>)> {
+    if let Some(token) = bearer_from(&headers).or_else(|| session_cookie_from(&headers)) {
         sqlx::query("DELETE FROM sessions WHERE token = $1")
             .bind(token)
             .execute(&state.pool)
             .await
             .map_err(internal)?;
     }
-    Ok(Json(json!({"ok": true})))
+    Ok(json_with_cookie(
+        json!({"ok": true}),
+        session_clear_cookie(&headers),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -1507,4 +1609,23 @@ fn internal(e: sqlx::Error) -> (axum::http::StatusCode, Json<Value>) {
         axum::http::StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": e.to_string()})),
     )
+}
+
+#[cfg(test)]
+mod session_cookie_tests {
+    use super::session_from_cookie_header;
+
+    #[test]
+    fn lit_le_cookie_de_session() {
+        assert_eq!(
+            session_from_cookie_header("a=1; df_session=df_abc"),
+            Some("df_abc".into())
+        );
+        assert_eq!(
+            session_from_cookie_header("df_session=df_abc%2Fok"),
+            Some("df_abc/ok".into())
+        );
+        assert_eq!(session_from_cookie_header("df_session=dfat_secret"), None);
+        assert_eq!(session_from_cookie_header("other=df_abc"), None);
+    }
 }

@@ -65,8 +65,12 @@ async fn authorize_page(state: State<AppState>) -> Response {
     }
 }
 
-async fn callback_page(state: State<AppState>, query: Query<CallbackQuery>) -> Response {
-    match callback(state, query).await {
+async fn callback_page(
+    state: State<AppState>,
+    headers: axum::http::HeaderMap,
+    query: Query<CallbackQuery>,
+) -> Response {
+    match callback(state, headers, query).await {
         Ok(resp) => resp.into_response(),
         Err(err) => login_error(err).into_response(),
     }
@@ -142,6 +146,7 @@ struct CallbackQuery {
 /// Callback OIDC : échange le code contre un token, extrait l'email, crée/lie un utilisateur DevForge.
 async fn callback(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Query(query): Query<CallbackQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let cfg = load_sso_settings(&state.pool).await;
@@ -226,7 +231,12 @@ async fn callback(
 
     // Redirection vers l'application avec le token en paramètre (sera stocké par le frontend)
     let redirect_url = format!("/login?sso_token={}", urlencoding::encode(&session_token));
-    Ok(Redirect::to(&redirect_url))
+    let mut res = Redirect::to(&redirect_url).into_response();
+    let cookie = crate::auth_routes::session_set_cookie(&session_token, &headers);
+    if let Ok(v) = axum::http::HeaderValue::from_str(&cookie) {
+        res.headers_mut().insert(axum::http::header::SET_COOKIE, v);
+    }
+    Ok(res)
 }
 
 fn generate_state_token() -> String {
