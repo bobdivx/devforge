@@ -22,6 +22,7 @@ import {
   syncLaunchedProjectName,
 } from '../lib/launched-agents';
 import { ProjectAgentsPanel } from './ProjectAgentsPanel';
+import { ProjectSpecsTile } from './ProjectSpecsModal';
 import {
   Alert,
   Badge,
@@ -394,13 +395,14 @@ export function ProjectAgentsHub({
       ) : (
         <FadeIn>
           <HubGrid cols={4}>
+            <ProjectSpecsTile projectUuid={projectUuid} index={0} />
             {gridAgents.map((agent, i) => {
               const status = statusOf(agent);
               const isCoord = agent.role === 'coordinator';
               return (
                 <HubTile
                   key={agent.uuid}
-                  index={i}
+                  index={i + 1}
                   title={agent.name || roleLabel(agent.role)}
                   onClick={() => setDetailUuid(agent.uuid)}
                   icon={agentIcon(agent)}
@@ -452,7 +454,7 @@ export function ProjectAgentsHub({
               );
             })}
             <HubAddTile
-              index={gridAgents.length}
+              index={gridAgents.length + 1}
               label="Nouvel agent"
               onClick={() => {
                 setCreateForm(emptyCreate());
