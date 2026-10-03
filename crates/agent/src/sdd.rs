@@ -407,6 +407,32 @@ La suite du fichier explique la preuve (test lancé) ou l'écart restant par rap
     )
 }
 
+/// Cible du tour à lancer juste après un approve qui vient d'enfiler le worker.
+/// `None` si le worker existait déjà, ou si l'approve n'a pas abouti.
+pub fn queued_worker(result: &serde_json::Value) -> Option<(String, String)> {
+    if result.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        return None;
+    }
+    if result.get("worker_started").and_then(|v| v.as_bool()) != Some(true) {
+        return None;
+    }
+    let project = result
+        .get("project_uuid")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let worker = result
+        .get("worker_uuid")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if project.is_empty() || worker.is_empty() {
+        None
+    } else {
+        Some((project.to_string(), worker.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -438,6 +464,31 @@ mod tests {
         assert!(!ensure_constitution(&dir).unwrap());
         assert_eq!(fs::read_to_string(&path).unwrap(), "modifié\n");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn queued_worker_only_when_just_started() {
+        let started = serde_json::json!({
+            "ok": true,
+            "worker_started": true,
+            "project_uuid": "p",
+            "worker_uuid": "w"
+        });
+        assert_eq!(queued_worker(&started), Some(("p".into(), "w".into())));
+        let again = serde_json::json!({
+            "ok": true,
+            "worker_started": false,
+            "project_uuid": "p",
+            "worker_uuid": "w"
+        });
+        assert!(queued_worker(&again).is_none());
+        let failed = serde_json::json!({
+            "ok": false,
+            "worker_started": true,
+            "project_uuid": "p",
+            "worker_uuid": "w"
+        });
+        assert!(queued_worker(&failed).is_none());
     }
 
     #[test]

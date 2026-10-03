@@ -640,13 +640,16 @@ async fn mcp_handle_one(state: &AppState, abilities: &[String], raw: Value) -> O
             }
             let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
             match state.registry.execute(&name, arguments).await {
-                Ok(result) => rpc_ok(json!({
+                Ok(result) => {
+                    crate::spec_routes::schedule_started_worker(state.clone(), &result);
+                    rpc_ok(json!({
                     "content": [{
                         "type": "text",
                         "text": serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()),
                     }],
                     "isError": false,
-                })),
+                }))
+                }
                 Err(e) => rpc_ok(json!({
                     "content": [{ "type": "text", "text": e.to_string() }],
                     "isError": true,

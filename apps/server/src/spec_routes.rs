@@ -215,6 +215,20 @@ async fn spawn_worker(
     Ok(agent_uuid)
 }
 
+/// Démarre le tour du worker que `sdd_loop` approve vient d'enfiler.
+/// Le projet est celui de l'instance (uuid), pas le workspace par défaut du jeton.
+pub fn schedule_started_worker(state: AppState, result: &Value) {
+    let Some((project_uuid, agent_uuid)) = sdd::queued_worker(result) else {
+        return;
+    };
+    tokio::spawn(async move {
+        if let Err(e) = crate::routes::trigger_agent_turn(&state, &project_uuid, &agent_uuid).await
+        {
+            tracing::warn!(error = %e, agent_uuid, "démarrage worker spec");
+        }
+    });
+}
+
 fn wake_coordinator_later(state: AppState, project_uuid: String, marker: String, content: String) {
     tokio::spawn(async move {
         if let Err(e) =
