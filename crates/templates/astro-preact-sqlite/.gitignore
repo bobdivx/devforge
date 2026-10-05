@@ -6,3 +6,5 @@ data/
 *.db-shm
 *.db-wal
 .env
+.devforge-preview.*
+.devforge-npm-stamp
