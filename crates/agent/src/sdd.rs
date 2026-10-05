@@ -188,18 +188,8 @@ fn unique_slug(workdir: &Path, base: &str) -> Result<String, String> {
     Err("trop de specs avec ce titre".into())
 }
 
-pub fn specify(workdir: &Path, title: &str, description: &str) -> Result<FeatureStatus, String> {
-    let title = title.trim();
-    let description = description.trim();
-    if title.is_empty() || description.is_empty() {
-        return Err("titre et description requis".into());
-    }
-    ensure_constitution(workdir).map_err(|e| e.to_string())?;
-    let base = slugify(title);
-    let slug = unique_slug(workdir, &base)?;
-    let dir = feature_dir(workdir, &slug)?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let spec = format!(
+pub fn format_spec_markdown(title: &str, description: &str) -> String {
+    format!(
         "\
 # {title}
 
@@ -217,7 +207,87 @@ pub fn specify(workdir: &Path, title: &str, description: &str) -> Result<Feature
 
 - Publication distante, pull request, déploiement : interdits tant que la spec n'est pas validée, puis tant qu'une publication n'est pas demandée explicitement.
 "
-    );
+    )
+}
+
+pub fn read_spec_markdown(workdir: &Path, slug: &str) -> Result<Option<String>, String> {
+    let path = feature_dir(workdir, slug)?.join("spec.md");
+    if !path.exists() {
+        return Ok(None);
+    }
+    fs::read_to_string(&path).map(Some).map_err(|e| e.to_string())
+}
+
+/// Extrait le bloc Intention d'un spec.md (pour préremplir « Ajuster »).
+pub fn intention_from_spec_markdown(md: &str) -> String {
+    let mut lines = md.lines();
+    let mut in_intention = false;
+    let mut out = String::new();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.eq_ignore_ascii_case("## Intention") {
+            in_intention = true;
+            continue;
+        }
+        if in_intention && trimmed.starts_with("## ") {
+            break;
+        }
+        if in_intention {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(line);
+        }
+    }
+    out.trim().to_string()
+}
+
+/// Réécrit titre + intention d'une spec encore en attente d'approbation.
+pub fn revise(
+    workdir: &Path,
+    slug: &str,
+    title: &str,
+    description: &str,
+) -> Result<FeatureStatus, String> {
+    let title = title.trim();
+    let description = description.trim();
+    if title.is_empty() || description.is_empty() {
+        return Err("titre et description requis".into());
+    }
+    let Some(mut status) = read_status(workdir, slug)? else {
+        return Err("spec introuvable".into());
+    };
+    if status.dismissed {
+        return Err("spec retirée".into());
+    }
+    if status.phase != PHASE_AWAITING {
+        return Err(format!(
+            "ajustement impossible : phase actuelle « {} »",
+            status.phase
+        ));
+    }
+    let dir = feature_dir(workdir, slug)?;
+    let spec = format_spec_markdown(title, description);
+    fs::write(dir.join("spec.md"), spec).map_err(|e| e.to_string())?;
+    status.title = title.to_string();
+    status.note = "En attente de ton accord.".into();
+    status.updated_at = now_stamp();
+    write_status_file(&dir, &status).map_err(|e| e.to_string())?;
+    Ok(status)
+}
+
+pub fn specify(workdir: &Path, title: &str, description: &str) -> Result<FeatureStatus, String> {
+    let title = title.trim();
+    let description = description.trim();
+    if title.is_empty() || description.is_empty() {
+        return Err("titre et description requis".into());
+    }
+    ensure_constitution(workdir).map_err(|e| e.to_string())?;
+    let base = slugify(title);
+    let slug = unique_slug(workdir, &base)?;
+    let dir = feature_dir(workdir, &slug)?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let spec = format_spec_markdown(title, description);
     fs::write(dir.join("spec.md"), spec).map_err(|e| e.to_string())?;
     let status = FeatureStatus {
         slug,
@@ -911,6 +981,19 @@ mod tests {
             "worker_uuid": "w"
         });
         assert!(queued_worker(&failed).is_none());
+    }
+
+    #[test]
+    fn revise_rewrites_awaiting_spec() {
+        let dir = scratch();
+        let status = specify(&dir, "Page", "V1").unwrap();
+        let revised = revise(&dir, &status.slug, "Page", "V2 intention").unwrap();
+        assert_eq!(revised.phase, PHASE_AWAITING);
+        assert_eq!(revised.title, "Page");
+        let md = read_spec_markdown(&dir, &status.slug).unwrap().unwrap();
+        assert!(md.contains("V2 intention"));
+        assert_eq!(intention_from_spec_markdown(&md), "V2 intention");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
