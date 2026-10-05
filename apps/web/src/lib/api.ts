@@ -621,8 +621,19 @@ export const api = {
     request<{ data: ProjectAgent[] }>(`/projects/${projectUuid}/agents`),
   projectSpecs: (projectUuid: string) =>
     request<{ data: SpecFeature[] }>(`/projects/${projectUuid}/specs`),
+  getProjectSpec: (projectUuid: string, slug: string) =>
+    request<{ data: SpecFeature; spec_md: string }>(`/projects/${projectUuid}/specs/${slug}`),
   createProjectSpec: (projectUuid: string, body: { title: string; description: string }) =>
     request<{ data: SpecFeature }>(`/projects/${projectUuid}/specs`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  reviseProjectSpec: (
+    projectUuid: string,
+    slug: string,
+    body: { title: string; description: string },
+  ) =>
+    request<{ data: SpecFeature; spec_md: string }>(`/projects/${projectUuid}/specs/${slug}/revise`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

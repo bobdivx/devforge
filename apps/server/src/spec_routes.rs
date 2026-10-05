@@ -20,8 +20,16 @@ pub fn router() -> Router<AppState> {
             get(list_specs).post(create_spec),
         )
         .route(
+            "/api/v1/projects/{uuid}/specs/{slug}",
+            get(get_spec),
+        )
+        .route(
             "/api/v1/projects/{uuid}/specs/{slug}/decision",
             post(decide_spec),
+        )
+        .route(
+            "/api/v1/projects/{uuid}/specs/{slug}/revise",
+            post(revise_spec),
         )
         .route(
             "/api/v1/projects/{uuid}/specs/{slug}/converge",
@@ -84,6 +92,61 @@ async fn list_specs(
     let root = project_root(&state, &uuid).await?;
     let features = sdd::list_features(&root).map_err(ApiError::message)?;
     Ok(Json(json!({"data": features})))
+}
+
+async fn get_spec(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((uuid, slug)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    let _ = crate::routes::auth_project(&state, &headers, &uuid).await?;
+    let root = project_root(&state, &uuid).await?;
+    let Some(status) = sdd::read_status(&root, &slug).map_err(ApiError::message)? else {
+        return Err(ApiError::not_found("spec"));
+    };
+    if status.dismissed {
+        return Err(ApiError::not_found("spec"));
+    }
+    let spec_md = sdd::read_spec_markdown(&root, &slug)
+        .map_err(ApiError::message)?
+        .unwrap_or_default();
+    Ok(Json(json!({
+        "data": status,
+        "spec_md": spec_md,
+    })))
+}
+
+#[derive(Deserialize)]
+struct ReviseSpec {
+    title: String,
+    description: String,
+}
+
+async fn revise_spec(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((uuid, slug)): Path<(String, String)>,
+    Json(body): Json<ReviseSpec>,
+) -> Result<Json<Value>, ApiError> {
+    let _ = crate::routes::auth_project(&state, &headers, &uuid).await?;
+    let root = project_root(&state, &uuid).await?;
+    let status = sdd::revise(&root, &slug, &body.title, &body.description)
+        .map_err(ApiError::message)?;
+    let spec_md = sdd::read_spec_markdown(&root, &slug)
+        .map_err(ApiError::message)?
+        .unwrap_or_default();
+    let marker = format!("SDD-REVISE:{}:{}", slug, now_str());
+    let content = format!(
+        "Spec « {title} » ajustée dans specs/{slug}/spec.md.\n\
+         ARRÊT. Toujours pas de code. L'utilisateur doit Approuver (bouton) avant la suite.",
+        title = status.title,
+        slug = status.slug
+    );
+    wake_coordinator_later(state, uuid, marker, content);
+    Ok(Json(json!({
+        "data": status,
+        "spec_md": spec_md,
+    })))
 }
 
 #[derive(Deserialize)]
