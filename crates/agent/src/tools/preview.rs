@@ -726,22 +726,84 @@ fn legacy_dev_preview_dynamic_files(project_uuid: &str) -> Vec<PathBuf> {
     vec![root.join("data").join("proxy").join("dynamic").join(name)]
 }
 
+/// Métadonnées preview (pid/logs/port) HORS du workdir Vite.
+/// Sinon chaque append stdout/stderr dans `.devforge-preview.out` est vu par le
+/// file watcher → `[vite] program reload` → plus de logs → boucle infinie.
+fn preview_state_dir(workdir: &Path) -> PathBuf {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let base = std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/var/lib/devforge".into());
+    let mut hasher = DefaultHasher::new();
+    let key_src = workdir
+        .canonicalize()
+        .unwrap_or_else(|_| workdir.to_path_buf());
+    key_src.to_string_lossy().hash(&mut hasher);
+    let name = workdir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("app");
+    let safe: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    PathBuf::from(base.trim_end_matches(['/', '\\']))
+        .join("preview")
+        .join(format!("{safe}-{:x}", hasher.finish()))
+}
+
+fn ensure_preview_state_dir(workdir: &Path) -> std::io::Result<PathBuf> {
+    let dir = preview_state_dir(workdir);
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
 fn preview_pid_path(workdir: &Path) -> PathBuf {
-    workdir.join(".devforge-preview.pid")
+    preview_state_dir(workdir).join("preview.pid")
 }
 
 fn preview_out_path(workdir: &Path) -> PathBuf {
-    workdir.join(".devforge-preview.out")
+    preview_state_dir(workdir).join("preview.out")
 }
 
 fn preview_err_path(workdir: &Path) -> PathBuf {
-    workdir.join(".devforge-preview.err")
+    preview_state_dir(workdir).join("preview.err")
+}
+
+/// Anciens sidecars dans le workdir (pré-fix boucle Vite) — lecture seule / purge.
+fn legacy_preview_sidecar_paths(workdir: &Path) -> [PathBuf; 4] {
+    [
+        workdir.join(".devforge-preview.pid"),
+        workdir.join(".devforge-preview.out"),
+        workdir.join(".devforge-preview.err"),
+        workdir.join(".devforge-preview.port"),
+    ]
+}
+
+fn cleanup_legacy_preview_sidecars(workdir: &Path) {
+    for path in legacy_preview_sidecar_paths(workdir) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 fn read_preview_pid(workdir: &Path) -> Option<u32> {
-    std::fs::read_to_string(preview_pid_path(workdir))
-        .ok()
-        .and_then(|t| t.trim().parse().ok())
+    for path in [
+        preview_pid_path(workdir),
+        workdir.join(".devforge-preview.pid"),
+    ] {
+        if let Some(pid) = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| t.trim().parse().ok())
+        {
+            return Some(pid);
+        }
+    }
+    None
 }
 
 fn read_preview_logs(workdir: &Path, max_lines: usize) -> String {
@@ -749,6 +811,8 @@ fn read_preview_logs(workdir: &Path, max_lines: usize) -> String {
     let paths = [
         preview_err_path(workdir),
         preview_out_path(workdir),
+        workdir.join(".devforge-preview.err"),
+        workdir.join(".devforge-preview.out"),
         workdir.join(".astro/dev.log"),
     ];
     for path in paths {
@@ -763,14 +827,15 @@ fn read_preview_logs(workdir: &Path, max_lines: usize) -> String {
 }
 
 fn preview_port_hint(production_port: u16, preview_port: u16) -> String {
+    let log_hint = "Vérifie preview.err sous $DEVFORGE_DATA_DIR/preview/ (hors workdir).";
     if production_port > 0 && production_port != preview_port {
         format!(
             "Le port production du projet est {production_port} (conteneur). \
              Le serveur de dev écoute sur {preview_port}. \
-             Vérifie .devforge-preview.err dans le workdir."
+             {log_hint}"
         )
     } else {
-        "Vérifie .devforge-preview.err dans le workdir.".into()
+        log_hint.into()
     }
 }
 
@@ -895,21 +960,29 @@ async fn allocate_preview_port(preferred: u16) -> u16 {
 }
 
 fn preview_port_file(workdir: &Path) -> PathBuf {
-    workdir.join(".devforge-preview.port")
+    preview_state_dir(workdir).join("preview.port")
 }
 
 fn read_saved_preview_port(workdir: &Path) -> Option<u16> {
-    let port = std::fs::read_to_string(preview_port_file(workdir))
-        .ok()
-        .and_then(|t| t.trim().parse().ok())?;
-    if (PREVIEW_PORT_BASE..PREVIEW_PORT_BASE + PREVIEW_PORT_SPAN).contains(&port) {
-        Some(port)
-    } else {
-        None
+    for path in [
+        preview_port_file(workdir),
+        workdir.join(".devforge-preview.port"),
+    ] {
+        let Some(port) = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| t.trim().parse().ok())
+        else {
+            continue;
+        };
+        if (PREVIEW_PORT_BASE..PREVIEW_PORT_BASE + PREVIEW_PORT_SPAN).contains(&port) {
+            return Some(port);
+        }
     }
+    None
 }
 
 fn write_saved_preview_port(workdir: &Path, port: u16) -> std::io::Result<()> {
+    ensure_preview_state_dir(workdir)?;
     std::fs::write(preview_port_file(workdir), port.to_string())
 }
 
@@ -1096,6 +1169,7 @@ fn npm_cli_available() -> bool {
 }
 
 fn append_preview_log(workdir: &Path, label: &str, stdout: &str, stderr: &str) {
+    let _ = ensure_preview_state_dir(workdir);
     let mut buf = format!("=== {label} ===\n");
     if !stdout.trim().is_empty() {
         buf.push_str(stdout);
@@ -1303,6 +1377,7 @@ fn stop_owned_preview(workdir: &Path, port: u16) -> std::result::Result<(), Stri
         return stop_preview(workdir, port);
     }
     let _ = std::fs::remove_file(preview_pid_path(workdir));
+    let _ = std::fs::remove_file(workdir.join(".devforge-preview.pid"));
     Ok(())
 }
 
@@ -1330,6 +1405,7 @@ fn stop_preview(workdir: &Path, port: u16) -> std::result::Result<(), String> {
     }
 
     let _ = std::fs::remove_file(preview_pid_path(workdir));
+    let _ = std::fs::remove_file(workdir.join(".devforge-preview.pid"));
     if astro_lock_pid(workdir).is_none_or(|pid| !pid_is_alive(pid)) {
         let _ = std::fs::remove_file(workdir.join(".astro/dev.json"));
     }
@@ -1409,6 +1485,9 @@ fn spawn_preview(
     preview_url: Option<&str>,
     project_env: &[(String, String)],
 ) -> std::result::Result<u32, String> {
+    // Logs hors workdir : sinon Vite regarde `.devforge-preview.out` et boucle en program reload.
+    ensure_preview_state_dir(workdir).map_err(|e| e.to_string())?;
+    cleanup_legacy_preview_sidecars(workdir);
     let out = std::fs::File::create(preview_out_path(workdir)).map_err(|e| e.to_string())?;
     let err = std::fs::File::create(preview_err_path(workdir)).map_err(|e| e.to_string())?;
 
@@ -1962,6 +2041,44 @@ mod tests {
         assert_ne!(legacy[0], canon);
         std::env::remove_var("DEVFORGE_DATA_DIR");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preview_sidecars_live_outside_vite_workdir() {
+        let suffix = std::process::id();
+        let data = std::env::temp_dir().join(format!("df-preview-state-data-{suffix}"));
+        let work = std::env::temp_dir().join(format!("df-preview-state-work-{suffix}/sonozz"));
+        let _ = std::fs::remove_dir_all(&data);
+        let _ = std::fs::remove_dir_all(&work);
+        std::fs::create_dir_all(&work).unwrap();
+        // SAFETY: test isolé — restaure ensuite
+        std::env::set_var("DEVFORGE_DATA_DIR", &data);
+        let state = preview_state_dir(&work);
+        assert!(
+            state.starts_with(&data.join("preview")),
+            "state dir under DEVFORGE_DATA_DIR/preview: {state:?}"
+        );
+        assert!(
+            !state.starts_with(&work),
+            "state must not be inside the Vite workdir (log→reload loop)"
+        );
+        assert!(preview_out_path(&work).ends_with("preview.out"));
+        assert!(preview_err_path(&work).ends_with("preview.err"));
+        assert!(preview_pid_path(&work).ends_with("preview.pid"));
+        assert!(preview_port_file(&work).ends_with("preview.port"));
+        ensure_preview_state_dir(&work).unwrap();
+        std::fs::write(preview_out_path(&work), "hello\n").unwrap();
+        assert!(!work.join(".devforge-preview.out").exists());
+        assert_eq!(
+            std::fs::read_to_string(preview_out_path(&work)).unwrap().trim(),
+            "hello"
+        );
+        std::fs::write(work.join(".devforge-preview.out"), "legacy").unwrap();
+        cleanup_legacy_preview_sidecars(&work);
+        assert!(!work.join(".devforge-preview.out").exists());
+        std::env::remove_var("DEVFORGE_DATA_DIR");
+        let _ = std::fs::remove_dir_all(&data);
+        let _ = std::fs::remove_dir_all(work.parent().unwrap());
     }
 
     #[test]
