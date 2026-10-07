@@ -412,7 +412,7 @@ export function ProjectGitPanel({
                   <li key={f.path}>
                     <button
                       type="button"
-                      class="flex w-full items-center gap-3 px-3.5 py-2 text-left hover:bg-white/[0.03]"
+                      class="flex w-full items-center gap-3 px-3.5 py-2 text-left hover:bg-white/[0.03] max-lg:min-h-11"
                       onClick={() => void openDiff('workdir', f.path)}
                     >
                       <span class="w-7 shrink-0 text-[var(--color-ink-faint)]">{f.status}</span>

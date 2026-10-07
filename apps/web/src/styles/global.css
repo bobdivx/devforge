@@ -511,11 +511,28 @@ pre {
     min-height: 44px;
     min-width: 44px;
   }
-  /* Interrupteurs : on garde le dessin, on agrandit la zone de toucher. */
-  .df-tap [role='switch']::after {
+  /* Interrupteurs (partout) : on garde le dessin, on agrandit la zone de toucher à 44 px. */
+  [role='switch']::after {
     content: '';
     position: absolute;
-    inset: -10px -2px;
+    inset: -12px -4px;
+  }
+  /*
+   * .df-hit : zone de toucher ≥ 44 × 44 px centrée sur l'élément, sans changer son dessin
+   * (pseudo-élément invisible). :where() garde une spécificité nulle pour ne jamais
+   * écraser un `absolute` / `fixed` posé sur l'élément.
+   */
+  :where(.df-hit) {
+    position: relative;
+  }
+  .df-hit::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
   }
   /* Clavier ouvert : le dock bas s'efface pour ne pas couvrir la zone de saisie. */
   body:has(:is(input:not([type='checkbox'], [type='radio'], [type='range']), textarea, [contenteditable='true']):focus) .df-dock {

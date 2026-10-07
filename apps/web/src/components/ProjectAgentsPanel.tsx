@@ -888,7 +888,8 @@ export function ProjectAgentsPanel({
 
   const mobileThreadBar = threadsMode && !persona ? (
     <div class={cn('mb-2 flex shrink-0 items-center gap-2', !embedded && 'lg:hidden')}>
-      <div class="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {/* -my/py : la zone de défilement laisse dépasser la zone de toucher des puces (44 px) sans changer la mise en page. */}
+      <div class="min-w-0 flex-1 overflow-x-auto py-2 -my-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div class="flex w-max gap-1">
           {displayRows.map(({ agent: a, depth }) => (
             <button
@@ -896,13 +897,14 @@ export function ProjectAgentsPanel({
               type="button"
               onClick={() => setSelected(a.uuid)}
               class={cn(
-                'max-w-[10rem] shrink-0 truncate rounded-lg px-2.5 py-1.5 text-xs font-medium transition',
+                'df-hit max-w-[10rem] shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium transition',
                 selected === a.uuid
                   ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
                   : 'bg-white/[0.03] text-[var(--color-ink-muted)] hover:bg-white/5',
               )}
             >
-              {depth > 0 ? `↳ ${threadLabel(a)}` : threadLabel(a)}
+              {/* truncate sur le texte : un overflow:hidden sur le bouton couperait sa zone de toucher. */}
+              <span class="block truncate">{depth > 0 ? `↳ ${threadLabel(a)}` : threadLabel(a)}</span>
             </button>
           ))}
         </div>
