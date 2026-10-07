@@ -319,7 +319,7 @@ export function ProjectDetailPage(props: Props) {
           : undefined
       }
       actions={
-        <Button size="sm" onClick={() => setFeatureOpen(true)}>
+        <Button size="sm" class="max-lg:h-11" onClick={() => setFeatureOpen(true)}>
           Nouvelle fonctionnalité
         </Button>
       }

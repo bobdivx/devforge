@@ -17,6 +17,8 @@ type Props = {
   /** Padding horizontal/vertical du body. Défaut true. */
   padded?: boolean;
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  /** Mobile : feuille plein écran (au-dessus du dock), au lieu d'une feuille bas d'écran. */
+  fullOnMobile?: boolean;
 };
 
 const sizes = {
@@ -38,6 +40,7 @@ export function Modal({
   bodyClass,
   padded = true,
   size = 'lg',
+  fullOnMobile = false,
 }: Props) {
   const titleId = useId();
   const descId = useId();
@@ -87,10 +90,16 @@ export function Modal({
           // Sheet mobile → panneau centré desktop
           'rounded-t-2xl border-b-0 sm:rounded-2xl sm:border',
           sizes[size],
+          fullOnMobile && 'max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none max-sm:border-0',
           className,
         )}
       >
-        <div class="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--color-line)] px-4 py-3 sm:px-5 sm:py-4">
+        <div
+          class={cn(
+            'flex shrink-0 items-start justify-between gap-3 border-b border-[var(--color-line)] px-4 py-3 sm:px-5 sm:py-4',
+            fullOnMobile && 'max-sm:pt-[max(0.75rem,env(safe-area-inset-top,0px))]',
+          )}
+        >
           <div class="min-w-0">
             <h2
               id={titleId}
@@ -109,7 +118,7 @@ export function Modal({
           </div>
           <button
             type="button"
-            class="shrink-0 rounded-lg px-2 py-1 text-sm text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]"
+            class="-mr-2 -mt-1.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-base text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)] lg:-mr-1 lg:-mt-0.5 lg:h-8 lg:w-8 lg:text-sm"
             onClick={onClose}
             aria-label="Fermer"
           >

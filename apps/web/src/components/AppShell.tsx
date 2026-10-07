@@ -105,7 +105,7 @@ function SideNavPill({ item }: { item: NavItem }) {
     <a
       href={item.href}
       class={cn(
-        'shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-[background-color,color,transform] duration-200 active:scale-[0.97]',
+        'inline-flex shrink-0 items-center rounded-full px-3 py-1.5 text-xs font-medium transition-[background-color,color,transform] duration-200 active:scale-[0.97]',
         on
           ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
           : 'bg-white/[0.03] text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
@@ -490,7 +490,7 @@ function ShellInner({
                       </span>
                     </div>
                   ) : null}
-                  <nav class="flex w-max gap-1 pb-3" aria-label="Navigation projet">
+                  <nav class="df-tap flex w-max gap-1 pb-3" aria-label="Navigation projet">
                     {nav.map((item) => (
                       <SideNavPill key={item.key} item={item} />
                     ))}
@@ -505,7 +505,7 @@ function ShellInner({
         </div>
 
         <nav
-          class="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--color-line)] bg-[var(--color-bg)]/95 backdrop-blur lg:hidden"
+          class="df-dock fixed inset-x-0 bottom-0 z-20 border-t border-[var(--color-line)] bg-[var(--color-bg)]/95 backdrop-blur lg:hidden"
           style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
           aria-label="Navigation principale"
         >

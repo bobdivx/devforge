@@ -252,6 +252,8 @@ export function ProjectAgentsPanel({
   const [pollEnabled, setPollEnabled] = useState(builderMode || false);
   const [sharing, setSharing] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  /** Zone des messages : on la fait défiler elle seule (pas la page, sinon l'en-tête saute sur mobile). */
+  const scrollRef = useRef<HTMLDivElement>(null);
   const bootstrapped = useRef(false);
 
   const list = threadsMode ? threads : agents;
@@ -550,7 +552,8 @@ export function ProjectAgentsPanel({
   }, [selected]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const box = scrollRef.current;
+    if (box) box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
   }, [messages, thinking, liveActions, liveReflections, thinkDetail]);
 
   async function clearChat() {
@@ -904,6 +907,7 @@ export function ProjectAgentsPanel({
           padding="none"
           class={cn(
             'flex min-h-0 flex-col overflow-hidden',
+            persona && 'df-tap',
             embedded
               ? 'h-full'
               : threadsMode
@@ -992,7 +996,7 @@ export function ProjectAgentsPanel({
             </Alert>
           )}
 
-          <div class="flex-1 space-y-3 overflow-y-auto p-4">
+          <div ref={scrollRef} class="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4">
             {messages.length === 0 && persona && (
               <div class="flex items-start gap-2.5">
                 {persona.smallAvatar}
@@ -1126,14 +1130,14 @@ export function ProjectAgentsPanel({
           </div>
 
           {persona && persona.chips.length > 0 && (
-            <div class="flex shrink-0 flex-wrap gap-2 border-t border-[var(--color-line)] px-3 pt-3">
+            <div class="df-scroll-x flex shrink-0 gap-2 overflow-x-auto border-t border-[var(--color-line)] px-3 pt-3 md:flex-wrap md:overflow-visible">
               {persona.chips.map((chip) => (
                 <button
                   key={chip.key}
                   type="button"
                   disabled={busy || (!chip.onClick && !selected)}
                   class={cn(
-                    'rounded-full border px-3 py-1.5 text-xs transition disabled:opacity-50',
+                    'inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-3 py-1.5 text-xs transition disabled:opacity-50 max-lg:text-[13px]',
                     chip.tone === 'danger'
                       ? 'border-[var(--color-danger)]/35 bg-[var(--color-danger)]/10 text-[var(--color-danger)] hover:bg-[var(--color-danger)]/15'
                       : 'border-[var(--color-line-strong)] bg-white/[0.03] text-[var(--color-ink)] hover:bg-white/[0.07]',
@@ -1148,6 +1152,8 @@ export function ProjectAgentsPanel({
           <form
             class={cn(
               'flex min-w-0 gap-2 p-3',
+              // Au focus (clavier mobile), garder la saisie au-dessus du dock bas.
+              persona && 'scroll-mb-[calc(5rem+env(safe-area-inset-bottom,0px))]',
               !(persona && persona.chips.length > 0) && 'border-t border-[var(--color-line)]',
             )}
             onSubmit={onSubmit}
@@ -1159,13 +1165,15 @@ export function ProjectAgentsPanel({
                 placeholder={persona ? persona.placeholder : threadsMode ? 'Message…' : current ? `Message pour ${chatHeaderTitle}…` : 'Message…'}
                 onInput={(ev) => setInput((ev.target as HTMLInputElement).value)}
                 disabled={busy || !selected}
+                class={persona ? 'max-lg:h-11!' : undefined}
+                enterKeyHint="send"
               />
             </div>
             <Button
               type="submit"
               variant="secondary"
               disabled={busy || !selected || !input.trim()}
-              class="shrink-0"
+              class={cn('shrink-0', persona && 'max-lg:h-11')}
             >
               {busy ? <Spinner /> : 'Envoyer'}
             </Button>

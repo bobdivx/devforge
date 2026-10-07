@@ -477,6 +477,8 @@ export function ProjectSpecsModal({
       open={open}
       onClose={onClose}
       size="xl"
+      fullOnMobile
+      class="df-tap"
       title={modalTitle}
       description={modalDesc}
     >
