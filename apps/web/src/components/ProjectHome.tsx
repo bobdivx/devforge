@@ -432,7 +432,7 @@ export function ProjectHome({
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-5">
         {/* Conversation avec Braise */}
         <section
-          class="h-[max(380px,calc(100dvh-24rem-env(safe-area-inset-bottom,0px)))] min-w-0 lg:h-[calc(100dvh-10.5rem)] lg:min-h-[560px]"
+          class="h-[max(380px,calc(100dvh-17rem-env(safe-area-inset-bottom,0px)))] min-w-0 lg:h-[calc(100dvh-10.5rem)] lg:min-h-[560px]"
           aria-label="Conversation avec Braise"
         >
           <ProjectAgentsPanel

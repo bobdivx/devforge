@@ -11,6 +11,7 @@ import {
   type AgentToolCall,
 } from '../lib/agent-stream';
 import { cn } from '../lib/cn';
+import { Markdown } from '../lib/markdown';
 import {
   AgentActionList,
   AgentPlanActions,
@@ -1078,14 +1079,19 @@ export function ProjectAgentsPanel({
                     {m.toolCalls && m.toolCalls.length > 0 && (
                       <AgentActionList actions={toLiveActions(m.toolCalls)} />
                     )}
-                    {m.content.trim() && (
+                    {m.content.trim() && persona ? (
+                      <Markdown
+                        text={m.content}
+                        class="min-w-0 max-w-full space-y-2 break-words text-sm leading-relaxed text-[var(--color-ink)] [overflow-wrap:anywhere]"
+                      />
+                    ) : m.content.trim() ? (
                       <div class="max-w-[92%] whitespace-pre-wrap break-words text-sm text-[var(--color-ink)]">
                         {m.content}
                         {m.provider && !persona && (
                           <div class="mt-1 text-[11px] text-[var(--color-ink-faint)]">{m.provider}</div>
                         )}
                       </div>
-                    )}
+                    ) : null}
                     {m.plan && m.plan.steps.length > 0 && (
                       <AgentPlanActions
                         plan={m.plan}

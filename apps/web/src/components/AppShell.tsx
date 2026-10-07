@@ -35,6 +35,8 @@ type Props = {
   actions?: ComponentChildren;
   /** Largeur max-w-7xl sans sous-nav (page projet simple, deux colonnes). */
   wide?: boolean;
+  /** Page projet : sous lg, pas de compteurs ni de carte compte (l'en-tête du projet passe en premier). */
+  hideHeaderOnMobile?: boolean;
   skipAuth?: boolean;
 };
 
@@ -260,6 +262,7 @@ function ShellInner({
   belowTitle,
   actions,
   wide = false,
+  hideHeaderOnMobile = false,
 }: Props) {
   const onNodePage =
     typeof window !== 'undefined' && window.location.pathname.startsWith('/app/node');
@@ -462,7 +465,9 @@ function ShellInner({
                 <WorkerRail status={workerLocal} phase={workerPhase} variant="banner" />
               </div>
             )}
-            <AppHeader worker={isWorker} workerLink={workerLocal?.link?.state} />
+            <div class={hideHeaderOnMobile ? 'hidden lg:block' : undefined}>
+              <AppHeader worker={isWorker} workerLink={workerLocal?.link?.state} />
+            </div>
             {(title || actions) && (
               <div class="mb-4 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-end sm:justify-between">
                 <div class="min-w-0">

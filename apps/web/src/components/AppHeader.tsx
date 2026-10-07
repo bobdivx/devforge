@@ -52,7 +52,7 @@ function StatChip({
 
   return (
     <div
-      class="flex shrink-0 items-center gap-2 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1"
+      class="flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2 py-1 sm:gap-2 sm:px-2.5"
       title={label}
     >
       <span class={cn('h-1.5 w-1.5 rounded-full', dot)} aria-hidden />
@@ -137,8 +137,8 @@ export function AppHeader({
       : boot?.team?.name || boot?.workspace?.name || '';
 
   return (
-    <header class="mb-6 flex flex-col gap-3 border-b border-[var(--color-line)] pb-4 sm:flex-row sm:items-center sm:justify-between">
-      <div class="-mx-1 flex min-w-0 flex-1 items-center gap-2 overflow-x-auto px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <header class="mb-4 flex flex-row items-center justify-between gap-3 border-b border-[var(--color-line)] pb-3 sm:mb-6 sm:pb-4">
+      <div class="-mx-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto px-1 sm:gap-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {worker ? (
           <div
             class="flex shrink-0 items-center gap-2 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1"
@@ -191,12 +191,13 @@ export function AppHeader({
           </span>
         </div>
       ) : (
-      <div class="flex w-full min-w-0 items-center gap-2 sm:w-auto">
+      <div class="flex min-w-0 shrink-0 items-center gap-2">
       <LaunchedAgentsMenu />
-      <div class="relative min-w-0 flex-1 sm:flex-none" ref={menuRef}>
+      <div class="relative shrink-0" ref={menuRef}>
         <button
           type="button"
-          class="flex min-h-[44px] w-full items-center gap-2.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] py-1 pl-1 pr-3 transition-[border-color,background-color,transform] duration-200 hover:border-white/20 hover:bg-white/[0.06] active:scale-[0.99] sm:w-auto"
+          class="flex min-h-[44px] min-w-[44px] items-center justify-center gap-2.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] p-1 transition-[border-color,background-color,transform] duration-200 hover:border-white/20 hover:bg-white/[0.06] active:scale-[0.99] sm:justify-start sm:pr-3"
+          aria-label={`Compte : ${displayName}`}
           aria-expanded={menuOpen}
           aria-haspopup="menu"
           onClick={() => setMenuOpen((o) => !o)}
@@ -204,7 +205,8 @@ export function AppHeader({
           <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-xs font-semibold text-[var(--color-accent)]">
             {initials(accountName || accountEmail || 'DF')}
           </span>
-          <span class="min-w-0 flex-1 truncate text-left sm:max-w-[10rem]">
+          {/* Téléphone : avatar seul ; nom et e-mail restent dans le menu. */}
+          <span class="hidden min-w-0 flex-1 truncate text-left sm:block sm:max-w-[10rem]">
             <span class="block truncate text-sm font-medium leading-tight text-[var(--color-ink)]">
               {displayName}
             </span>
@@ -220,7 +222,7 @@ export function AppHeader({
             stroke="currentColor"
             stroke-width="2"
             class={cn(
-              'shrink-0 text-[var(--color-ink-muted)] transition-transform duration-200',
+              'hidden shrink-0 text-[var(--color-ink-muted)] transition-transform duration-200 sm:block',
               menuOpen && 'rotate-180',
             )}
             aria-hidden
