@@ -328,6 +328,39 @@ export type AgentTriggerConfig = {
   event?: string;
 };
 
+export type DraftFile = { path: string; status: 'added' | 'modified' | 'deleted' | 'renamed' | string; old_path?: string | null };
+export type DraftBackup = { id: string; created_at: string; reason: string; files: string[]; deleted: string[] };
+export type DraftStatus = {
+  ok: boolean;
+  available: boolean;
+  reason?: string | null;
+  dirty: boolean;
+  count: number;
+  files: DraftFile[];
+  junk_count: number;
+  branch: string;
+  ahead: number;
+  behind: number;
+  has_remote: boolean;
+  updated_at?: string | null;
+  suggested_message: string;
+  backups: DraftBackup[];
+  preview: { running: boolean; url?: string | null };
+};
+export type DraftDiffFile = DraftFile & { additions: number; deletions: number; patch?: string | null };
+export type DraftSummary = {
+  project_uuid: string;
+  project_name: string;
+  production_url?: string | null;
+  branch: string;
+  count: number;
+  added: number;
+  deleted: number;
+  behind: number;
+  updated_at?: string | null;
+  sample: string[];
+};
+
 export const api = {
   bootstrap: () => request<Bootstrap>('/bootstrap'),
   register: async (body: {
@@ -1892,6 +1925,40 @@ export const api = {
       }>;
     }>(`/projects/${encodeURIComponent(uuid)}/git/diff?${q}`);
   },
+
+  /* ---- Brouillon (workdir local pas encore sur GitHub) ---- */
+  draftStatus: (uuid: string, fetch = false) =>
+    request<DraftStatus>(`/projects/${encodeURIComponent(uuid)}/draft${fetch ? '?fetch=1' : ''}`),
+  draftDiff: (uuid: string, path?: string) =>
+    request<{ ok: boolean; files: DraftDiffFile[] }>(
+      `/projects/${encodeURIComponent(uuid)}/draft/diff${path ? `?path=${encodeURIComponent(path)}` : ''}`,
+    ),
+  draftValidate: (uuid: string, message: string) =>
+    request<{ ok: boolean; sha: string; files: number; branch: string }>(
+      `/projects/${encodeURIComponent(uuid)}/draft/validate`,
+      { method: 'POST', body: JSON.stringify({ message, confirm: true }) },
+    ),
+  draftDiscard: (uuid: string) =>
+    request<{ ok: boolean; backup_id: string; files: number; head: string }>(
+      `/projects/${encodeURIComponent(uuid)}/draft/discard`,
+      { method: 'POST', body: JSON.stringify({ confirm: true }) },
+    ),
+  draftRestore: (uuid: string, backupId: string) =>
+    request<{ ok: boolean; files: number }>(`/projects/${encodeURIComponent(uuid)}/draft/restore`, {
+      method: 'POST',
+      body: JSON.stringify({ backup_id: backupId }),
+    }),
+  draftRevertFile: (uuid: string, path: string) =>
+    request<{ ok: boolean; backup_id: string; path: string }>(
+      `/projects/${encodeURIComponent(uuid)}/draft/revert-file`,
+      { method: 'POST', body: JSON.stringify({ path, confirm: true }) },
+    ),
+  draftUpdateFromGithub: (uuid: string) =>
+    request<{ ok: boolean; merged: number; head: string }>(
+      `/projects/${encodeURIComponent(uuid)}/draft/update-from-github`,
+      { method: 'POST', body: '{}' },
+    ),
+  drafts: () => request<{ ok: boolean; drafts: DraftSummary[] }>(`/drafts`),
 
   projectGitDiscard: (uuid: string) =>
     request<{ ok: boolean; message?: string; output?: string }>(

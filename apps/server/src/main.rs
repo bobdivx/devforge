@@ -19,6 +19,8 @@ mod detect_svc;
 mod dns;
 mod dns_failover;
 mod domain_catalog;
+mod draft;
+mod draft_routes;
 mod git_routes;
 mod group_routes;
 mod infra_routes;
@@ -337,6 +339,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(runner_routes::router())
         .merge(actions_routes::router())
         .merge(git_routes::router())
+        .merge(draft_routes::router())
         .merge(group_routes::router())
         .merge(domain_catalog::router())
         .merge(update_routes::router())

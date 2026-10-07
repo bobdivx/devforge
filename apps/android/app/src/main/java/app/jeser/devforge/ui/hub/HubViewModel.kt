@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import app.jeser.devforge.AppGraph
 import app.jeser.devforge.data.AndroidInfo
 import app.jeser.devforge.data.Conversation
+import app.jeser.devforge.data.DraftSummary
 import app.jeser.devforge.data.InboxEvent
 import app.jeser.devforge.data.isNewerVersion
 import app.jeser.devforge.notify.NotifKind
@@ -20,6 +21,8 @@ data class HubUiState(
     val conversations: List<Conversation> = emptyList(),
     val conversationsLoading: Boolean = true,
     val conversationsError: String? = null,
+    /** Apps avec un brouillon (changements locaux pas encore sur GitHub). */
+    val drafts: List<DraftSummary> = emptyList(),
     val alerts: List<InboxEvent> = emptyList(),
     val alertsLoading: Boolean = true,
     val alertsError: String? = null,
@@ -53,6 +56,7 @@ class HubViewModel(
     fun refreshConversations() {
         viewModelScope.launch {
             _state.update { it.copy(conversationsLoading = it.conversations.isEmpty(), conversationsError = null) }
+            launch { runCatching { graph.api.drafts() }.onSuccess { d -> _state.update { it.copy(drafts = d) } } }
             runCatching { graph.api.conversations() }
                 .onSuccess { list -> _state.update { it.copy(conversations = list, conversationsLoading = false) } }
                 .onFailure { e -> _state.update { it.copy(conversationsLoading = false, conversationsError = e.message ?: "Instance injoignable") } }

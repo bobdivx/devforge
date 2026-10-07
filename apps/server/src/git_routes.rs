@@ -82,11 +82,13 @@ async fn any_deploy_sha(state: &AppState, project: &Project) -> Option<String> {
     row.and_then(|(sha,)| sha.filter(|s| !s.is_empty() && s != "pending" && s != "unknown"))
 }
 
+#[allow(dead_code)]
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 /// Découpe un `git diff` unifié en fichiers + patch.
+#[allow(dead_code)]
 fn parse_unified_diff(raw: &str) -> Vec<Value> {
     let mut files = Vec::new();
     let mut current_path: Option<String> = None;
@@ -173,6 +175,25 @@ fn parse_unified_diff(raw: &str) -> Vec<Value> {
     files
 }
 
+/// Lignes `git status --porcelain=v1` → (statut, chemin), fichiers internes DevForge et bruit exclus.
+/// Format : 2 colonnes de statut, un espace, le chemin (`R  ancien -> nouveau` pour un renommage).
+pub(crate) fn parse_porcelain(raw: &str) -> Vec<(String, String)> {
+    raw.lines()
+        .map(|l| l.trim_end_matches('\r'))
+        .filter(|l| l.len() > 3 && !l.starts_with("fatal:") && !l.starts_with("warning:"))
+        .filter_map(|line| {
+            let status: String = line.chars().take(2).collect();
+            let rest: String = line.chars().skip(3).collect();
+            let path = rest.rsplit(" -> ").next().unwrap_or(&rest).trim();
+            let path = path.strip_prefix('"').and_then(|p| p.strip_suffix('"')).unwrap_or(path);
+            if path.is_empty() || crate::draft::is_junk(path) {
+                return None;
+            }
+            Some((status.trim().to_string(), path.to_string()))
+        })
+        .collect()
+}
+
 async fn workdir_status(state: &AppState, project: &Project) -> Value {
     let configured = project.workdir.as_deref().unwrap_or("").trim();
     let server_id = project.server_id.as_deref().unwrap_or("default").trim();
@@ -210,10 +231,12 @@ async fn workdir_status(state: &AppState, project: &Project) -> Value {
     match state.deploy.exec(server_id, &workdir, git_cmd, 30).await {
         Ok(res) if res.ok || res.output.contains("---") => {
             let out = res.output;
+            // Ne pas `trim()` le début : la 1re ligne commence souvent par un espace (« M fichier »)
+            // et le découpage par colonnes perdrait le 1er caractère du chemin.
             let (status_part, head_part) = out
                 .split_once("---")
-                .map(|(a, b)| (a.trim(), b.trim()))
-                .unwrap_or((out.trim(), ""));
+                .map(|(a, b)| (a.trim_matches(|c| c == '\n' || c == '\r'), b.trim()))
+                .unwrap_or((out.trim_matches(|c| c == '\n' || c == '\r'), ""));
             // Si pas de .git, git status échoue
             if status_part.to_lowercase().contains("not a git repository")
                 || head_part.to_lowercase().contains("not a git repository")
@@ -227,15 +250,9 @@ async fn workdir_status(state: &AppState, project: &Project) -> Value {
                     "reason": "Dossier présent mais ce n’est pas un dépôt git.",
                 });
             }
-            let files: Vec<Value> = status_part
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .filter(|l| !l.starts_with("fatal:"))
-                .map(|line| {
-                    let status = line.chars().take(2).collect::<String>();
-                    let path = line.chars().skip(3).collect::<String>();
-                    json!({ "status": status.trim(), "path": path })
-                })
+            let files: Vec<Value> = parse_porcelain(status_part)
+                .into_iter()
+                .map(|(status, path)| json!({ "status": status, "path": path }))
                 .collect();
             json!({
                 "available": true,
@@ -420,53 +437,42 @@ async fn git_diff(
 
     if source == "workdir" {
         let workdir = project_resolved_workdir(&project)?;
-        let server_id = project.server_id.as_deref().unwrap_or("default").trim();
-        let cmd = match q.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
-            Some(path) => {
-                if cfg!(windows) {
-                    format!(
-                        "git diff HEAD --no-color -- {}; git diff HEAD --no-color --cached -- {}",
-                        path.replace('\'', "''"),
-                        path.replace('\'', "''")
-                    )
-                } else {
-                    format!(
-                        "git diff HEAD --no-color -- {} ; git diff HEAD --no-color --cached -- {}",
-                        shell_quote(path),
-                        shell_quote(path)
-                    )
-                }
-            }
-            None => {
-                if cfg!(windows) {
-                    "git diff HEAD --no-color; Write-Output '===STAGED==='; git diff HEAD --no-color --cached"
-                        .to_string()
-                } else {
-                    "git diff HEAD --no-color ; echo '===STAGED==='; git diff HEAD --no-color --cached"
-                        .to_string()
-                }
-            }
-        };
-        let res = state
-            .deploy
-            .exec(server_id, &workdir, &cmd, 60)
-            .await
-            .map_err(map_err)?;
-        if !res.ok && res.output.trim().is_empty() {
-            return Err(ApiError::message(
-                res.output.chars().take(500).collect::<String>(),
-            ));
+        // Workdir local : même calcul que le brouillon (fichiers nouveaux inclus, bruit exclu).
+        {
+            let branch = project.git_branch.clone().filter(|b| !b.is_empty()).unwrap_or_else(|| "main".into());
+            let wd = std::path::PathBuf::from(&workdir);
+            let only = q.path.clone().filter(|p| !p.trim().is_empty());
+            let files = tokio::task::spawn_blocking(move || crate::draft::diff(&wd, &branch, only.as_deref()))
+                .await
+                .map_err(map_err)?
+                .map_err(|e| ApiError::message(e.0))?;
+            let files: Vec<Value> = files
+                .into_iter()
+                .map(|f| {
+                    let status = match f["status"].as_str().unwrap_or("modified") {
+                        "deleted" => "removed",
+                        other => other,
+                    }
+                    .to_string();
+                    json!({
+                        "filename": f["path"],
+                        "status": status,
+                        "additions": f["additions"],
+                        "deletions": f["deletions"],
+                        "patch": f["patch"],
+                        "previous_filename": f["old_path"],
+                    })
+                })
+                .collect();
+            return Ok(Json(json!({
+                "ok": true,
+                "source": "workdir",
+                "base": "GitHub",
+                "head": "workdir",
+                "title": "Brouillon (pas encore sur GitHub)",
+                "files": files,
+            })));
         }
-        let raw = res.output.replace("===STAGED===", "");
-        let files = parse_unified_diff(&raw);
-        return Ok(Json(json!({
-            "ok": true,
-            "source": "workdir",
-            "base": "HEAD",
-            "head": "workdir",
-            "title": "Modifications locales",
-            "files": files,
-        })));
     }
 
     // sync: deploy … tip branche

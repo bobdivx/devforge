@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
@@ -303,6 +304,16 @@ fun MoreSheet(state: ProjectUiState, actions: ProjectActions, onDismiss: () -> U
             SheetAction(
                 Icons.Filled.Refresh, "Reconstruire", plan.rebuildExplanation + " Confirmation demandée.",
                 onClick = { onSheet(ProjectSheet.Deploy) }, enabled = state.canDeploy,
+            )
+        }
+        val draft = state.draft
+        if (draft != null && draft.available && (draft.dirty || draft.backups.isNotEmpty())) {
+            SheetAction(
+                Icons.Filled.Description,
+                if (draft.dirty) "Brouillon · ${filesLabel(draft.count)}" else "Brouillons supprimés",
+                if (draft.dirty) "Voir les fichiers, valider sur GitHub ou supprimer." else "Restaurer une sauvegarde (gardée 7 jours).",
+                onClick = { actions.onOpenDraft(); onSheet(ProjectSheet.Draft) },
+                tint = DfColors.Warn,
             )
         }
         SheetAction(

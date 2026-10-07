@@ -37,6 +37,7 @@ import app.jeser.devforge.ui.hub.HubViewModel
 import app.jeser.devforge.ui.hub.SettingsScreen
 import app.jeser.devforge.ui.project.ProjectActions
 import app.jeser.devforge.ui.project.ProjectScreen
+import app.jeser.devforge.ui.project.ProjectSheet
 import app.jeser.devforge.ui.project.ProjectViewModel
 import app.jeser.devforge.ui.theme.DfColors
 
@@ -84,9 +85,15 @@ fun HomeRoot(
             HomeTab.Settings -> hubVm.refreshSettings()
         }
     }
+    var draftFor by rememberSaveable { mutableStateOf<String?>(null) }
     if (selected != null) {
-        BackHandler { onSelect(null) }
-        ProjectRoute(graph, selected, onBack = { onSelect(null) }, onChanged = { appsVm.refresh(); hubVm.refreshConversations() })
+        BackHandler { draftFor = null; onSelect(null) }
+        ProjectRoute(
+            graph, selected,
+            onBack = { draftFor = null; onSelect(null) },
+            onChanged = { appsVm.refresh(); hubVm.refreshConversations() },
+            openDraft = draftFor == selected,
+        )
         return
     }
     if (tab != HomeTab.Apps) BackHandler { tab = HomeTab.Apps }
@@ -96,7 +103,8 @@ fun HomeRoot(
         apps = apps,
         hub = hub,
         onRefreshApps = { appsVm.refresh() },
-        onOpen = { onSelect(it) },
+        onOpen = { draftFor = null; onSelect(it) },
+        onOpenDraft = { draftFor = it; onSelect(it) },
         onNoticeShown = appsVm::noticeShown,
         onRefreshBraise = hubVm::refreshConversations,
         onRefreshAlerts = hubVm::refreshAlerts,
@@ -125,6 +133,7 @@ fun HomeShell(
     hub: HubUiState,
     onRefreshApps: () -> Unit = {},
     onOpen: (String) -> Unit = {},
+    onOpenDraft: (String) -> Unit = onOpen,
     onNoticeShown: () -> Unit = {},
     onRefreshBraise: () -> Unit = {},
     onRefreshAlerts: () -> Unit = {},
@@ -147,7 +156,7 @@ fun HomeShell(
                     state = apps, onRefresh = onRefreshApps, onOpen = onOpen,
                     modifier = Modifier.fillMaxSize(), onNoticeShown = onNoticeShown, initialInboxOpen = initialInboxOpen,
                 )
-                HomeTab.Braise -> BraiseScreen(hub, onRefresh = onRefreshBraise, onOpen = onOpen)
+                HomeTab.Braise -> BraiseScreen(hub, onRefresh = onRefreshBraise, onOpen = onOpen, onOpenDraft = onOpenDraft)
                 HomeTab.Alerts -> AlertsScreen(hub, onRefresh = onRefreshAlerts, onOpen = onOpen)
                 HomeTab.Settings -> SettingsScreen(
                     hub, apps.me, onToggle = onToggleNotif, onOpenSystemNotif = onOpenSystemNotif,
@@ -209,7 +218,7 @@ private fun TabIcon(tab: HomeTab, badge: Int) {
 }
 
 @Composable
-private fun ProjectRoute(graph: AppGraph, uuid: String, onBack: (() -> Unit)?, onChanged: () -> Unit) {
+private fun ProjectRoute(graph: AppGraph, uuid: String, onBack: (() -> Unit)?, onChanged: () -> Unit, openDraft: Boolean = false) {
     val vm: ProjectViewModel = viewModel(
         key = "project:$uuid",
         factory = viewModelFactory { initializer { ProjectViewModel(graph, uuid) } },
@@ -240,7 +249,16 @@ private fun ProjectRoute(graph: AppGraph, uuid: String, onBack: (() -> Unit)?, o
             onCloseRuntimeLogs = vm::closeRuntimeLogs,
             onOpenPreview = vm::openPreview,
             onUrlOpened = vm::urlOpened,
+            onOpenDraft = vm::openDraft,
+            onDraftValidate = vm::validateDraft,
+            onDraftDiscard = vm::discardDraft,
+            onDraftRevert = vm::revertDraftFile,
+            onDraftRestore = vm::restoreDraft,
+            onDraftUpdate = vm::updateDraftFromGithub,
+            onDraftValidatedSeen = vm::draftValidatedSeen,
+            onUndoShown = vm::undoShown,
         ),
+        initialSheet = if (openDraft) ProjectSheet.Draft else ProjectSheet.None,
     )
 }
 

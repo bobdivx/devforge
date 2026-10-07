@@ -182,20 +182,29 @@ export function ProjectGitPanel({
   }
 
   async function discardLocal() {
-    if (!confirm('Jeter toutes les modifications locales ? Irréversible.')) {
+    if (!confirm('Supprimer le brouillon (modifications locales pas encore sur GitHub) ? Une sauvegarde est gardée 7 jours.')) {
       return;
     }
     setBusy(true);
     try {
-      const r = await api.projectGitDiscard(projectUuid);
+      const r = await api.draftDiscard(projectUuid);
       toast.push({
-        title: r.message || 'Discard',
-        tone: r.ok ? 'ok' : 'danger',
-        detail: r.ok ? undefined : r.output,
+        title: 'Brouillon supprimé',
+        detail: `${r.files} fichier${r.files > 1 ? 's' : ''} · sauvegarde gardée 7 jours`,
+        tone: 'warn',
+        action: {
+          label: 'Annuler',
+          onClick: () => {
+            void api
+              .draftRestore(projectUuid, r.backup_id)
+              .then(() => load())
+              .catch((e) => toast.push({ title: 'Restauration impossible', detail: String(e), tone: 'danger' }));
+          },
+        },
       });
       await load();
     } catch (e) {
-      toast.push({ title: 'Discard impossible', detail: String(e), tone: 'danger' });
+      toast.push({ title: 'Suppression impossible', detail: String(e), tone: 'danger' });
     } finally {
       setBusy(false);
     }

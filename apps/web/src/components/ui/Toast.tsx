@@ -11,6 +11,10 @@ export type ToastItem = {
   title: string;
   detail?: string;
   tone: ToastTone;
+  /** Bouton d'action (ex. « Annuler » après une suppression). */
+  action?: { label: string; onClick: () => void };
+  /** Durée d'affichage (ms). Défaut 4200, 10 s avec une action. */
+  durationMs?: number;
 };
 
 type ToastApi = {
@@ -38,7 +42,7 @@ export function ToastProvider({ children }: { children: ComponentChildren }) {
     (t: Omit<ToastItem, 'id'> & { id?: string }) => {
       const id = t.id ?? `t_${Math.random().toString(36).slice(2, 9)}`;
       setItems((prev) => [...prev.slice(-4), { ...t, id }]);
-      window.setTimeout(() => dismiss(id), 4200);
+      window.setTimeout(() => dismiss(id), t.durationMs ?? (t.action ? 10000 : 4200));
     },
     [dismiss],
   );
@@ -61,6 +65,18 @@ export function ToastProvider({ children }: { children: ComponentChildren }) {
                 <div class="text-sm font-medium">{t.title}</div>
                 {t.detail && (
                   <div class="mt-0.5 text-xs text-[var(--color-ink-muted)]">{t.detail}</div>
+                )}
+                {t.action && (
+                  <button
+                    type="button"
+                    class="mt-1.5 inline-flex min-h-[44px] items-center rounded-lg px-2 text-sm font-semibold text-[var(--color-accent)] hover:bg-white/5 sm:min-h-[32px]"
+                    onClick={() => {
+                      t.action?.onClick();
+                      dismiss(t.id);
+                    }}
+                  >
+                    {t.action.label}
+                  </button>
                 )}
               </div>
               <button

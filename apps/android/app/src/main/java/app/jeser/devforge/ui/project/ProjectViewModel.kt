@@ -13,6 +13,9 @@ import app.jeser.devforge.data.AgentMessage
 import app.jeser.devforge.data.ContainerState
 import app.jeser.devforge.data.ContainerStatus
 import app.jeser.devforge.data.Deployment
+import app.jeser.devforge.data.DraftDiffFile
+import app.jeser.devforge.data.DraftStatus
+import app.jeser.devforge.data.DraftValidated
 import app.jeser.devforge.data.GitInfo
 import app.jeser.devforge.data.LiveSummary
 import app.jeser.devforge.data.PersonaStatus
@@ -77,6 +80,16 @@ data class ProjectUiState(
     val runtimeLogs: RuntimeLogsState? = null,
     /** Lien à ouvrir une fois (aperçu prêt). */
     val openUrl: String? = null,
+    /** Brouillon : changements locaux pas encore sur GitHub. */
+    val draft: DraftStatus? = null,
+    val draftDiff: List<DraftDiffFile>? = null,
+    val draftDiffError: String? = null,
+    /** Action brouillon en cours : validate, discard, revert, update, restore. */
+    val draftBusy: String? = null,
+    val draftError: String? = null,
+    val draftValidated: DraftValidated? = null,
+    /** Message + sauvegarde à proposer en « Annuler » (snackbar). */
+    val undo: DraftUndo? = null,
 ) {
     val latest: Deployment? get() = deployments.firstOrNull()
     val lastFailed: Boolean get() = latest?.isFailed == true
@@ -88,6 +101,8 @@ data class ProjectUiState(
     val team: List<PersonaStatus> get() = teamStatus(agents, specs, latest)
     val canControl: Boolean get() = containerState.exists && lifecycleBusy == null && latest?.isRunning != true
 }
+
+data class DraftUndo(val message: String, val backupId: String)
 
 object ChipText {
     const val HEALTH = "Est-ce que tout va bien ? Fais juste un bilan rapide (app en ligne, dernière mise en ligne, brouillon), sans rien modifier."
@@ -125,6 +140,7 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
                 launch { refreshContainer() }
                 launch { runCatching { api.git(uuid) }.onSuccess { g -> _state.update { it.copy(git = g) } } }
                 launch { runCatching { api.preview(uuid) }.onSuccess { pv -> _state.update { it.copy(preview = pv) } } }
+                launch { refreshDraft(fetch = true) }
                 val agents = api.agents(uuid)
                 val coord = agents.firstOrNull { it.role == "coordinator" }
                 _state.update { it.copy(coordinatorUuid = coord?.uuid, agents = agents) }
@@ -183,6 +199,7 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
                         _state.update { s -> if (s.project == p) s else s.copy(project = p) }
                     }
                 }
+                if (tick % 2 == 0) refreshDraft()
                 if (tick % 6 == 0) {
                     runCatching { api.git(uuid) }.onSuccess { g -> _state.update { s -> if (s.git == g) s else s.copy(git = g) } }
                     runCatching { api.agents(uuid) }.onSuccess { a -> _state.update { s -> if (s.agents == a) s else s.copy(agents = a) } }
@@ -434,4 +451,85 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
     }
 
     fun noticeShown() = _state.update { it.copy(notice = null) }
+
+    /* ---------------- Brouillon ---------------- */
+
+    private suspend fun refreshDraft(fetch: Boolean = false) {
+        runCatching { api.draft(uuid, fetch) }.onSuccess { d -> _state.update { s -> if (s.draft == d) s else s.copy(draft = d) } }
+    }
+
+    private fun draftErrorText(e: Throwable): String = when (e) {
+        is UnauthorizedException -> "Session expirée."
+        is ApiException -> e.message ?: "Le serveur a refusé."
+        else -> "Pas de connexion à l'instance."
+    }
+
+    /** Ouvre la feuille : charge le diff de tous les fichiers. */
+    fun openDraft() {
+        _state.update { it.copy(draftDiff = null, draftDiffError = null, draftError = null, draftValidated = null) }
+        viewModelScope.launch {
+            refreshDraft()
+            runCatching { api.draftDiff(uuid) }
+                .onSuccess { files -> _state.update { it.copy(draftDiff = files) } }
+                .onFailure { e -> _state.update { it.copy(draftDiffError = draftErrorText(e)) } }
+        }
+    }
+
+    private fun draftAction(key: String, block: suspend () -> Unit) {
+        if (_state.value.draftBusy != null) return
+        _state.update { it.copy(draftBusy = key, draftError = null) }
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (e: IOException) {
+                _state.update { it.copy(draftError = draftErrorText(e)) }
+            } finally {
+                _state.update { it.copy(draftBusy = null) }
+            }
+        }
+    }
+
+    /** « Valider » : commit + push sur GitHub. Seulement depuis la feuille de confirmation. */
+    fun validateDraft(message: String) = draftAction("validate") {
+        val v = api.draftValidate(uuid, message)
+        _state.update { it.copy(draftValidated = v) }
+        refreshDraft()
+        runCatching { api.git(uuid) }.onSuccess { g -> _state.update { it.copy(git = g) } }
+    }
+
+    /** « Supprimer le brouillon » : sauvegarde 7 jours puis retour à l'état de GitHub. */
+    fun discardDraft(onDone: () -> Unit) = draftAction("discard") {
+        val r = api.draftDiscard(uuid)
+        refreshDraft()
+        onDone()
+        val n = r.files
+        _state.update {
+            it.copy(
+                undo = DraftUndo("Brouillon supprimé ($n fichier${if (n > 1) "s" else ""}). Sauvegarde gardée 7 jours.", r.backupId),
+                preview = it.preview?.copy(status = "stopped"),
+            )
+        }
+    }
+
+    fun revertDraftFile(path: String, onDone: () -> Unit) = draftAction("revert") {
+        val r = api.draftRevertFile(uuid, path)
+        refreshDraft()
+        _state.update { s -> s.copy(draftDiff = s.draftDiff?.filter { it.path != path }, undo = DraftUndo("Fichier remis comme sur GitHub.", r.backupId)) }
+        onDone()
+    }
+
+    fun restoreDraft(backupId: String) = draftAction("restore") {
+        val r = api.draftRestore(uuid, backupId)
+        refreshDraft()
+        _state.update { it.copy(notice = "Brouillon restauré (${r.files} fichier${if (r.files > 1) "s" else ""}).") }
+    }
+
+    fun updateDraftFromGithub() = draftAction("update") {
+        val r = api.draftUpdateFromGithub(uuid)
+        refreshDraft()
+        _state.update { it.copy(notice = if (r.merged > 0) "Brouillon à jour : ${r.merged} commit${if (r.merged > 1) "s" else ""} récupéré${if (r.merged > 1) "s" else ""}." else "Le brouillon est déjà à jour.") }
+    }
+
+    fun undoShown() = _state.update { it.copy(undo = null) }
+    fun draftValidatedSeen() = _state.update { it.copy(draftValidated = null) }
 }

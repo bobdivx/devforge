@@ -634,8 +634,22 @@ impl GitHubClient for HttpGitHubClient {
         branch: Option<&str>,
         sha: Option<&str>,
     ) -> Result<RepoFile> {
+        self.write_file_bytes(owner, repo, path, content.as_bytes(), message, branch, sha)
+            .await
+    }
+
+    async fn write_file_bytes(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        content: &[u8],
+        message: &str,
+        branch: Option<&str>,
+        sha: Option<&str>,
+    ) -> Result<RepoFile> {
         let path = path.trim().trim_start_matches('/');
-        let encoded = encode_base64_simple(content.as_bytes());
+        let encoded = encode_base64_simple(content);
         let mut body = serde_json::json!({
             "message": message,
             "content": encoded,
@@ -665,7 +679,7 @@ impl GitHubClient for HttpGitHubClient {
             .map(str::to_string);
         Ok(RepoFile {
             path: path.to_string(),
-            content: content.to_string(),
+            content: String::from_utf8_lossy(content).into_owned(),
             sha: new_sha,
             commit_sha,
             html_url: commit_url,
