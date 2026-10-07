@@ -539,6 +539,16 @@ export function ProjectAgentsPanel({
     } else setMessages([]);
   }, [selected, projectUuid]);
 
+  // Effacement déclenché ailleurs (Réglages avancés de la page simple).
+  useEffect(() => {
+    const onCleared = (ev: Event) => {
+      const id = (ev as CustomEvent<{ agentUuid?: string }>).detail?.agentUuid;
+      if (id && id === selected) setMessages([]);
+    };
+    window.addEventListener('devforge:chat-cleared', onCleared);
+    return () => window.removeEventListener('devforge:chat-cleared', onCleared);
+  }, [selected]);
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, thinking, liveActions, liveReflections, thinkDetail]);
@@ -943,15 +953,18 @@ export function ProjectAgentsPanel({
               >
                 {sharing ? <Spinner /> : <Share2 size={14} strokeWidth={2} aria-hidden />}
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={!selected || busy || messages.length === 0}
-                onClick={() => void clearChat()}
-              >
-                Effacer
-              </Button>
+              {/* Page simple : l'effacement passe par Réglages avancés (avec confirmation). */}
+              {!persona && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={!selected || busy || messages.length === 0}
+                  onClick={() => void clearChat()}
+                >
+                  Effacer
+                </Button>
+              )}
             </div>
           </div>
 
@@ -1029,7 +1042,7 @@ export function ProjectAgentsPanel({
                     {m.content.trim() && (
                       <div class="max-w-[92%] whitespace-pre-wrap break-words text-sm text-[var(--color-ink)]">
                         {m.content}
-                        {m.provider && (
+                        {m.provider && !persona && (
                           <div class="mt-1 text-[11px] text-[var(--color-ink-faint)]">{m.provider}</div>
                         )}
                       </div>
