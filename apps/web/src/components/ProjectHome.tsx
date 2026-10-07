@@ -33,6 +33,7 @@ import { braiseTitle, PERSONAS, teamStatus, type PersonaTone } from '../lib/pers
 import { ProjectAgentsPanel, type ChatChip } from './ProjectAgentsPanel';
 import { PersonaAvatar } from './personas/PersonaAvatar';
 import { PreviewModal } from './workspace/PreviewModal';
+import { StatusBadge } from './StatusBadge';
 import { PreviewPane } from './workspace/WorkspaceAtelier';
 import type { PreviewServerStatus } from './workspace/WorkspaceTopBar';
 import { Button, FadeIn, HubGrid, HubTile, Modal, Spinner, useToast } from './ui';
@@ -385,6 +386,8 @@ export function ProjectHome({
               )}
             </div>
           </div>
+          {/* Mobile/tablette : état global des apps, seulement s'il y a quelque chose à voir. */}
+          <StatusBadge compact class="ml-auto lg:hidden" />
         </div>
         <div class="grid grid-cols-[1fr_1fr_auto] gap-2 sm:ml-auto sm:flex sm:shrink-0">
           <Button

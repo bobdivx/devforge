@@ -10,6 +10,7 @@ import { AppShell } from './AppShell';
 import { ModelSentence } from './ModelSentence';
 import { ProjectAgentsHub } from './ProjectAgentsHub';
 import { ProjectHome } from './ProjectHome';
+import { StatusBadge } from './StatusBadge';
 import { ProjectSpecsModal } from './ProjectSpecsModal';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
@@ -333,9 +334,12 @@ export function ProjectDetailPage(props: Props) {
           : undefined
       }
       actions={
-        <Button size="sm" class="max-lg:h-11" onClick={() => setFeatureOpen(true)}>
-          Nouvelle fonctionnalité
-        </Button>
+        <>
+          <Button size="sm" class="max-lg:h-11" onClick={() => setFeatureOpen(true)}>
+            Nouvelle fonctionnalité
+          </Button>
+          <StatusBadge compact class="lg:hidden" />
+        </>
       }
       belowTitle={
         <ProjectActivityStrip
