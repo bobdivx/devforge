@@ -224,11 +224,19 @@ impl Tool for SyncWorkdirToGitHubTool {
 
             let sha_opt = existing_file.as_ref().map(|f| f.sha.as_str());
 
-            match self
-                .github
-                .write_file(&owner, &repo, &rel_path, &content, commit_message, Some(branch), sha_opt)
-                .await
-            {
+            let written = match std::str::from_utf8(&content) {
+                Ok(text) => {
+                    self.github
+                        .write_file(&owner, &repo, &rel_path, text, commit_message, Some(branch), sha_opt)
+                        .await
+                }
+                Err(_) => {
+                    self.github
+                        .write_file_bytes(&owner, &repo, &rel_path, &content, commit_message, Some(branch), sha_opt)
+                        .await
+                }
+            };
+            match written {
                 Ok(file) => {
                     synced.push(json!({
                         "path": rel_path,
@@ -245,8 +253,17 @@ impl Tool for SyncWorkdirToGitHubTool {
             }
         }
 
+        let failed_paths: Vec<&str> = errors
+            .iter()
+            .filter_map(|e| e.get("path").and_then(|p| p.as_str()))
+            .collect();
         Ok(json!({
             "ok": errors.is_empty(),
+            "error": if errors.is_empty() {
+                Value::Null
+            } else {
+                json!(format!("{} fichier(s) non poussé(s) : {}", errors.len(), failed_paths.join(", ")))
+            },
             "files_synced": synced.len(),
             "files_failed": errors.len(),
             "synced": synced,
@@ -261,7 +278,7 @@ impl Tool for SyncWorkdirToGitHubTool {
 
 /// Scanne récursivement le workdir et retourne (relative_path, content).
 /// Exclut .git, node_modules, etc.
-fn scan_workdir(root: &Path) -> Result<Vec<(String, String)>> {
+fn scan_workdir(root: &Path) -> Result<Vec<(String, Vec<u8>)>> {
     let mut files = Vec::new();
     scan_dir_recursive(root, root, &mut files)?;
     Ok(files)
@@ -270,7 +287,7 @@ fn scan_workdir(root: &Path) -> Result<Vec<(String, String)>> {
 fn scan_dir_recursive(
     root: &Path,
     current: &Path,
-    files: &mut Vec<(String, String)>,
+    files: &mut Vec<(String, Vec<u8>)>,
 ) -> Result<()> {
     let entries = std::fs::read_dir(current).map_err(|e| {
         devforge_shared::DevForgeError::Message(format!(
@@ -302,14 +319,13 @@ fn scan_dir_recursive(
                 .to_string_lossy()
                 .replace('\\', "/");
 
-            // Lire le contenu
-            match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    files.push((rel_path, content));
-                }
-                Err(_) => {
-                    // Ignorer les fichiers binaires / non-UTF8
-                    continue;
+            // Contenu brut : texte ET binaires (images, polices…) sont poussés tels quels.
+            match std::fs::read(&path) {
+                Ok(content) => files.push((rel_path, content)),
+                Err(e) => {
+                    return Err(devforge_shared::DevForgeError::Message(format!(
+                        "Lecture impossible de {rel_path} : {e}"
+                    )))
                 }
             }
         }
@@ -319,7 +335,7 @@ fn scan_dir_recursive(
 }
 
 fn should_exclude(name: &str) -> bool {
-    if name.starts_with(".devforge-") {
+    if name.starts_with(".devforge-") || name.starts_with(".devforge.") || name == ".devforge" {
         return true;
     }
     matches!(
@@ -342,4 +358,29 @@ fn should_exclude(name: &str) -> bool {
             | ".vscode"
             | ".idea"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_keeps_binaries_and_skips_devforge_internals() {
+        let root = std::env::temp_dir().join(format!("df-scan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("public")).unwrap();
+        std::fs::create_dir_all(root.join(".devforge-smoke")).unwrap();
+        let png = vec![0x89u8, b'P', b'N', b'G', 0, 0xff, 0xfe];
+        std::fs::write(root.join("public/og-image.png"), &png).unwrap();
+        std::fs::write(root.join("index.html"), "<h1>ok</h1>").unwrap();
+        std::fs::write(root.join(".devforge-npm-stamp"), "x").unwrap();
+        std::fs::write(root.join(".devforge.json"), "{}").unwrap();
+        std::fs::write(root.join(".devforge-smoke/out.txt"), "x").unwrap();
+        let mut files = scan_workdir(&root).unwrap();
+        files.sort();
+        let names: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(names, vec!["index.html", "public/og-image.png"]);
+        assert_eq!(files[1].1, png);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

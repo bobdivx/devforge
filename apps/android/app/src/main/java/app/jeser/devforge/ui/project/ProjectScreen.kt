@@ -88,10 +88,18 @@ data class ProjectActions(
     val onCloseRuntimeLogs: () -> Unit = {},
     val onOpenPreview: () -> Unit = {},
     val onUrlOpened: () -> Unit = {},
+    val onOpenDraft: () -> Unit = {},
+    val onDraftValidate: (String) -> Unit = {},
+    val onDraftDiscard: (() -> Unit) -> Unit = {},
+    val onDraftRevert: (String, () -> Unit) -> Unit = { _, _ -> },
+    val onDraftRestore: (String) -> Unit = {},
+    val onDraftUpdate: () -> Unit = {},
+    val onDraftValidatedSeen: () -> Unit = {},
+    val onUndoShown: () -> Unit = {},
 )
 
 /** Feuilles de la page app (une seule ouverte à la fois). */
-enum class ProjectSheet { None, Details, More, Deploys, Stop, Restart, Deploy, NewFeature }
+enum class ProjectSheet { None, Details, More, Deploys, Stop, Restart, Deploy, NewFeature, Draft, DraftFile, DraftValidate, DraftDiscard }
 
 private data class Chip(val key: String, val label: String, val danger: Boolean = false)
 
@@ -102,8 +110,11 @@ fun ProjectScreen(
     actions: ProjectActions,
     modifier: Modifier = Modifier,
     initialSheet: ProjectSheet = ProjectSheet.None,
+    initialDraftPath: String? = null,
 ) {
     var sheet by rememberSaveable { mutableStateOf(initialSheet) }
+    var draftPath by rememberSaveable { mutableStateOf<String?>(initialDraftPath) }
+    LaunchedEffect(Unit) { if (initialSheet == ProjectSheet.Draft) actions.onOpenDraft() }
     var input by rememberSaveable { mutableStateOf("") }
     val snackbar = remember { SnackbarHostState() }
     val uri = LocalUriHandler.current
@@ -114,12 +125,20 @@ fun ProjectScreen(
             actions.onNoticeShown()
         }
     }
+    LaunchedEffect(state.undo) {
+        state.undo?.let { u ->
+            val r = snackbar.showSnackbar(u.message, actionLabel = "Annuler", duration = SnackbarDuration.Long)
+            if (r == SnackbarResult.ActionPerformed) actions.onDraftRestore(u.backupId)
+            actions.onUndoShown()
+        }
+    }
     LaunchedEffect(state.openUrl) {
         state.openUrl?.let { runCatching { uri.openUri(it) }; actions.onUrlOpened() }
     }
 
     val project = state.project
     val onSheet: (ProjectSheet) -> Unit = { sheet = it }
+    val openDraft = { actions.onOpenDraft(); sheet = ProjectSheet.Draft }
     Scaffold(
         modifier = modifier,
         containerColor = DfColors.Bg,
@@ -174,6 +193,7 @@ fun ProjectScreen(
                             ) {
                                 StatusStrip(state, onClick = { sheet = ProjectSheet.Details })
                                 DeployBanner(state, onDeploy = { sheet = ProjectSheet.Deploy }, onLogs = { state.latest?.let(actions.onOpenLogs) ?: actions.onOpenRuntimeLogs() })
+                                DraftBanner(state.draft, onClick = openDraft)
                                 RecentDeploys(state, onOpen = actions.onOpenLogs)
                             }
                             VerticalDivider(color = DfColors.Line)
@@ -189,6 +209,7 @@ fun ProjectScreen(
                                 Column(Modifier.padding(horizontal = side).padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     StatusStrip(state, onClick = { sheet = ProjectSheet.Details })
                                     DeployBanner(state, onDeploy = { sheet = ProjectSheet.Deploy }, onLogs = { state.latest?.let(actions.onOpenLogs) ?: actions.onOpenRuntimeLogs() })
+                                    DraftBanner(state.draft, onClick = openDraft)
                                 }
                             }
                             ChatPane(state, input, { input = it }, actions, onNewFeature = { sheet = ProjectSheet.NewFeature }, modifier = Modifier.weight(1f))
@@ -234,6 +255,39 @@ fun ProjectScreen(
                 busy = state.creatingSpec,
                 onDismiss = close,
                 onSubmit = { t, d -> actions.onCreateSpec(t, d) { sheet = ProjectSheet.None } },
+            )
+            ProjectSheet.Draft -> DraftSheet(
+                state,
+                onDismiss = close,
+                onOpenFile = { p -> draftPath = p; sheet = ProjectSheet.DraftFile },
+                onValidate = { actions.onDraftValidatedSeen(); sheet = ProjectSheet.DraftValidate },
+                onDiscard = { sheet = ProjectSheet.DraftDiscard },
+                onUpdate = actions.onDraftUpdate,
+                onRestore = actions.onDraftRestore,
+                onOpenPreview = { actions.onOpenPreview(); close() },
+            )
+            ProjectSheet.DraftFile -> DraftFileSheet(
+                state,
+                path = draftPath.orEmpty(),
+                onBack = { sheet = ProjectSheet.Draft },
+                onDismiss = close,
+                onRevert = { p -> actions.onDraftRevert(p) { sheet = ProjectSheet.Draft } },
+            )
+            ProjectSheet.DraftValidate -> DraftValidateSheet(
+                state,
+                canDeploy = state.canDeploy,
+                onDismiss = { actions.onDraftValidatedSeen(); close() },
+                onValidate = actions.onDraftValidate,
+                onDeployNow = {
+                    actions.onDeploy("Mise en ligne après validation du brouillon")
+                    actions.onDraftValidatedSeen()
+                    close()
+                },
+            )
+            ProjectSheet.DraftDiscard -> DraftDiscardSheet(
+                state,
+                onDismiss = { sheet = ProjectSheet.Draft },
+                onConfirm = { actions.onDraftDiscard { sheet = ProjectSheet.None } },
             )
             ProjectSheet.None -> Unit
         }

@@ -317,3 +317,85 @@ data class AndroidInfo(
     @SerialName("download_path") val downloadPath: String? = null,
     @SerialName("size_bytes") val sizeBytes: Long? = null,
 )
+
+/* ---------------- Brouillon (workdir local pas encore sur GitHub) ---------------- */
+
+@Serializable
+data class DraftFile(
+    val path: String = "",
+    /** `added` | `modified` | `deleted` | `renamed` */
+    val status: String = "modified",
+    @SerialName("old_path") val oldPath: String? = null,
+)
+
+@Serializable
+data class DraftBackup(
+    val id: String = "",
+    @SerialName("created_at") val createdAt: String? = null,
+    val reason: String = "discard",
+    val files: List<String> = emptyList(),
+    val deleted: List<String> = emptyList(),
+)
+
+@Serializable
+data class DraftPreview(val running: Boolean = false, val url: String? = null)
+
+@Serializable
+data class DraftStatus(
+    val available: Boolean = false,
+    val reason: String? = null,
+    val dirty: Boolean = false,
+    val count: Int = 0,
+    val files: List<DraftFile> = emptyList(),
+    @SerialName("junk_count") val junkCount: Int = 0,
+    val branch: String = "main",
+    val ahead: Int = 0,
+    val behind: Int = 0,
+    @SerialName("has_remote") val hasRemote: Boolean = false,
+    @SerialName("updated_at") val updatedAt: String? = null,
+    @SerialName("suggested_message") val suggestedMessage: String = "",
+    val backups: List<DraftBackup> = emptyList(),
+    val preview: DraftPreview = DraftPreview(),
+)
+
+@Serializable
+data class DraftDiffFile(
+    val path: String = "",
+    val status: String = "modified",
+    @SerialName("old_path") val oldPath: String? = null,
+    val additions: Int = 0,
+    val deletions: Int = 0,
+    val patch: String? = null,
+)
+
+@Serializable
+data class DraftDiff(val files: List<DraftDiffFile> = emptyList())
+
+@Serializable
+data class DraftValidated(val sha: String = "", val files: Int = 0, val branch: String = "main")
+
+@Serializable
+data class DraftDiscarded(@SerialName("backup_id") val backupId: String = "", val files: Int = 0)
+
+@Serializable
+data class DraftRestored(val files: Int = 0)
+
+@Serializable
+data class DraftReverted(@SerialName("backup_id") val backupId: String = "", val path: String = "")
+
+@Serializable
+data class DraftUpdated(val merged: Int = 0, val head: String = "")
+
+@Serializable
+data class DraftSummary(
+    @SerialName("project_uuid") val projectUuid: String = "",
+    @SerialName("project_name") val projectName: String = "",
+    @SerialName("production_url") val productionUrl: String? = null,
+    @SerialName("git_repository") val gitRepository: String? = null,
+    val count: Int = 0,
+    val behind: Int = 0,
+    @SerialName("updated_at") val updatedAt: String? = null,
+)
+
+@Serializable
+data class DraftList(val drafts: List<DraftSummary> = emptyList())

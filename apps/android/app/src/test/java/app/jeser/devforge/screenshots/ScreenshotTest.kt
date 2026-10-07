@@ -126,6 +126,39 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
         shot("project-more-sheet-up-to-date")
     }
 
+    @Test fun projectDraft() {
+        compose.setContent { Shot { ProjectScreen(SampleData.projectDraft, ProjectActions(onBack = {})) } }
+        shot("project-draft")
+        if (!device.endsWith("land")) {
+            val root = compose.onRoot().getBoundsInRoot()
+            val chatTop = compose.onNodeWithTag("chat").getBoundsInRoot().top
+            val h = (root.bottom - root.top).value
+            assertTrue("en-tête trop haut avec le brouillon : $chatTop sur $h dp", chatTop.value <= h * 0.30f)
+        }
+    }
+
+    @Test fun draftSheet() {
+        compose.setContent { Shot { ProjectScreen(SampleData.projectDraft, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Draft) } }
+        shot("draft-sheet")
+    }
+
+    @Test fun draftFileSheet() {
+        compose.setContent {
+            Shot { ProjectScreen(SampleData.projectDraft, ProjectActions(onBack = {}), initialSheet = ProjectSheet.DraftFile, initialDraftPath = "src/components/Footer.astro") }
+        }
+        shot("draft-file")
+    }
+
+    @Test fun draftValidateSheet() {
+        compose.setContent { Shot { ProjectScreen(SampleData.projectDraft, ProjectActions(onBack = {}), initialSheet = ProjectSheet.DraftValidate) } }
+        shot("draft-validate")
+    }
+
+    @Test fun draftDiscardSheet() {
+        compose.setContent { Shot { ProjectScreen(SampleData.projectDraft, ProjectActions(onBack = {}), initialSheet = ProjectSheet.DraftDiscard) } }
+        shot("draft-discard")
+    }
+
     @Test fun tabBraise() {
         compose.setContent { Shot { HomeRootPreview(SampleData.apps, tab = HomeTab.Braise, hub = SampleData.hub) } }
         shot("tab-braise")

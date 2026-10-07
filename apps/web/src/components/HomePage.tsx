@@ -1,5 +1,6 @@
 import { api, type ClusterNode, type Project } from '../lib/api';
 import { AndroidAppBanner } from './AndroidAppBanner';
+import { DraftsSection } from './DraftPanel';
 import { nodeShortLabel } from '../lib/cluster-display';
 import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { cn } from '../lib/cn';
@@ -430,6 +431,7 @@ export function HomePage() {
               />
             )}
           </HubGrid>
+          <DraftsSection />
         </>
       )}
 

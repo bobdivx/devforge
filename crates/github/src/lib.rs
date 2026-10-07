@@ -252,6 +252,22 @@ pub trait GitHubClient: Send + Sync {
         sha: Option<&str>,
     ) -> Result<RepoFile>;
 
+    /// Create or update a file with raw bytes (binaires : images, polices…). `sha` required when updating.
+    async fn write_file_bytes(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _path: &str,
+        _content: &[u8],
+        _message: &str,
+        _branch: Option<&str>,
+        _sha: Option<&str>,
+    ) -> Result<RepoFile> {
+        Err(DevForgeError::Message(
+            "GitHub non configuré — connecte un token dans Settings".into(),
+        ))
+    }
+
     async fn create_registration_token(
         &self,
         owner: &str,
@@ -697,6 +713,22 @@ impl GitHubFacade {
     ) -> Result<RepoFile> {
         self.client()
             .write_file(owner, repo, path, content, message, branch, sha)
+            .await
+    }
+
+    /// Comme `write_file`, pour un contenu binaire.
+    pub async fn write_file_bytes(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        content: &[u8],
+        message: &str,
+        branch: Option<&str>,
+        sha: Option<&str>,
+    ) -> Result<RepoFile> {
+        self.client()
+            .write_file_bytes(owner, repo, path, content, message, branch, sha)
             .await
     }
 

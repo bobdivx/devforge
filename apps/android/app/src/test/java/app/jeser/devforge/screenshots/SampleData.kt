@@ -13,6 +13,12 @@ import app.jeser.devforge.data.GitSync
 import app.jeser.devforge.data.GitWorkdir
 import app.jeser.devforge.data.PreviewStatus
 import app.jeser.devforge.data.Deployment
+import app.jeser.devforge.data.DraftBackup
+import app.jeser.devforge.data.DraftDiffFile
+import app.jeser.devforge.data.DraftFile
+import app.jeser.devforge.data.DraftPreview
+import app.jeser.devforge.data.DraftStatus
+import app.jeser.devforge.data.DraftSummary
 import app.jeser.devforge.data.InboxEvent
 import app.jeser.devforge.data.Me
 import app.jeser.devforge.data.Project
@@ -127,6 +133,31 @@ object SampleData {
         ),
     )
 
+    /** Brouillon local de 3 fichiers (pas encore sur GitHub). */
+    val draft = DraftStatus(
+        available = true, dirty = true, count = 3, branch = "main", hasRemote = true,
+        files = listOf(
+            DraftFile("src/pages/contact.astro", "added"),
+            DraftFile("src/components/Footer.astro", "modified"),
+            DraftFile("public/old-banner.png", "deleted"),
+        ),
+        junkCount = 2, updatedAt = ago(42), suggestedMessage = "feat: met à jour contact.astro, Footer.astro, old-banner.png",
+        preview = DraftPreview(true, "https://vigie-preview.jeser.app"),
+        backups = listOf(DraftBackup("20261007T120000Z", ago(60 * 5), "discard", listOf("src/old.ts"), emptyList())),
+    )
+    val draftDiff = listOf(
+        DraftDiffFile(
+            "src/pages/contact.astro", "added", additions = 9,
+            patch = "@@ -0,0 +1,9 @@\n+---\n+import Layout from '../layouts/Layout.astro';\n+---\n+<Layout title=\"Contact\">\n+  <h1>Écris-nous</h1>\n+  <form method=\"post\" action=\"/api/contact\" class=\"grid gap-3 max-w-md\">\n+    <input name=\"email\" type=\"email\" required placeholder=\"ton@email.fr\" />\n+  </form>\n+</Layout>",
+        ),
+        DraftDiffFile(
+            "src/components/Footer.astro", "modified", additions = 2, deletions = 1,
+            patch = "@@ -4,7 +4,8 @@\n <footer class=\"py-8 text-sm text-zinc-400\">\n-  <p>© 2025 Vigie</p>\n+  <p>© 2026 Vigie · <a href=\"/contact\">Contact</a></p>\n+  <p class=\"mt-1\">Fait avec soin à Paris, hébergé sur notre propre serveur.</p>\n </footer>",
+        ),
+        DraftDiffFile("public/old-banner.png", "deleted"),
+    )
+    val projectDraft = projectUpToDate.copy(draft = draft, draftDiff = draftDiff)
+
     val hub = HubUiState(
         conversations = listOf(
             Conversation("p-vigie", "Vigie", "vigie.jeser.app", lastRole = "assistant",
@@ -141,6 +172,10 @@ object SampleData {
                 excerpt = "Tout va bien côté popcornn 🔥 L'app répond, dernière mise en ligne réussie hier.", createdAt = ago(60 * 26)),
         ),
         conversationsLoading = false,
+        drafts = listOf(
+            DraftSummary("p-vigie", "Vigie", "vigie.jeser.app", count = 3, updatedAt = ago(42)),
+            DraftSummary("p-tesla", "tesla", "teslasphere.app", count = 1, behind = 2, updatedAt = ago(60 * 30)),
+        ),
         alerts = inbox + listOf(
             InboxEvent("deploy:old", "deploy_failed", "p-pop", "popcornn", "Mise en ligne échouée · popcornn",
                 "npm ERR! missing script: build", ago(60 * 30)),

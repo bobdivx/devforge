@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.SystemUpdate
@@ -24,6 +25,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.jeser.devforge.data.Conversation
+import app.jeser.devforge.data.DraftSummary
 import app.jeser.devforge.data.InboxEvent
 import app.jeser.devforge.data.Me
 import app.jeser.devforge.notify.NotifKind
@@ -78,7 +80,7 @@ private fun waitingLabel(c: Conversation): Pair<String, Color>? = when (c.waitin
 /** Conversations avec Braise, celles qui attendent ta réponse en premier. Un toucher ouvre le chat de l'app. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BraiseScreen(state: HubUiState, onRefresh: () -> Unit, onOpen: (String) -> Unit) {
+fun BraiseScreen(state: HubUiState, onRefresh: () -> Unit, onOpen: (String) -> Unit, onOpenDraft: (String) -> Unit = onOpen) {
     TabScaffold("Braise 🔥") { padding ->
         PullToRefreshBox(isRefreshing = false, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
             val waiting = state.waiting
@@ -106,6 +108,10 @@ fun BraiseScreen(state: HubUiState, onRefresh: () -> Unit, onOpen: (String) -> U
                             item(key = "h-wait") { SectionTitle("En attente de toi · ${waiting.size}") }
                             items(waiting, key = { "w:" + it.projectUuid }) { ConversationCard(it, onOpen) }
                         }
+                        if (state.drafts.isNotEmpty()) {
+                            item(key = "h-drafts") { SectionTitle("Brouillons à trier · ${state.drafts.size}") }
+                            items(state.drafts, key = { "d:" + it.projectUuid }) { DraftCard(it, onOpenDraft) }
+                        }
                         if (others.isNotEmpty()) {
                             item(key = "h-recent") { SectionTitle("Conversations récentes") }
                             items(others, key = { "o:" + it.projectUuid }) { ConversationCard(it, onOpen) }
@@ -113,6 +119,27 @@ fun BraiseScreen(state: HubUiState, onRefresh: () -> Unit, onOpen: (String) -> U
                     }
                 }
             }
+        }
+    }
+}
+
+/** App avec un brouillon : un toucher ouvre directement la feuille du brouillon. */
+@Composable
+private fun DraftCard(d: DraftSummary, onOpen: (String) -> Unit) {
+    Card(onClick = { onOpen(d.projectUuid) }) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AppIcon(d.projectName, d.productionUrl, d.gitRepository, status = null, size = 40.dp)
+            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                Text(d.projectName, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val whenText = relativeTime(d.updatedAt)
+                Text(
+                    "${d.count} fichier${if (d.count > 1) "s" else ""} pas encore sur GitHub" +
+                        (if (whenText.isNotBlank()) " · $whenText" else "") +
+                        (if (d.behind > 0) " · GitHub a avancé" else ""),
+                    color = DfColors.Warn, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = DfColors.InkFaint)
         }
     }
 }

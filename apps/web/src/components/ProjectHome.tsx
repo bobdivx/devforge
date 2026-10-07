@@ -35,6 +35,7 @@ import { ProjectAgentsPanel, type ChatChip } from './ProjectAgentsPanel';
 import { PersonaAvatar } from './personas/PersonaAvatar';
 import { PreviewModal } from './workspace/PreviewModal';
 import { StatusBadge } from './StatusBadge';
+import { DraftBanner, DraftModal, filesLabel, useDraft } from './DraftPanel';
 import { PreviewPane } from './workspace/WorkspaceAtelier';
 import type { PreviewServerStatus } from './workspace/WorkspaceTopBar';
 import { Button, FadeIn, HubGrid, HubTile, Modal, Spinner, useToast } from './ui';
@@ -242,6 +243,10 @@ export function ProjectHome({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deployBusy, setDeployBusy] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const { draft, refresh: refreshDraft } = useDraft(uuid);
+  const [draftOpen, setDraftOpen] = useState(
+    () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('draft') === '1',
+  );
 
   const latest = deployments[0] ?? null;
   const current = deployments.find((d) => isInProgress(d.status)) ?? latest;
@@ -506,6 +511,8 @@ export function ProjectHome({
         </div>
       </div>
 
+      <DraftBanner draft={draft} onOpen={() => setDraftOpen(true)} class="mb-3 sm:mb-4" />
+
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-5">
         {/* Conversation avec Braise */}
         <section
@@ -703,9 +710,53 @@ export function ProjectHome({
               ) : null}
             </p>
           )}
-          <p>Les changements du brouillon qui ne sont pas encore sur GitHub ne seront pas inclus.</p>
+          {draft?.dirty ? (
+            <div class="rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3">
+              <p>
+                Le brouillon ({filesLabel(draft.count)}) n’est pas encore sur GitHub : il ne sera pas inclus.
+              </p>
+              <button
+                type="button"
+                class="mt-1 inline-flex min-h-[44px] items-center text-sm font-semibold text-[var(--color-accent)] hover:underline sm:min-h-0"
+                onClick={() => {
+                  setConfirmOpen(false);
+                  setDraftOpen(true);
+                }}
+              >
+                Valider le brouillon d’abord →
+              </button>
+            </div>
+          ) : (
+            <p>Les changements du brouillon qui ne sont pas encore sur GitHub ne seront pas inclus.</p>
+          )}
         </div>
       </Modal>
+
+      <DraftModal
+        open={draftOpen}
+        onClose={() => {
+          setDraftOpen(false);
+          const u = new URL(window.location.href);
+          if (u.searchParams.has('draft')) {
+            u.searchParams.delete('draft');
+            window.history.replaceState(null, '', u.toString());
+          }
+        }}
+        uuid={uuid}
+        name={name}
+        draft={draft}
+        onChanged={() => refreshDraft()}
+        onDeployNow={
+          canDeploy
+            ? async () => {
+                await api.createDeployment(uuid, { git_message: 'Mise en ligne après validation du brouillon' });
+                toast.push({ title: 'Mise en ligne lancée', detail: 'Reconstruction depuis GitHub…', tone: 'info' });
+                const list = await api.deployments(uuid);
+                onDeployments(list.data ?? []);
+              }
+            : undefined
+        }
+      />
 
       <AdvancedSettingsModal
         open={advancedOpen}

@@ -240,6 +240,51 @@ class ApiClient(
         DataEnvelope.serializer(SpecFeature.serializer()),
     ).data
 
+    /* ---- Brouillon ---- */
+    suspend fun draft(uuid: String, fetch: Boolean = false): DraftStatus =
+        get("/projects/${enc(uuid)}/draft${if (fetch) "?fetch=1" else ""}", DraftStatus.serializer())
+
+    suspend fun draftDiff(uuid: String, path: String? = null): List<DraftDiffFile> =
+        get("/projects/${enc(uuid)}/draft/diff${path?.let { "?path=${enc(it)}" } ?: ""}", DraftDiff.serializer()).files
+
+    /** Commit + push du brouillon sur GitHub. Appelé seulement depuis la feuille de confirmation. */
+    suspend fun draftValidate(uuid: String, message: String): DraftValidated = send(
+        "POST",
+        "/projects/${enc(uuid)}/draft/validate",
+        buildJsonObject { put("message", message); put("confirm", true) },
+        DraftValidated.serializer(),
+    )
+
+    suspend fun draftDiscard(uuid: String): DraftDiscarded = send(
+        "POST",
+        "/projects/${enc(uuid)}/draft/discard",
+        buildJsonObject { put("confirm", true) },
+        DraftDiscarded.serializer(),
+    )
+
+    suspend fun draftRestore(uuid: String, backupId: String): DraftRestored = send(
+        "POST",
+        "/projects/${enc(uuid)}/draft/restore",
+        buildJsonObject { put("backup_id", backupId) },
+        DraftRestored.serializer(),
+    )
+
+    suspend fun draftRevertFile(uuid: String, path: String): DraftReverted = send(
+        "POST",
+        "/projects/${enc(uuid)}/draft/revert-file",
+        buildJsonObject { put("path", path); put("confirm", true) },
+        DraftReverted.serializer(),
+    )
+
+    suspend fun draftUpdateFromGithub(uuid: String): DraftUpdated = send(
+        "POST",
+        "/projects/${enc(uuid)}/draft/update-from-github",
+        buildJsonObject { },
+        DraftUpdated.serializer(),
+    )
+
+    suspend fun drafts(): List<DraftSummary> = get("/drafts", DraftList.serializer()).drafts
+
     suspend fun conversations(): List<Conversation> =
         get("/mobile/conversations", DataEnvelope.serializer(Conversations.serializer())).data.conversations
 
