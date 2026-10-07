@@ -1,65 +1,15 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { api, type Project } from '../lib/api';
+import { api } from '../lib/api';
 import type { Bootstrap } from '../lib/auth';
 import { mobileAvatarNav } from '../lib/nav';
-import { projectStatusMeta } from '../lib/status';
 import { cn } from '../lib/cn';
 import { LaunchedAgentsMenu } from './LaunchedAgentsMenu';
-
-type ProjectStats = {
-  total: number;
-  live: number;
-  deploying: number;
-  failed: number;
-  stopped: number;
-};
-
-function computeStats(projects: Project[]): ProjectStats {
-  const s: ProjectStats = { total: projects.length, live: 0, deploying: 0, failed: 0, stopped: 0 };
-  for (const p of projects) {
-    const tone = projectStatusMeta(p.status).tone;
-    if (tone === 'ok') s.live += 1;
-    else if (tone === 'warn') s.deploying += 1;
-    else if (tone === 'danger') s.failed += 1;
-    else s.stopped += 1;
-  }
-  return s;
-}
+import { StatusBadge, StatusCounters } from './StatusBadge';
 
 function initials(name: string): string {
   const parts = name.trim().split(/[\s-_]+/).filter(Boolean);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
   return name.slice(0, 2).toUpperCase() || '?';
-}
-
-function StatChip({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone: 'ok' | 'warn' | 'danger' | 'neutral';
-}) {
-  const dot =
-    tone === 'ok'
-      ? 'bg-[var(--color-ok)]'
-      : tone === 'warn'
-        ? 'bg-[var(--color-warn)]'
-        : tone === 'danger'
-          ? 'bg-[var(--color-danger)]'
-          : 'bg-[var(--color-ink-faint)]';
-
-  return (
-    <div
-      class="flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2 py-1 sm:gap-2 sm:px-2.5"
-      title={label}
-    >
-      <span class={cn('h-1.5 w-1.5 rounded-full', dot)} aria-hidden />
-      <span class="text-[11px] text-[var(--color-ink-muted)]">{label}</span>
-      <span class="text-xs font-semibold tabular-nums text-[var(--color-ink)]">{value}</span>
-    </div>
-  );
 }
 
 export function AppHeader({
@@ -70,7 +20,6 @@ export function AppHeader({
   workerLink?: 'unknown' | 'ok' | 'down';
 }) {
   const [boot, setBoot] = useState<Bootstrap | null>(null);
-  const [stats, setStats] = useState<ProjectStats | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -79,19 +28,9 @@ export function AppHeader({
     let cancelled = false;
     (async () => {
       try {
-        if (worker) {
-          const b = await api.bootstrap();
-          if (cancelled) return;
-          setBoot(b);
-          return;
-        }
-        const [b, projects] = await Promise.all([
-          api.bootstrap(),
-          api.projects().catch(() => null),
-        ]);
+        const b = await api.bootstrap();
         if (cancelled) return;
         setBoot(b);
-        if (projects?.data) setStats(computeStats(projects.data));
       } catch {
         /* AuthGate gère déjà les erreurs auth */
       }
@@ -165,14 +104,12 @@ export function AppHeader({
               {workerLink === 'down' ? 'Lien coupé' : workerLink === 'ok' ? 'Worker' : 'Connexion…'}
             </span>
           </div>
-        ) : stats ? (
-          <>
-            <StatChip label="En ligne" value={stats.live} tone="ok" />
-            <StatChip label="Déploiement" value={stats.deploying} tone="warn" />
-            <StatChip label="Échec" value={stats.failed} tone="danger" />
-          </>
         ) : (
-          <div class="h-7 w-48 animate-pulse rounded-full bg-white/5" aria-hidden />
+          <>
+            {/* Bureau : les trois compteurs ; mobile et tablette : un seul badge interactif. */}
+            <StatusCounters class="hidden lg:flex" />
+            <StatusBadge class="lg:hidden" />
+          </>
         )}
       </div>
 
