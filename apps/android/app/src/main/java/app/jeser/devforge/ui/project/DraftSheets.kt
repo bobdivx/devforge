@@ -136,6 +136,26 @@ fun DraftSheet(
             color = DfColors.InkMuted,
         )
         ErrorBox(state.draftError)
+        if (draft?.dirty == true) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                OutlinedButton(
+                    onClick = onDiscard,
+                    enabled = busy == null,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = DfColors.Danger),
+                    border = BorderStroke(1.dp, DfColors.Danger.copy(alpha = .4f)),
+                    modifier = Modifier.weight(1f).heightIn(min = 52.dp),
+                ) {
+                    Icon(Icons.Filled.Delete, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Supprimer")
+                }
+                Button(
+                    onClick = onValidate,
+                    enabled = busy == null && draft.behind == 0 && draft.hasRemote,
+                    modifier = Modifier.weight(1f).heightIn(min = 52.dp),
+                ) {
+                    Icon(Icons.Filled.CloudUpload, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Valider", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
         if (draft?.dirty == true && draft.behind > 0) {
             Surface(color = DfColors.Accent.copy(alpha = .08f), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, DfColors.Accent.copy(alpha = .3f))) {
                 Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -174,26 +194,6 @@ fun DraftSheet(
                 "${draft.junkCount} fichier${if (draft.junkCount > 1) "s" else ""} technique${if (draft.junkCount > 1) "s" else ""} ignoré${if (draft.junkCount > 1) "s" else ""} (aperçu, build, secrets) : jamais envoyés.",
                 color = DfColors.InkFaint, fontSize = 12.sp,
             )
-        }
-        if (draft?.dirty == true) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                OutlinedButton(
-                    onClick = onDiscard,
-                    enabled = busy == null,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = DfColors.Danger),
-                    border = BorderStroke(1.dp, DfColors.Danger.copy(alpha = .4f)),
-                    modifier = Modifier.weight(1f).heightIn(min = 52.dp),
-                ) {
-                    Icon(Icons.Filled.Delete, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Supprimer")
-                }
-                Button(
-                    onClick = onValidate,
-                    enabled = busy == null && draft.behind == 0 && draft.hasRemote,
-                    modifier = Modifier.weight(1f).heightIn(min = 52.dp),
-                ) {
-                    Icon(Icons.Filled.CloudUpload, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Valider", fontWeight = FontWeight.SemiBold)
-                }
-            }
         }
         if (draft != null && draft.backups.isNotEmpty()) {
             Text("Sauvegardes (7 jours)", color = DfColors.InkMuted, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp))
