@@ -113,9 +113,79 @@ data class Agent(
     val uuid: String,
     val name: String = "",
     val role: String = "",
+    val kind: String = "",
     val status: String = "idle",
+    val enabled: Int = 1,
+    @SerialName("trigger_type") val triggerType: String = "",
+    @SerialName("trigger_config") val triggerConfig: String = "",
+    @SerialName("last_run_at") val lastRunAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
 )
+
+/** `GET /projects/{uuid}/status` : état Docker brut (`docker ps --format {{.Status}}`). */
+@Serializable
+data class ContainerStatus(
+    val phase: String = "unknown",
+    val healthy: Boolean = false,
+    val message: String = "",
+)
+
+/** Réponse des actions start / stop / restart (`POST /projects/{uuid}/lifecycle/{action}`). */
+@Serializable
+data class LifecycleResult(
+    val ok: Boolean = false,
+    val phase: String? = null,
+    val error: String? = null,
+    val output: String? = null,
+)
+
+@Serializable
+data class RuntimeLogs(
+    val ok: Boolean = false,
+    val logs: String = "",
+    val error: String? = null,
+)
+
+@Serializable
+data class GitSync(
+    val state: String? = null,
+    @SerialName("behind_by") val behindBy: Int? = null,
+    @SerialName("ahead_by_remote") val aheadByRemote: Int? = null,
+    @SerialName("deployed_sha") val deployedSha: String? = null,
+    @SerialName("html_url") val htmlUrl: String? = null,
+    @SerialName("files_count") val filesCount: Int? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class GitFile(val status: String = "", val path: String = "")
+
+@Serializable
+data class GitWorkdir(
+    val available: Boolean = false,
+    val dirty: Boolean = false,
+    val files: List<GitFile> = emptyList(),
+)
+
+/** `GET /projects/{uuid}/git` : synchro GitHub ↔ version en ligne, et brouillon local. */
+@Serializable
+data class GitInfo(
+    val available: Boolean = false,
+    val branch: String? = null,
+    @SerialName("repo_url") val repoUrl: String? = null,
+    val sync: GitSync? = null,
+    val workdir: GitWorkdir? = null,
+)
+
+/** Aperçu brouillon (local, jamais publié). */
+@Serializable
+data class PreviewStatus(
+    val status: String = "stopped",
+    @SerialName("preview_url") val previewUrl: String? = null,
+    @SerialName("public_ok") val publicOk: Boolean? = null,
+) {
+    val running: Boolean get() = status == "running" || status == "ready"
+}
 
 @Serializable
 data class AgentMessage(

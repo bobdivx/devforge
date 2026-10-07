@@ -6,6 +6,12 @@ import app.jeser.devforge.ui.login.LoginScreen
 import app.jeser.devforge.ui.login.LoginUiState
 import app.jeser.devforge.ui.project.ProjectActions
 import app.jeser.devforge.ui.project.ProjectScreen
+import app.jeser.devforge.ui.project.ProjectSheet
+import app.jeser.devforge.ui.project.RuntimeLogsState
+import app.jeser.devforge.ui.project.LogsState
+import app.jeser.devforge.ui.components.LocalLoadRemoteIcons
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import app.jeser.devforge.ui.theme.DevForgeTheme
 import app.jeser.devforge.ui.HomeRootPreview
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
@@ -53,43 +59,87 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
         captureScreenRoboImage("$dir/$name-$device.png")
     }
 
+    @Composable
+    private fun Shot(content: @Composable () -> Unit) {
+        DevForgeTheme { CompositionLocalProvider(LocalLoadRemoteIcons provides false) { content() } }
+    }
+
     @Test fun login() {
-        compose.setContent { DevForgeTheme { LoginScreen(LoginUiState(), {}, {}, {}) } }
+        compose.setContent { Shot { LoginScreen(LoginUiState(), {}, {}, {}) } }
         shot("login")
     }
 
     @Test fun apps() {
-        compose.setContent { DevForgeTheme { HomeRootPreview(apps = SampleData.apps, project = SampleData.project) } }
+        compose.setContent { Shot { HomeRootPreview(SampleData.apps) } }
         shot("apps")
     }
 
-    @Test fun projectChat() {
-        compose.setContent {
-            DevForgeTheme { ProjectScreen(SampleData.project, ProjectActions(onBack = {})) }
-        }
-        shot("project-chat")
+    @Test fun appsInbox() {
+        compose.setContent { Shot { HomeRootPreview(SampleData.apps, initialInboxOpen = true) } }
+        shot("apps-inbox-sheet")
     }
 
-    @Test fun notificationPrompt() {
-        compose.setContent {
-            DevForgeTheme {
-                HomeRootPreview(apps = SampleData.apps, project = SampleData.project)
-                app.jeser.devforge.ui.components.NotificationPrompt({}, {})
-            }
-        }
-        shot("notif-prompt")
+    @Test fun appsStopConfirm() {
+        compose.setContent { Shot { HomeRootPreview(SampleData.apps, initialStopConfirm = "p-pop") } }
+        shot("apps-stop-confirm")
+    }
+
+    @Test fun project() {
+        compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {})) } }
+        shot("project")
+    }
+
+    @Test fun projectStatusSheet() {
+        compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Status) } }
+        shot("project-status-sheet")
+    }
+
+    @Test fun projectTeamSheet() {
+        compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Team) } }
+        shot("project-team-sheet")
+    }
+
+    @Test fun projectLogs() {
+        val st = SampleData.project.copy(
+            runtimeLogs = RuntimeLogsState(
+                text = (1..40).joinToString("\n") { "2026-10-07T12:${10 + it % 50}:00Z GET /api/health 200 ${3 + it % 7}ms" },
+                loading = false,
+            ),
+            logs = LogsState(
+                SampleData.deployments.first(),
+                text = "> npm run build\nnpm ERR! Missing script: \"build\"\nnpm ERR! To see a list of scripts, run:\nnpm ERR!   npm run",
+                loading = false,
+            ),
+        )
+        compose.setContent { Shot { ProjectScreen(st, ProjectActions(onBack = {})) } }
+        shot("project-logs")
+    }
+
+    @Test fun restartConfirm() {
+        compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Restart) } }
+        shot("restart-confirm")
     }
 
     @Test fun deployConfirm() {
         compose.setContent {
-            DevForgeTheme {
+            Shot {
                 ProjectScreen(
                     SampleData.project.copy(deployments = SampleData.deployments.drop(1)),
                     ProjectActions(onBack = {}),
-                    initialDeployConfirm = true,
+                    initialSheet = ProjectSheet.Deploy,
                 )
             }
         }
         shot("deploy-confirm")
+    }
+
+    @Test fun notificationPrompt() {
+        compose.setContent {
+            Shot {
+                HomeRootPreview(SampleData.apps)
+                app.jeser.devforge.ui.components.NotificationPrompt({}, {})
+            }
+        }
+        shot("notif-prompt")
     }
 }

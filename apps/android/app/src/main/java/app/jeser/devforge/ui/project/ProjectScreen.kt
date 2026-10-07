@@ -1,86 +1,68 @@
 package app.jeser.devforge.ui.project
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.TabRowDefaults
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.VerticalDivider
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.material.icons.automirrored.filled.Subject
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.RocketLaunch
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.jeser.devforge.data.AppStatus
+import app.jeser.devforge.data.ContainerState
 import app.jeser.devforge.data.Deployment
 import app.jeser.devforge.data.SpecFeature
+import app.jeser.devforge.data.Tone
+import app.jeser.devforge.data.syncLabel
 import app.jeser.devforge.ui.apps.hostOf
+import app.jeser.devforge.ui.components.AppIcon
+import app.jeser.devforge.ui.components.ConfirmActionSheet
 import app.jeser.devforge.ui.components.Persona
 import app.jeser.devforge.ui.components.PersonaAvatar
 import app.jeser.devforge.ui.components.PersonaMessage
-import app.jeser.devforge.ui.components.StatusPill
+import app.jeser.devforge.ui.components.TileBg
+import app.jeser.devforge.ui.components.TileLabel
+import app.jeser.devforge.ui.components.color
+import app.jeser.devforge.ui.components.persona
 import app.jeser.devforge.ui.components.relativeTime
+import app.jeser.devforge.ui.components.restartConfirm
+import app.jeser.devforge.ui.components.stopConfirm
 import app.jeser.devforge.ui.markdown.MarkdownText
 import app.jeser.devforge.ui.theme.DfColors
 
@@ -96,24 +78,31 @@ data class ProjectActions(
     val onDecideSpec: (Boolean) -> Unit = {},
     val onCreateSpec: (String, String, () -> Unit) -> Unit = { _, _, _ -> },
     val onNoticeShown: () -> Unit = {},
+    val onLifecycle: (String) -> Unit = {},
+    val onOpenRuntimeLogs: () -> Unit = {},
+    val onRefreshRuntimeLogs: () -> Unit = {},
+    val onCloseRuntimeLogs: () -> Unit = {},
+    val onOpenPreview: () -> Unit = {},
+    val onUrlOpened: () -> Unit = {},
 )
+
+/** Feuilles de la page app (une seule ouverte à la fois). */
+enum class ProjectSheet { None, Status, Deploys, Domain, Team, Stop, Restart, Deploy, NewFeature }
 
 private data class Chip(val key: String, val label: String, val danger: Boolean = false)
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ProjectScreen(
     state: ProjectUiState,
     actions: ProjectActions,
     modifier: Modifier = Modifier,
-    initialDeployConfirm: Boolean = false,
-    initialNewFeature: Boolean = false,
+    initialSheet: ProjectSheet = ProjectSheet.None,
 ) {
-    var confirmDeploy by rememberSaveable { mutableStateOf(initialDeployConfirm) }
-    var newFeature by rememberSaveable { mutableStateOf(initialNewFeature) }
+    var sheet by rememberSaveable { mutableStateOf(initialSheet) }
     var input by rememberSaveable { mutableStateOf("") }
-    var tab by rememberSaveable { mutableIntStateOf(0) }
     val snackbar = remember { SnackbarHostState() }
+    val uri = LocalUriHandler.current
 
     LaunchedEffect(state.notice) {
         state.notice?.let {
@@ -121,15 +110,34 @@ fun ProjectScreen(
             actions.onNoticeShown()
         }
     }
+    LaunchedEffect(state.openUrl) {
+        state.openUrl?.let { runCatching { uri.openUri(it) }; actions.onUrlOpened() }
+    }
 
     val project = state.project
+    val summary = state.summary
     Scaffold(
         modifier = modifier,
         containerColor = DfColors.Bg,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text(project?.name ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = {
+                    if (project != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            AppIcon(project.name, project.productionUrl, project.gitRepository, status = null, size = 32.dp)
+                            Column(Modifier.padding(start = 8.dp)) {
+                                Text(project.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    listOfNotNull(summary.status.label, summary.since).joinToString(" · "),
+                                    color = summary.status.color(),
+                                    fontSize = 12.5.sp,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+                },
                 navigationIcon = {
                     actions.onBack?.let { back ->
                         IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour aux apps") }
@@ -155,44 +163,37 @@ fun ProjectScreen(
                     modifier = Modifier.align(Alignment.Center),
                 )
                 else -> BoxWithConstraints(Modifier.fillMaxSize()) {
-                    val wide = maxWidth >= 760.dp
-                    Column(Modifier.fillMaxSize()) {
-                        ProjectHeader(state, onDeploy = { confirmDeploy = true })
-                        if (wide) {
-                            HorizontalDivider(color = DfColors.Line)
-                            Row(Modifier.fillMaxSize()) {
-                                ChatPane(state, input, { input = it }, actions, onNewFeature = { newFeature = true }, modifier = Modifier.weight(1f))
-                                VerticalDivider(color = DfColors.Line)
-                                DeploysPane(state, actions.onOpenLogs, modifier = Modifier.width(320.dp).fillMaxHeight())
-                            }
-                        } else {
-                            TabRow(
-                                selectedTabIndex = tab,
-                                containerColor = DfColors.Bg,
-                                contentColor = DfColors.Ink,
-                                indicator = { pos ->
-                                    TabRowDefaults.SecondaryIndicator(Modifier.tabIndicatorOffset(pos[tab]), color = DfColors.Accent)
-                                },
-                                divider = { HorizontalDivider(color = DfColors.Line) },
+                    val wide = maxWidth >= 900.dp
+                    val onSheet: (ProjectSheet) -> Unit = { sheet = it }
+                    if (wide) {
+                        Row(Modifier.fillMaxSize()) {
+                            Column(
+                                Modifier.width(400.dp).fillMaxHeight().verticalScroll(rememberScrollState())
+                                    .padding(start = 20.dp, end = 16.dp, bottom = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                Tab(selected = tab == 0, onClick = { tab = 0 }, modifier = Modifier.height(48.dp),
-                                    text = { Text("🔥 Braise") })
-                                Tab(selected = tab == 1, onClick = { tab = 1 }, modifier = Modifier.height(48.dp),
-                                    text = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text("Mises en ligne")
-                                            if (state.lastFailed) {
-                                                Spacer(Modifier.width(6.dp))
-                                                Box(Modifier.size(8.dp).background(DfColors.Danger, CircleShape))
-                                            }
-                                        }
-                                    })
+                                StatusTiles(state, columns = 2, onSheet = onSheet)
+                                ActionRow(state, actions, onSheet = onSheet)
+                                RecentDeploys(state, onOpen = actions.onOpenLogs)
                             }
-                            if (tab == 0) {
-                                ChatPane(state, input, { input = it }, actions, onNewFeature = { newFeature = true }, modifier = Modifier.weight(1f))
-                            } else {
-                                DeploysPane(state, actions.onOpenLogs, modifier = Modifier.weight(1f))
+                            VerticalDivider(color = DfColors.Line)
+                            ChatPane(state, input, { input = it }, actions, onNewFeature = { sheet = ProjectSheet.NewFeature }, modifier = Modifier.weight(1f))
+                        }
+                    } else {
+                        // Hauteur réelle du clavier (isImeVisible vaut true tant que les insets ne sont pas connus).
+                        val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+                        val cols = if (maxWidth >= 600.dp) 4 else 2
+                        val side = if (maxWidth >= 600.dp) 24.dp else 16.dp
+                        Column(Modifier.fillMaxSize()) {
+                            // Clavier ouvert : on replie l'état pour laisser la place à la discussion.
+                            AnimatedVisibility(visible = !imeOpen) {
+                                Column(Modifier.padding(horizontal = side), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    StatusTiles(state, columns = cols, onSheet = onSheet)
+                                    ActionRow(state, actions, onSheet = onSheet)
+                                }
                             }
+                            HorizontalDivider(color = DfColors.Line, modifier = Modifier.padding(top = 10.dp))
+                            ChatPane(state, input, { input = it }, actions, onNewFeature = { sheet = ProjectSheet.NewFeature }, modifier = Modifier.weight(1f))
                         }
                     }
                 }
@@ -200,73 +201,284 @@ fun ProjectScreen(
         }
     }
 
-    if (confirmDeploy && project != null) {
-        DeployConfirmSheet(
-            project = project,
-            busy = state.deploying,
-            onDismiss = { confirmDeploy = false },
-            onConfirm = { msg ->
-                actions.onDeploy(msg)
-                confirmDeploy = false
-            },
-        )
+    if (project != null) {
+        val close = { sheet = ProjectSheet.None }
+        when (sheet) {
+            ProjectSheet.Status -> StatusSheet(state, onDismiss = close)
+            ProjectSheet.Deploys -> DeploysSheet(state, onDismiss = close, onOpen = { d -> sheet = ProjectSheet.None; actions.onOpenLogs(d) })
+            ProjectSheet.Domain -> DomainSheet(state, onDismiss = close)
+            ProjectSheet.Team -> TeamSheet(state, onDismiss = close)
+            ProjectSheet.Stop -> ConfirmActionSheet(
+                stopConfirm(project.name, hostOf(project.productionUrl)),
+                busy = state.lifecycleBusy == "stop",
+                onDismiss = close,
+                onConfirm = { actions.onLifecycle("stop"); sheet = ProjectSheet.None },
+            )
+            ProjectSheet.Restart -> ConfirmActionSheet(
+                restartConfirm(project.name),
+                busy = state.lifecycleBusy == "restart",
+                onDismiss = close,
+                onConfirm = { actions.onLifecycle("restart"); sheet = ProjectSheet.None },
+            )
+            ProjectSheet.Deploy -> DeployConfirmSheet(
+                project = project,
+                busy = state.deploying,
+                onDismiss = close,
+                onConfirm = { msg -> actions.onDeploy(msg); sheet = ProjectSheet.None },
+            )
+            ProjectSheet.NewFeature -> NewFeatureSheet(
+                busy = state.creatingSpec,
+                onDismiss = close,
+                onSubmit = { t, d -> actions.onCreateSpec(t, d) { sheet = ProjectSheet.None } },
+            )
+            ProjectSheet.None -> Unit
+        }
     }
-    if (newFeature) {
-        NewFeatureSheet(
-            busy = state.creatingSpec,
-            onDismiss = { newFeature = false },
-            onSubmit = { t, d -> actions.onCreateSpec(t, d) { newFeature = false } },
-        )
+    val askRepair = {
+        actions.onCloseRuntimeLogs(); actions.onCloseLogs(); actions.onSend(ChipText.REPAIR)
     }
-    state.logs?.let { LogsSheet(it, onDismiss = actions.onCloseLogs, onAskRepair = {
-        actions.onCloseLogs(); tab = 0; actions.onSend(ChipText.REPAIR)
-    }) }
+    if (state.runtimeLogs != null) {
+        RuntimeLogsSheet(state, onDismiss = actions.onCloseRuntimeLogs, onRefresh = actions.onRefreshRuntimeLogs, onAskRepair = askRepair)
+    } else {
+        state.logs?.let { LogsSheet(it, onDismiss = actions.onCloseLogs, onAskRepair = askRepair) }
+    }
     state.spec?.let { SpecSheet(it, onDismiss = actions.onCloseSpec, onDecide = actions.onDecideSpec) }
 }
 
+/* ---------------- Tuiles d'état ---------------- */
+
 @Composable
-private fun ProjectHeader(state: ProjectUiState, onDeploy: () -> Unit) {
-    val project = state.project ?: return
-    val uri = LocalUriHandler.current
-    Row(
-        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+private fun InfoTile(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    tone: Color? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        color = TileBg,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, tone?.copy(alpha = .35f) ?: Color.Transparent),
+        modifier = modifier.heightIn(min = 80.dp),
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            StatusPill(project.appStatus)
-            val host = hostOf(project.productionUrl)
-            if (host != null) {
-                Surface(
-                    onClick = { runCatching { uri.openUri(project.productionUrl!!) } },
-                    color = Color.Transparent,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.heightIn(min = 40.dp),
+        Column(
+            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            TileLabel(label)
+            content()
+        }
+    }
+}
+
+@Composable
+private fun TileValue(text: String, color: Color = DfColors.Ink) {
+    Text(text, color = color, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+
+@Composable
+private fun TileSub(text: String, color: Color = DfColors.InkMuted) {
+    Text(text, color = color, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+
+/** État, dernier déploiement, domaine, équipe : un toucher ouvre le détail dans une feuille. */
+@Composable
+fun StatusTiles(state: ProjectUiState, columns: Int, onSheet: (ProjectSheet) -> Unit) {
+    val project = state.project ?: return
+    val summary = state.summary
+    val latest = state.latest
+    val host = hostOf(project.productionUrl)
+    val tiles: List<@Composable (Modifier) -> Unit> = listOf(
+        { m ->
+            InfoTile("État", onClick = { onSheet(ProjectSheet.Status) }, modifier = m,
+                tone = summary.status.color().takeIf { summary.status in setOf(AppStatus.Failed, AppStatus.Down) }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).background(summary.status.color(), CircleShape))
+                    Spacer(Modifier.width(6.dp))
+                    TileValue(summary.status.label, summary.status.color())
+                }
+                val healthShort = if (summary.healthOk == true) "Santé : OK" else summary.health
+                TileSub(summary.since ?: healthShort, if (summary.since == null && summary.healthOk == false) DfColors.Danger else DfColors.InkMuted)
+                if (summary.since != null) {
+                    TileSub(healthShort, if (summary.healthOk == false) DfColors.Danger else DfColors.InkFaint)
+                }
+            }
+        },
+        { m ->
+            val (label, color) = latest?.let { deployLabel(it) } ?: ("Aucune" to DfColors.InkFaint)
+            InfoTile("Dernier déploiement", onClick = { onSheet(ProjectSheet.Deploys) }, modifier = m,
+                tone = DfColors.Danger.takeIf { latest?.isFailed == true }) {
+                TileValue(latest?.gitMessage?.lineSequence()?.firstOrNull()?.takeIf { it.isNotBlank() } ?: if (latest == null) "Pas encore publié" else "Mise en ligne")
+                TileSub(listOfNotNull(label, latest?.let { relativeTime(it.createdAt).takeIf { r -> r.isNotEmpty() } }).joinToString(" · "), color)
+                syncLabel(state.git)?.let { TileSub(it.removePrefix("GitHub : ").replaceFirstChar { c -> c.uppercase() }.let { s -> "GitHub · $s" }, DfColors.InkFaint) }
+            }
+        },
+        { m ->
+            InfoTile("Domaine", onClick = { onSheet(ProjectSheet.Domain) }, modifier = m) {
+                TileValue(host ?: "Pas de domaine", if (host != null) DfColors.Accent else DfColors.InkFaint)
+                TileSub(
+                    when {
+                        host == null -> "Le brouillon reste local"
+                        summary.healthOk == true -> "HTTPS · répond"
+                        summary.healthOk == false -> "HTTPS · ne répond pas"
+                        else -> "HTTPS"
+                    },
+                    if (summary.healthOk == false && host != null) DfColors.Danger else DfColors.InkMuted,
+                )
+            }
+        },
+        { m ->
+            val team = state.team
+            val top = team.firstOrNull { it.tone == Tone.Warn || it.tone == Tone.Danger } ?: team.firstOrNull { it.tone == Tone.Accent }
+            InfoTile("Équipe", onClick = { onSheet(ProjectSheet.Team) }, modifier = m) {
+                Row(horizontalArrangement = Arrangement.spacedBy((-6).dp)) {
+                    team.forEach { PersonaAvatar(it.key.persona(), 24.dp) }
+                }
+                TileSub(
+                    top?.let { "${it.key.persona().displayName} · ${it.label.lowercase()}" } ?: "Tout le monde veille",
+                    top?.tone?.color() ?: DfColors.InkMuted,
+                )
+            }
+        },
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        tiles.chunked(columns).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(IntrinsicSize.Min)) {
+                row.forEach { tile -> tile(Modifier.weight(1f).fillMaxHeight()) }
+                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+/* ---------------- Boutons de contrôle ---------------- */
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ActionButton(
+    icon: ImageVector,
+    label: String,
+    tooltip: String,
+    shortLabel: String = label,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    busy: Boolean = false,
+    tint: Color = DfColors.Ink,
+    filled: Boolean = false,
+) {
+    val alpha = if (enabled) 1f else .38f
+    // Le poids (weight) s'applique à ce Box : TooltipBox ne le transmet pas à son ancre.
+    BoxWithConstraints(modifier) {
+    val narrow = maxWidth < 66.dp
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(tooltip) } },
+        state = rememberTooltipState(),
+    ) {
+        Surface(
+            onClick = onClick,
+            enabled = enabled && !busy,
+            color = Color.Transparent,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).semantics {
+                contentDescription = tooltip
+                role = Role.Button
+            },
+        ) {
+            Column(
+                Modifier.padding(vertical = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Box(
+                    Modifier.size(44.dp).background(
+                        if (filled) tint.copy(alpha = alpha) else tint.copy(alpha = .12f * alpha),
+                        RoundedCornerShape(14.dp),
+                    ),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
-                        Text(host, color = DfColors.Accent, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                        Text("  ↗", color = DfColors.Accent)
+                    if (busy) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = if (filled) DfColors.OnAccent else tint)
+                    } else {
+                        Icon(icon, contentDescription = null, tint = if (filled) DfColors.OnAccent else tint.copy(alpha = alpha), modifier = Modifier.size(22.dp))
                     }
                 }
-            } else {
-                Text("Pas encore en ligne", color = DfColors.InkFaint, style = MaterialTheme.typography.bodySmall)
+                // Libellé court quand la place manque (téléphone 360 dp) ; le libellé complet reste dans l'info-bulle.
+                Text(
+                    if (narrow) shortLabel else label,
+                    color = DfColors.InkMuted.copy(alpha = alpha),
+                    fontSize = 11.sp,
+                    lineHeight = 13.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                )
             }
         }
-        Spacer(Modifier.width(12.dp))
-        Button(
-            onClick = onDeploy,
-            enabled = state.canDeploy,
-            modifier = Modifier.heightIn(min = 48.dp),
-            shape = RoundedCornerShape(14.dp),
-        ) {
-            when {
-                state.deploying || state.latest?.isRunning == true -> {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = DfColors.OnAccent)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Déploiement…")
-                }
-                else -> Text("🚀 Mettre en ligne")
-            }
+    }
+}
+}
+
+/** Contrôle de l'app : ouvrir, aperçu, redémarrer, arrêter / démarrer, logs, mettre en ligne. */
+@Composable
+fun ActionRow(state: ProjectUiState, actions: ProjectActions, onSheet: (ProjectSheet) -> Unit) {
+    val project = state.project ?: return
+    val uri = LocalUriHandler.current
+    val c = state.containerState
+    val running = c.running
+    val url = project.productionUrl?.split(',')?.firstOrNull()?.trim()
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        val m = Modifier.weight(1f)
+        ActionButton(
+            Icons.AutoMirrored.Filled.OpenInNew, "Ouvrir", "Ouvrir le site en ligne",
+            onClick = { url?.let { runCatching { uri.openUri(if (it.startsWith("http")) it else "https://$it") } } },
+            enabled = !url.isNullOrBlank(), modifier = m,
+        )
+        ActionButton(
+            Icons.Filled.Visibility, "Aperçu", "Aperçu du brouillon (local, rien n'est publié)",
+            onClick = actions.onOpenPreview, busy = state.previewStarting, modifier = m,
+        )
+        ActionButton(
+            Icons.Filled.RestartAlt, "Redémarrer", "Redémarrer le conteneur (avec confirmation)", shortLabel = "Relancer",
+            onClick = { onSheet(ProjectSheet.Restart) },
+            enabled = state.canControl && running, busy = state.lifecycleBusy == "restart", modifier = m,
+        )
+        if (running || state.lifecycleBusy == "stop") {
+            ActionButton(
+                Icons.Filled.Stop, "Arrêter", "Arrêter l'app (avec confirmation)",
+                onClick = { onSheet(ProjectSheet.Stop) },
+                enabled = state.canControl, busy = state.lifecycleBusy == "stop", tint = DfColors.Danger, modifier = m,
+            )
+        } else {
+            ActionButton(
+                Icons.Filled.PlayArrow, "Démarrer", "Démarrer l'app",
+                onClick = { actions.onLifecycle("start") },
+                enabled = state.canControl && c.kind != ContainerState.Kind.Missing,
+                busy = state.lifecycleBusy == "start", tint = DfColors.Ok, modifier = m,
+            )
         }
+        ActionButton(
+            Icons.AutoMirrored.Filled.Subject, "Logs", "Logs de l'app et de la dernière mise en ligne",
+            onClick = actions.onOpenRuntimeLogs, modifier = m,
+        )
+        ActionButton(
+            Icons.Filled.RocketLaunch, "Mettre en ligne", "Reconstruire depuis GitHub et publier (avec confirmation)",
+            onClick = { onSheet(ProjectSheet.Deploy) },
+            enabled = state.canDeploy, busy = state.deploying || state.latest?.isRunning == true,
+            tint = DfColors.Accent, filled = true, modifier = m,
+        )
+    }
+}
+
+@Composable
+private fun RecentDeploys(state: ProjectUiState, onOpen: (Deployment) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Dernières mises en ligne", style = MaterialTheme.typography.titleSmall, color = DfColors.InkMuted)
+        if (state.deployments.isEmpty()) {
+            Text("Pas encore de mise en ligne. Le brouillon reste local.", color = DfColors.InkFaint, style = MaterialTheme.typography.bodyMedium)
+        }
+        state.deployments.take(6).forEach { d -> DeployRow(d, onClick = { onOpen(d) }) }
     }
 }
 
@@ -505,26 +717,7 @@ private fun SpecWaitingCard(f: SpecFeature, onOpen: () -> Unit) {
 }
 
 @Composable
-private fun DeploysPane(state: ProjectUiState, onOpen: (Deployment) -> Unit, modifier: Modifier = Modifier) {
-    LazyColumn(
-        modifier = modifier,
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        item(key = "title") {
-            Text("Dernières mises en ligne", style = MaterialTheme.typography.titleSmall, color = DfColors.InkMuted)
-        }
-        if (state.deployments.isEmpty()) {
-            item(key = "none") {
-                Text("Pas encore de mise en ligne. Le brouillon reste local.", color = DfColors.InkFaint, style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-        items(state.deployments.take(15), key = { it.uuid }) { d -> DeployRow(d, onClick = { onOpen(d) }) }
-    }
-}
-
-@Composable
-private fun DeployRow(d: Deployment, onClick: () -> Unit) {
+fun DeployRow(d: Deployment, onClick: () -> Unit) {
     val (label, color) = deployLabel(d)
     Surface(
         onClick = onClick,

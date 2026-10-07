@@ -180,6 +180,37 @@ class ApiClient(
         DataEnvelope.serializer(Deployment.serializer()),
     ).data
 
+    /** État du conteneur (lecture seule). */
+    suspend fun containerStatus(uuid: String): ContainerStatus =
+        get("/projects/${enc(uuid)}/status", DataEnvelope.serializer(ContainerStatus.serializer())).data
+
+    /** Démarrer / Arrêter / Redémarrer : mêmes routes que le web. Arrêter et Redémarrer passent par une confirmation. */
+    suspend fun lifecycle(uuid: String, action: String): LifecycleResult {
+        require(action in setOf("start", "stop", "restart")) { "action inconnue" }
+        return send(
+            "POST",
+            "/projects/${enc(uuid)}/lifecycle/${enc(action)}",
+            buildJsonObject { },
+            DataEnvelope.serializer(LifecycleResult.serializer()),
+        ).data
+    }
+
+    suspend fun runtimeLogs(uuid: String, tail: Int = 200): RuntimeLogs =
+        get("/projects/${enc(uuid)}/runtime-logs?tail=$tail", DataEnvelope.serializer(RuntimeLogs.serializer())).data
+
+    suspend fun git(uuid: String): GitInfo = get("/projects/${enc(uuid)}/git", GitInfo.serializer())
+
+    suspend fun preview(uuid: String): PreviewStatus =
+        get("/projects/${enc(uuid)}/preview", DataEnvelope.serializer(PreviewStatus.serializer())).data
+
+    /** Lance l'aperçu brouillon (local) : rien n'est publié. */
+    suspend fun startPreview(uuid: String): PreviewStatus = send(
+        "POST",
+        "/projects/${enc(uuid)}/preview/start",
+        buildJsonObject { },
+        DataEnvelope.serializer(PreviewStatus.serializer()),
+    ).data
+
     suspend fun agents(uuid: String): List<Agent> =
         get("/projects/${enc(uuid)}/agents", DataEnvelope.serializer(ListSerializer(Agent.serializer()))).data
 

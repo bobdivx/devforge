@@ -1886,6 +1886,19 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         }
     }
 
+    /// Logs d’exécution du conteneur (lecture seule), tronqués côté serveur.
+    pub async fn runtime_logs(&self, project: &ProjectTestContext, tail: u32) -> Value {
+        let name = Self::container_name(&project.project_uuid);
+        let cmd = docker::docker_runtime_logs(&name, tail);
+        match self.run_lifecycle(project, &cmd).await {
+            Ok(r) => {
+                let logs = truncate_runtime_logs(&r.output, 96 * 1024);
+                json!({"ok": r.ok, "container": name, "logs": logs})
+            }
+            Err(e) => json!({"ok": false, "error": e.to_string(), "logs": ""}),
+        }
+    }
+
     pub async fn status(&self, project: &ProjectTestContext) -> DeployStatus {
         let name = Self::container_name(&project.project_uuid);
         let cmd = docker::docker_ps_status(&name);
@@ -2023,5 +2036,46 @@ mod tests {
         assert_eq!(out["ok"], true);
         assert_eq!(out["exit_code"], 0);
         assert!(out["output"].as_str().unwrap().contains("passed"));
+    }
+}
+
+/// Garde la fin des logs (les lignes récentes) sous `max` octets, sans couper un caractère.
+pub fn truncate_runtime_logs(raw: &str, max: usize) -> String {
+    if raw.len() <= max {
+        return raw.to_string();
+    }
+    let mut start = raw.len() - max;
+    while !raw.is_char_boundary(start) {
+        start += 1;
+    }
+    let tail = &raw[start..];
+    match tail.find('\n') {
+        Some(i) => tail[i + 1..].to_string(),
+        None => tail.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod runtime_logs_tests {
+    use super::*;
+
+    #[test]
+    fn keeps_recent_lines_only() {
+        let raw = (0..100)
+            .map(|i| format!("ligne {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let out = truncate_runtime_logs(&raw, 40);
+        assert!(out.len() <= 40);
+        assert!(out.ends_with("ligne 99"));
+        assert!(out.starts_with("ligne "));
+        assert_eq!(truncate_runtime_logs("court", 40), "court");
+    }
+
+    #[test]
+    fn runtime_logs_command_is_escaped_and_clamped() {
+        let cmd = docker::docker_runtime_logs("devforge-abc", 5000);
+        assert!(cmd.contains("--tail 1000"));
+        assert!(cmd.contains("devforge-abc"));
     }
 }
