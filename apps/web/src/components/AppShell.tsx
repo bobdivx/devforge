@@ -33,6 +33,8 @@ type Props = {
   /** Contenu sous le titre (ex. bandeau activité). */
   belowTitle?: ComponentChildren;
   actions?: ComponentChildren;
+  /** Largeur max-w-7xl sans sous-nav (page projet simple, deux colonnes). */
+  wide?: boolean;
   skipAuth?: boolean;
 };
 
@@ -257,6 +259,7 @@ function ShellInner({
   description,
   belowTitle,
   actions,
+  wide = false,
 }: Props) {
   const onNodePage =
     typeof window !== 'undefined' && window.location.pathname.startsWith('/app/node');
@@ -383,7 +386,7 @@ function ShellInner({
           class={cn(
             'mx-auto flex min-h-screen px-4 pt-4 lg:px-6',
             // Plus d’air quand le menu projet est présent (évite le chevauchement)
-            nav ? 'max-w-7xl gap-6 lg:gap-10' : 'max-w-6xl gap-6 lg:gap-8',
+            nav ? 'max-w-7xl gap-6 lg:gap-10' : wide ? 'max-w-7xl gap-6 lg:gap-8' : 'max-w-6xl gap-6 lg:gap-8',
           )}
         >
           <aside

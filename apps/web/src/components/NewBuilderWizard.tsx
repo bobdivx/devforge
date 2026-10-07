@@ -85,7 +85,7 @@ export function NewBuilderWizard({
         tone: 'ok',
       });
       const specQ = slug ? `&spec=${encodeURIComponent(slug)}` : '';
-      window.location.href = `/app/projects/view?uuid=${encodeURIComponent(res.data.project.uuid)}&tab=overview${specQ}`;
+      window.location.href = `/app/projects/view?uuid=${encodeURIComponent(res.data.project.uuid)}${specQ}`;
     } catch (err: unknown) {
       const msg = String((err as Error).message || err);
       setError(msg);

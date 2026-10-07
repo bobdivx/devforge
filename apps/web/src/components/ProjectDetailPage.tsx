@@ -9,6 +9,7 @@ import { AppIcon, statusDotClass } from './AppIcon';
 import { AppShell } from './AppShell';
 import { ModelSentence } from './ModelSentence';
 import { ProjectAgentsHub } from './ProjectAgentsHub';
+import { ProjectHome } from './ProjectHome';
 import { ProjectSpecsModal } from './ProjectSpecsModal';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
@@ -49,6 +50,7 @@ import {
 } from './ui';
 
 type Tab =
+  | 'home'
   | 'overview'
   | 'workspace'
   | 'deployments'
@@ -66,11 +68,13 @@ type Props = { uuid?: string; tab?: Tab };
 
 function readQuery(): { uuid: string; tab: Tab; builder?: boolean; agent?: string; spec?: string } {
   if (typeof window === 'undefined') {
-    return { uuid: '', tab: 'overview' };
+    return { uuid: '', tab: 'home' };
   }
   const q = new URLSearchParams(window.location.search);
-  const tab = (q.get('tab') as Tab) || 'overview';
+  // Sans ?tab : page simple (conversation avec Braise). Les anciens ?tab= restent valides.
+  const tab = (q.get('tab') as Tab) || 'home';
   const allowed: Tab[] = [
+    'home',
     'overview',
     'workspace',
     'deployments',
@@ -86,7 +90,7 @@ function readQuery(): { uuid: string; tab: Tab; builder?: boolean; agent?: strin
   ];
   return {
     uuid: q.get('uuid') || '',
-    tab: allowed.includes(tab) ? tab : 'overview',
+    tab: allowed.includes(tab) ? tab : 'home',
     builder: q.get('builder') === '1',
     agent: q.get('agent') || undefined,
     spec: q.get('spec') || undefined,
@@ -228,6 +232,7 @@ export function ProjectDetailPage(props: Props) {
   }, [uuid, deployments]);
 
   const titles: Record<string, string> = {
+    home: project?.name ?? 'Projet',
     overview: project?.name ?? 'Projet',
     workspace: 'Espace de travail',
     deployments: 'Déploiements',
@@ -243,6 +248,48 @@ export function ProjectDetailPage(props: Props) {
   };
 
   const navOpts = { workspace: workspaceBeta };
+  const isHome = tab === 'home';
+
+  if (isHome) {
+    return (
+      <AppShell active="projects" sideNavLabel="" wide>
+        {error && (
+          <Alert tone="warn" class="mb-4">
+            {error}
+          </Alert>
+        )}
+        <ProjectHome
+          uuid={uuid}
+          project={project}
+          deployments={deployments}
+          loading={loading}
+          onDeployments={(d) => setDeployments(d)}
+          onNewFeature={() => setFeatureOpen(true)}
+          onOpenRules={() => setRulesModalOpen(true)}
+          groupSwitcher={
+            project?.group_uuid ? (
+              <GroupSiblingSwitcher
+                projectUuid={uuid}
+                groupUuid={project.group_uuid}
+                groupName={project.group_name}
+              />
+            ) : null
+          }
+        />
+        <ProjectRulesModal
+          open={rulesModalOpen}
+          onClose={() => setRulesModalOpen(false)}
+          projectUuid={uuid}
+          projectName={project?.name}
+        />
+        <ProjectSpecsModal
+          projectUuid={uuid}
+          open={featureOpen}
+          onClose={() => setFeatureOpen(false)}
+        />
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell
@@ -570,7 +617,7 @@ function GroupSiblingSwitcher({
                   key={m.project_uuid}
                   role="option"
                   aria-selected={current}
-                  href={`/app/projects/view?uuid=${encodeURIComponent(m.project_uuid)}&tab=overview`}
+                  href={`/app/projects/view?uuid=${encodeURIComponent(m.project_uuid)}`}
                   class={cn(
                     'flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs transition-colors',
                     current

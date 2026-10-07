@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
+import { useEffect, useId, useRef, useState } from 'preact/hooks';
 import { MessageSquare, Plus, Share2 } from 'lucide-preact';
 import { api, type ProjectAgent } from '../lib/api';
 import {
@@ -184,8 +185,35 @@ function storeThread(projectUuid: string, agentUuid: string) {
   }
 }
 
+/** Suggestion cliquable au-dessus du champ (envoie, préremplit ou action locale). */
+export type ChatChip = {
+  key: string;
+  label: string;
+  send?: string;
+  prefill?: string;
+  onClick?: () => void;
+  tone?: 'default' | 'danger';
+};
+
+/**
+ * Habillage « personnage » du fil principal (Braise) : pas de liste de fils,
+ * pas de jargon, avatar + suggestions toujours visibles.
+ */
+export type ChatPersona = {
+  name: string;
+  title: string;
+  tagline: string;
+  avatar: ComponentChildren;
+  smallAvatar: ComponentChildren;
+  placeholder: string;
+  emptyText: string;
+  chips: ChatChip[];
+};
+
 type Props = {
   projectUuid: string;
+  /** Fil principal présenté comme un personnage (page projet simple). */
+  persona?: ChatPersona;
   defaultAgentUuid?: string;
   builderMode?: boolean;
   /** `threads` = workspace style Cursor ; `team` = liste Ops/Deploy/Reviewer */
@@ -201,8 +229,10 @@ export function ProjectAgentsPanel({
   builderMode,
   mode = 'team',
   embedded = false,
+  persona,
 }: Props) {
-  const threadsMode = mode === 'threads';
+  const threadsMode = mode === 'threads' || !!persona;
+  const inputId = useId();
   const toast = useToast();
   const [agents, setAgents] = useState<ProjectAgent[]>([]);
   const [threads, setThreads] = useState<ProjectAgent[]>([]);
@@ -320,7 +350,9 @@ export function ProjectAgentsPanel({
         setThreads(nextThreads);
 
         const remembered = readStoredThread(projectUuid);
+        const coordinatorUuid = nextThreads.find((a) => a.role === 'coordinator')?.uuid;
         const pick =
+          (persona && coordinatorUuid) ||
           (preferUuid && nextThreads.some((a) => a.uuid === preferUuid) && preferUuid) ||
           (selected && nextThreads.some((a) => a.uuid === selected) && selected) ||
           (defaultAgentUuid && nextThreads.some((a) => a.uuid === defaultAgentUuid)
@@ -333,7 +365,7 @@ export function ProjectAgentsPanel({
           nextThreads[0]?.uuid ||
           null;
         setSelected(pick);
-        if (pick) storeThread(projectUuid, pick);
+        if (pick && !persona) storeThread(projectUuid, pick);
         if (nextThreads.find((a) => a.uuid === pick)?.status === 'working') {
           setPollEnabled(true);
         }
@@ -502,7 +534,7 @@ export function ProjectAgentsPanel({
 
   useEffect(() => {
     if (selected) {
-      storeThread(projectUuid, selected);
+      if (!persona) storeThread(projectUuid, selected);
       void loadMessages(selected);
     } else setMessages([]);
   }, [selected, projectUuid]);
@@ -668,6 +700,27 @@ export function ProjectAgentsPanel({
     void sendText(input);
   }
 
+  function onChip(chip: ChatChip) {
+    if (chip.onClick) {
+      chip.onClick();
+      return;
+    }
+    if (chip.send) {
+      void sendText(chip.send);
+      return;
+    }
+    if (chip.prefill !== undefined) {
+      setInput(chip.prefill);
+      window.setTimeout(() => {
+        const el = document.getElementById(inputId) as HTMLInputElement | null;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(el.value.length, el.value.length);
+        }
+      }, 0);
+    }
+  }
+
   const chatHeaderTitle = threadsMode
     ? (current ? threadLabel(current) : 'Chat')
     : currentMeta?.label || 'Agent';
@@ -791,7 +844,7 @@ export function ProjectAgentsPanel({
     </Card>
   );
 
-  const mobileThreadBar = threadsMode ? (
+  const mobileThreadBar = threadsMode && !persona ? (
     <div class={cn('mb-2 flex shrink-0 items-center gap-2', !embedded && 'lg:hidden')}>
       <div class="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div class="flex w-max gap-1">
@@ -849,6 +902,23 @@ export function ProjectAgentsPanel({
           )}
         >
           <div class="flex items-center justify-between gap-2 border-b border-[var(--color-line)] px-4 py-3">
+            {persona ? (
+              <div class="flex min-w-0 items-center gap-3">
+                {persona.avatar}
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="truncate text-[15px] font-semibold tracking-tight">{persona.name}</span>
+                    <span class="rounded-full border border-[var(--color-line)] bg-white/[0.04] px-2 py-0.5 text-[11px] text-[var(--color-ink-muted)]">
+                      {persona.title}
+                    </span>
+                    {current?.status === 'working' && !busy && (
+                      <Badge tone="accent">Au travail…</Badge>
+                    )}
+                  </div>
+                  <p class="mt-0.5 truncate text-xs text-[var(--color-ink-faint)]">{persona.tagline}</p>
+                </div>
+              </div>
+            ) : (
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="truncate font-medium tracking-tight">{chatHeaderTitle}</span>
@@ -860,6 +930,7 @@ export function ProjectAgentsPanel({
                 <p class="mt-0.5 truncate text-xs text-[var(--color-ink-faint)]">{chatHeaderBlurb}</p>
               )}
             </div>
+            )}
             <div class="flex shrink-0 items-center gap-1">
               <Button
                 type="button"
@@ -909,7 +980,15 @@ export function ProjectAgentsPanel({
           )}
 
           <div class="flex-1 space-y-3 overflow-y-auto p-4">
-            {messages.length === 0 && (
+            {messages.length === 0 && persona && (
+              <div class="flex items-start gap-2.5">
+                {persona.smallAvatar}
+                <p class="max-w-[92%] rounded-2xl rounded-tl-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-ink)]">
+                  {persona.emptyText}
+                </p>
+              </div>
+            )}
+            {messages.length === 0 && !persona && (
               <div class="space-y-3">
                 <p class="text-sm text-[var(--color-ink-muted)]">
                   {threadsMode
@@ -938,7 +1017,9 @@ export function ProjectAgentsPanel({
                     {m.content}
                   </div>
                 ) : (
-                  <>
+                  <div class={cn(persona && 'flex items-start gap-2.5')}>
+                    {persona && <div class="pt-0.5">{persona.smallAvatar}</div>}
+                    <div class={cn(persona && 'min-w-0 flex-1 space-y-2')}>
                     {m.reflections && m.reflections.length > 0 && (
                       <AgentReflectionList items={m.reflections} />
                     )}
@@ -1012,7 +1093,8 @@ export function ProjectAgentsPanel({
                         </div>
                       </Card>
                     )}
-                  </>
+                    </div>
+                  </div>
                 )}
               </div>
             ))}
@@ -1030,11 +1112,38 @@ export function ProjectAgentsPanel({
             <div ref={endRef} />
           </div>
 
-          <form class="flex min-w-0 gap-2 border-t border-[var(--color-line)] p-3" onSubmit={onSubmit}>
+          {persona && persona.chips.length > 0 && (
+            <div class="flex shrink-0 flex-wrap gap-2 border-t border-[var(--color-line)] px-3 pt-3">
+              {persona.chips.map((chip) => (
+                <button
+                  key={chip.key}
+                  type="button"
+                  disabled={busy || (!chip.onClick && !selected)}
+                  class={cn(
+                    'rounded-full border px-3 py-1.5 text-xs transition disabled:opacity-50',
+                    chip.tone === 'danger'
+                      ? 'border-[var(--color-danger)]/35 bg-[var(--color-danger)]/10 text-[var(--color-danger)] hover:bg-[var(--color-danger)]/15'
+                      : 'border-[var(--color-line-strong)] bg-white/[0.03] text-[var(--color-ink)] hover:bg-white/[0.07]',
+                  )}
+                  onClick={() => onChip(chip)}
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <form
+            class={cn(
+              'flex min-w-0 gap-2 p-3',
+              !(persona && persona.chips.length > 0) && 'border-t border-[var(--color-line)]',
+            )}
+            onSubmit={onSubmit}
+          >
             <div class="min-w-0 flex-1">
               <Input
+                id={inputId}
                 value={input}
-                placeholder={threadsMode ? 'Message…' : current ? `Message pour ${chatHeaderTitle}…` : 'Message…'}
+                placeholder={persona ? persona.placeholder : threadsMode ? 'Message…' : current ? `Message pour ${chatHeaderTitle}…` : 'Message…'}
                 onInput={(ev) => setInput((ev.target as HTMLInputElement).value)}
                 disabled={busy || !selected}
               />
