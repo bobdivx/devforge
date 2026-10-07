@@ -272,3 +272,31 @@ fun iconInitials(name: String): String {
     if (parts.size >= 2) return (parts[0].take(1) + parts[1].take(1)).uppercase()
     return name.take(2).uppercase().ifEmpty { "?" }
 }
+
+private val ANSI = Regex("\u001B\\[[0-9;?]*[A-Za-z]|\u001B\\][^\u0007]*\u0007")
+private const val TS = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z "
+private val DOCKER_TS = Regex("^(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2})(?:\\.\\d+)?Z ")
+private val INLINE_TS = Regex("(?<=[^\\n])(?=$TS)")
+private val LOG_TS_FORMAT = java.time.format.DateTimeFormatter.ofPattern("dd/MM HH:mm:ss")
+
+/**
+ * Rend des logs lisibles sur un téléphone : retire les codes couleur ANSI, applique les retours
+ * chariot comme un terminal (on garde ce qui reste affiché), supprime les lignes vides et
+ * raccourcit l'horodatage Docker (« 2026-10-06T12:26:09.465Z ») en heure locale (« 06/10 14:26:09 »).
+ */
+fun cleanLogs(raw: String, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String =
+    raw.replace(ANSI, "").replace("\r\n", "\n").replace(INLINE_TS, "\n")
+        .split('\n')
+        .mapNotNull { line ->
+            val m = DOCKER_TS.find(line)
+            val body = (if (m != null) line.substring(m.range.last + 1) else line)
+                .split('\r').lastOrNull { it.isNotBlank() }?.trimEnd()
+                ?: return@mapNotNull null
+            if (m == null) return@mapNotNull body
+            val stamp = runCatching {
+                java.time.LocalDateTime.parse(m.groupValues[1]).atZone(java.time.ZoneOffset.UTC)
+                    .withZoneSameInstant(zone).format(LOG_TS_FORMAT)
+            }.getOrDefault(m.groupValues[1])
+            "$stamp  $body"
+        }
+        .joinToString("\n")

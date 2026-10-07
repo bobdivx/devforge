@@ -16,6 +16,10 @@ import app.jeser.devforge.ui.theme.DevForgeTheme
 import app.jeser.devforge.ui.HomeRootPreview
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.captureScreenRoboImage
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -79,30 +83,32 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
         shot("apps-inbox-sheet")
     }
 
-    @Test fun appsStopConfirm() {
-        compose.setContent { Shot { HomeRootPreview(SampleData.apps, initialStopConfirm = "p-pop") } }
-        shot("apps-stop-confirm")
-    }
-
     @Test fun project() {
         compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {})) } }
         shot("project")
+        // La discussion garde l'essentiel de l'écran : en-tête (barre + bande d'état) ≤ 30 % de la hauteur.
+        if (!device.endsWith("land")) {
+            val root = compose.onRoot().getBoundsInRoot()
+            val chatTop = compose.onNodeWithTag("chat").getBoundsInRoot().top
+            val h = (root.bottom - root.top).value
+            assertTrue("en-tête trop haut : $chatTop sur $h dp", chatTop.value <= h * 0.30f)
+        }
     }
 
-    @Test fun projectStatusSheet() {
-        compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Status) } }
-        shot("project-status-sheet")
+    @Test fun projectDetailsSheet() {
+        compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Details) } }
+        shot("project-details-sheet")
     }
 
-    @Test fun projectTeamSheet() {
-        compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Team) } }
-        shot("project-team-sheet")
+    @Test fun projectMoreSheet() {
+        compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {}), initialSheet = ProjectSheet.More) } }
+        shot("project-more-sheet")
     }
 
     @Test fun projectLogs() {
         val st = SampleData.project.copy(
             runtimeLogs = RuntimeLogsState(
-                text = (1..40).joinToString("\n") { "2026-10-07T12:${10 + it % 50}:00Z GET /api/health 200 ${3 + it % 7}ms" },
+                text = (1..40).joinToString("\n") { "2026-10-07T12:${10 + it % 50}:00.123456789Z \u001B[32mGET\u001B[39m /api/health 200 ${3 + it % 7}ms" },
                 loading = false,
             ),
             logs = LogsState(
