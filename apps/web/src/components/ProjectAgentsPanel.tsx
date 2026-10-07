@@ -551,10 +551,38 @@ export function ProjectAgentsPanel({
     return () => window.removeEventListener('devforge:chat-cleared', onCleared);
   }, [selected]);
 
+  /** Suit le bas du fil seulement si l'utilisateur y est déjà (il peut remonter lire sans être ramené). */
+  const stickToBottom = useRef(true);
+  const lastScrollSig = useRef('');
   useEffect(() => {
     const box = scrollRef.current;
-    if (box) box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+    if (!box) return;
+    // Le polling (1 s pendant qu'un agent travaille) recrée le tableau à chaque tick :
+    // on ne défile que si le contenu a réellement changé.
+    const last = messages[messages.length - 1];
+    const sig = [
+      messages.length,
+      last?.content.length ?? 0,
+      last?.toolCalls?.length ?? 0,
+      thinking ?? '',
+      thinkDetail ?? '',
+      liveActions.length,
+      liveReflections.length,
+    ].join('|');
+    if (sig === lastScrollSig.current) return;
+    const first = lastScrollSig.current === '';
+    lastScrollSig.current = sig;
+    // Message que l'on vient d'envoyer : toujours le montrer.
+    if (!first && !stickToBottom.current && last?.role !== 'user') return;
+    // Seule la zone des messages défile, jamais la page (sinon l'écran saute sur mobile).
+    box.scrollTo({ top: box.scrollHeight, behavior: first ? 'auto' : 'smooth' });
   }, [messages, thinking, liveActions, liveReflections, thinkDetail]);
+
+  useEffect(() => {
+    // Nouveau fil : repartir en bas.
+    lastScrollSig.current = '';
+    stickToBottom.current = true;
+  }, [selected]);
 
   async function clearChat() {
     if (!selected) return;
@@ -996,7 +1024,14 @@ export function ProjectAgentsPanel({
             </Alert>
           )}
 
-          <div ref={scrollRef} class="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4">
+          <div
+            ref={scrollRef}
+            class="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4"
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            }}
+          >
             {messages.length === 0 && persona && (
               <div class="flex items-start gap-2.5">
                 {persona.smallAvatar}
