@@ -1,0 +1,2 @@
+{"data":[{"enabled":1,"instructions":"","kind":"required","last_run_at":"","name":"Coordinateur","next_run_at":"","parent_agent_uuid":null,"project_uuid":"b58ec34c-0000-0000-0000-000000000002","role":"coordinator","status":"idle","trigger_config":"{}","trigger_type":"system","updated_at":"2026-09-29T09:23:06.248724738+00:00","uuid":"agent-coord"},
+{"enabled":1,"name":"Deploy","role":"deploy","status":"idle","uuid":"agent-deploy"}]}

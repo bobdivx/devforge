@@ -10,6 +10,8 @@ export function OAuthConsentPage() {
   const [req, setReq] = useState<ConsentRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Retour vers une app native : lien de secours si le navigateur ne suit pas le schéma. */
+  const [appLink, setAppLink] = useState<string | null>(null);
   const requestId =
     typeof window !== 'undefined'
       ? new URLSearchParams(window.location.search).get('request') || ''
@@ -44,6 +46,7 @@ export function OAuthConsentPage() {
     setError(null);
     try {
       const r = approve ? await api.oauthApprove(requestId) : await api.oauthDeny(requestId);
+      if (!/^https?:/i.test(r.redirect_to)) setAppLink(r.redirect_to);
       window.location.href = r.redirect_to;
     } catch (e) {
       setError(String((e as Error).message || e));
@@ -52,6 +55,7 @@ export function OAuthConsentPage() {
   }
 
   const appName = req?.client_name || 'Cette application';
+  const wantsApi = (req?.scope || '').split(/\s+/).includes('api');
 
   return (
     <div class="flex min-h-screen items-center justify-center px-4 py-12">
@@ -59,6 +63,18 @@ export function OAuthConsentPage() {
         <Card class="shadow-[0_24px_80px_rgb(0_0_0/0.35)]">
           {error ? (
             <Alert tone="danger">{error}</Alert>
+          ) : appLink ? (
+            <div class="space-y-4 py-2 text-center">
+              <p class="text-sm text-[var(--color-ink-muted)]">
+                C’est autorisé. Retourne dans l’application pour continuer.
+              </p>
+              <a
+                href={appLink}
+                class="inline-flex min-h-11 items-center justify-center rounded-xl bg-[var(--color-accent)] px-5 text-sm font-semibold text-zinc-950"
+              >
+                Ouvrir l’application
+              </a>
+            </div>
           ) : !req ? (
             <div class="flex items-center justify-center gap-3 py-6 text-sm text-[var(--color-ink-muted)]">
               <Spinner />
@@ -78,6 +94,12 @@ export function OAuthConsentPage() {
               <ul class="space-y-2 text-sm text-[var(--color-ink-muted)]">
                 <li>• Lister et inspecter tes projets, déploiements et logs.</li>
                 <li>• Utiliser les outils DevForge (fichiers, déploiements, santé des apps).</li>
+                {wantsApi && (
+                  <li>
+                    • Piloter DevForge depuis cette application comme sur le web : tes apps, la
+                    discussion avec Braise, les mises en ligne et les alertes.
+                  </li>
+                )}
                 <li>• Accès révocable à tout moment dans Compte → Tokens.</li>
               </ul>
               {req.redirect_host && (

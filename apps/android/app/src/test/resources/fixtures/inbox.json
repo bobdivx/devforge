@@ -1,0 +1,4 @@
+{"data":{"events":[{"id":"spec:p1:001-contact","kind":"spec_waiting","project_uuid":"p1","project_name":"Vigie","title":"Braise attend ton OK · Vigie","body":"« Page contact » est prête.","created_at":"2026-10-07T09:00:00+00:00"},
+{"id":"deploy:d-9","kind":"deploy_failed","project_uuid":"p2","project_name":"Boutique","title":"Mise en ligne échouée · Boutique","body":"npm ERR!","created_at":"2026-10-07T08:00:00+00:00"},
+{"id":"down:p3:unhealthy","kind":"app_down","project_uuid":"p3","project_name":"Tesla","title":"Tesla ne répond plus","body":"…","created_at":"2026-10-07T10:00:00+00:00"}],
+"projects":[{"uuid":"p1","name":"Vigie","status":"live"}],"since":"2026-10-06T10:00:00+00:00","server_time":"2026-10-07T10:00:00+00:00"}}

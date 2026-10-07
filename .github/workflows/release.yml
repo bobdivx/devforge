@@ -184,3 +184,53 @@ jobs:
             --repo "${{ github.repository }}" \
             --title "DevForge ${TAG}" \
             --generate-notes
+
+  # APK Android signé, joint à la page GitHub Release créée par le job docker.
+  android:
+    needs: [prepare, docker]
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Clé de signature
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${KEYSTORE_B64}" ]]; then
+            echo "${KEYSTORE_B64}" | base64 -d > "${RUNNER_TEMP}/release.jks"
+            echo "DEVFORGE_KEYSTORE_FILE=${RUNNER_TEMP}/release.jks" >> "$GITHUB_ENV"
+            echo "APK_SUFFIX=" >> "$GITHUB_ENV"
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 absent : APK signé avec la clé debug"
+            echo "APK_SUFFIX=-debug-signed" >> "$GITHUB_ENV"
+          fi
+      - name: Build APK release
+        working-directory: apps/android
+        env:
+          DEVFORGE_VERSION: ${{ needs.prepare.outputs.version }}
+          DEVFORGE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          DEVFORGE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          DEVFORGE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon :app:assembleRelease
+      - name: Joindre l'APK à la release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="${{ needs.prepare.outputs.tag }}"
+          SRC=apps/android/app/build/outputs/apk/release/app-release.apk
+          cp "$SRC" "DevForge-Android-${VERSION}${APK_SUFFIX}.apk"
+          # Nom stable : …/releases/latest/download/DevForge-Android.apk
+          cp "$SRC" "DevForge-Android${APK_SUFFIX}.apk"
+          gh release upload "$TAG" "DevForge-Android-${VERSION}${APK_SUFFIX}.apk" "DevForge-Android${APK_SUFFIX}.apk" \
+            --repo "${{ github.repository }}" --clobber
+          rm -f "${RUNNER_TEMP}/release.jks"

@@ -5,6 +5,14 @@ const SERVER_BASE =
   import.meta.env.PUBLIC_API_URL ??
   'http://127.0.0.1:8000/api/v1';
 
+/** URL absolue d'une route publique de l'API (lien de téléchargement, image). */
+export function publicApiUrl(path: string): string {
+  const base = SERVER_BASE.replace(/\/$/, '');
+  if (/^https?:/i.test(base)) return `${base}${path}`;
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  return `${origin}${base}${path}`;
+}
+
 /** Démarre le login OIDC de DevForge (même origine en prod, API en dev). */
 export function ssoAuthorizeUrl(): string {
   const origin = SERVER_BASE.replace(/\/$/, '').replace(/\/api\/v1$/, '');
@@ -729,6 +737,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  /** App Android : APK servi par l'instance (même version que le serveur si possible). */
+  androidInfo: () =>
+    request<{
+      data: {
+        available: boolean;
+        version: string | null;
+        server_version: string;
+        matches_server: boolean;
+        size_bytes: number | null;
+        file_name: string | null;
+        download_path: string;
+        min_android: string;
+      };
+    }>('/android'),
   oauthRequest: (id: string) =>
     request<{
       client_id: string;

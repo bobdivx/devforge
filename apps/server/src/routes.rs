@@ -3757,7 +3757,7 @@ async fn site_reach(state: &AppState, project: &Project) -> &'static str {
 
 /// Statut depuis Postgres uniquement (dernier déploiement + status stocké).
 /// Pas de probe HTTP/Docker — pour list/get project instantanés.
-async fn resolve_project_status_db(state: &AppState, project: &Project) -> Result<String, ApiError> {
+pub(crate) async fn resolve_project_status_db(state: &AppState, project: &Project) -> Result<String, ApiError> {
     let latest: Option<(String,)> = sqlx::query_as(
         "SELECT status FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1",
     )
@@ -3796,7 +3796,7 @@ async fn resolve_project_status_db(state: &AppState, project: &Project) -> Resul
 }
 
 /// Statut avec probe live (HTTP public ou Docker). Lent — réservé à ?live=1.
-async fn resolve_project_status_live(state: &AppState, project: &Project) -> Result<String, ApiError> {
+pub(crate) async fn resolve_project_status_live(state: &AppState, project: &Project) -> Result<String, ApiError> {
     let latest: Option<(String,)> = sqlx::query_as(
         "SELECT status FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1",
     )

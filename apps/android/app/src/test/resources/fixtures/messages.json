@@ -1,0 +1,4 @@
+{"data":[{"agent_uuid":"agent-coord","content":"Est-ce que l'application utilise bien la base ?","created_at":"2026-09-29T09:22:54.619139608+00:00","project_uuid":"p","provider":"","role":"user","tool_calls_json":"[]","uuid":"m-1"},
+{"agent_uuid":"agent-coord","content":"Oui, **Vigie** utilise bien la base. Voir `DATABASE_URL`.","created_at":"2026-09-29T09:23:06.248724738+00:00","project_uuid":"p","provider":"chain:A>B","role":"assistant","tool_calls_json":"[{\"name\":\"list_env_vars\",\"arguments\":{\"project\":\"p\"},\"result\":{\"count\":3}}]","uuid":"m-2"},
+{"agent_uuid":"agent-coord","content":"Voici le plan.","created_at":"2026-09-29T09:30:00+00:00","role":"assistant","tool_calls_json":"[{\"name\":\"propose_plan\",\"arguments\":{},\"result\":{\"plan\":{\"title\":\"Page contact\",\"steps\":[\"Créer la page\"]}}}]","uuid":"m-3"},
+{"content":"cassé","role":"assistant","tool_calls_json":"{pas du json","uuid":"m-4"}]}

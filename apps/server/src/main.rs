@@ -24,7 +24,9 @@ mod group_routes;
 mod infra_routes;
 mod infra_sqlite;
 mod llm_routes;
+mod android_routes;
 mod mcp_oauth;
+mod mobile_routes;
 mod mcp_routes;
 mod paths;
 mod platform_sso;
@@ -340,6 +342,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(update_routes::router())
         .merge(cron_routes::router())
         .merge(spec_routes::router())
+        .merge(mobile_routes::router())
+        .merge(android_routes::router())
         .merge(cluster_routes::router())
         .merge(worker::exec_route())
         .route("/", get(auth_routes::marketing_home))
