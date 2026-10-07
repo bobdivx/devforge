@@ -304,7 +304,12 @@ export function ProjectHome({
 
   const chips: ChatChip[] = [
     { key: 'feature', label: '✨ Nouvelle fonctionnalité', onClick: onNewFeature },
-    { key: 'health', label: '🩺 Est-ce que tout va bien ?', send: 'Est-ce que tout va bien ?' },
+    {
+      key: 'health',
+      label: '🩺 Est-ce que tout va bien ?',
+      // Bilan en lecture seule : la puce ne doit jamais déclencher de modification.
+      send: 'Est-ce que tout va bien ? Fais juste un bilan rapide (app en ligne, dernière mise en ligne, brouillon), sans rien modifier.',
+    },
     {
       key: 'design',
       label: '🎨 Améliore le design',
@@ -347,7 +352,7 @@ export function ProjectHome({
   }
 
   return (
-    <FadeIn>
+    <FadeIn class="df-tap">
       {/* En-tête */}
       <div class="mb-4 flex flex-col gap-4 sm:mb-5 sm:flex-row sm:items-center">
         <div class="flex min-w-0 items-center gap-3.5">
@@ -372,19 +377,20 @@ export function ProjectHome({
                   href={liveUrl}
                   target="_blank"
                   rel="noreferrer"
-                  class="inline-flex min-w-0 items-center gap-1 truncate text-[var(--color-accent)] hover:underline"
+                  class="inline-flex min-w-0 max-w-full items-center gap-1 text-[var(--color-accent)] hover:underline"
                 >
-                  {liveUrl.replace(/^https?:\/\//, '')}
-                  <ExternalLink size={12} aria-hidden />
+                  <span class="truncate">{liveUrl.replace(/^https?:\/\//, '')}</span>
+                  <ExternalLink size={12} class="shrink-0" aria-hidden />
                 </a>
               )}
             </div>
           </div>
         </div>
-        <div class="flex flex-wrap gap-2 sm:ml-auto">
+        <div class="grid grid-cols-[1fr_1fr_auto] gap-2 sm:ml-auto sm:flex sm:shrink-0">
           <Button
             size="sm"
             variant="secondary"
+            class="max-lg:h-11 max-lg:text-[13px]"
             onClick={() => {
               if (shownUrl) setFullOpen(true);
               else if (liveUrl) {
@@ -401,6 +407,7 @@ export function ProjectHome({
           </Button>
           <Button
             size="sm"
+            class="max-lg:h-11 max-lg:text-[13px]"
             disabled={!canDeploy || deployBusy || isInProgress(current?.status)}
             title={canDeploy ? 'Reconstruire et mettre en ligne depuis GitHub' : 'Relie d’abord un dépôt GitHub'}
             onClick={() => setConfirmOpen(true)}
@@ -408,9 +415,16 @@ export function ProjectHome({
             {deployBusy || isInProgress(current?.status) ? <Spinner /> : <Rocket size={14} aria-hidden />}
             {isInProgress(current?.status) ? 'Mise en ligne…' : 'Mettre en ligne'}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setAdvancedOpen(true)}>
-            <Settings2 size={14} aria-hidden />
-            Réglages avancés
+          <Button
+            size="sm"
+            variant="ghost"
+            class="max-lg:h-11 max-sm:w-11 max-sm:px-0 max-sm:ring-1 max-sm:ring-inset max-sm:ring-[var(--color-line-strong)]"
+            onClick={() => setAdvancedOpen(true)}
+            aria-label="Réglages avancés"
+            title="Réglages avancés"
+          >
+            <Settings2 size={16} aria-hidden />
+            <span class="hidden sm:inline">Réglages avancés</span>
           </Button>
         </div>
       </div>
@@ -418,7 +432,7 @@ export function ProjectHome({
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-5">
         {/* Conversation avec Braise */}
         <section
-          class="h-[72dvh] min-h-[480px] min-w-0 lg:h-[calc(100dvh-10.5rem)] lg:min-h-[560px]"
+          class="h-[max(380px,calc(100dvh-24rem-env(safe-area-inset-bottom,0px)))] min-w-0 lg:h-[calc(100dvh-10.5rem)] lg:min-h-[560px]"
           aria-label="Conversation avec Braise"
         >
           <ProjectAgentsPanel
@@ -455,7 +469,7 @@ export function ProjectHome({
                     role="tab"
                     aria-selected={effectiveView === key}
                     class={cn(
-                      'rounded-full px-2.5 py-0.5 text-[11.5px] font-medium transition',
+                      'rounded-full px-2.5 py-0.5 text-[11.5px] font-medium transition max-lg:px-4 max-lg:text-[13px]',
                       effectiveView === key
                         ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
                         : 'text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]',
@@ -467,7 +481,7 @@ export function ProjectHome({
                 ))}
               </div>
             </div>
-            <div class="h-[240px] overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-bg-elevated)]">
+            <div class="h-[300px] overflow-hidden rounded-xl lg:h-[240px] border border-[var(--color-line)] bg-[var(--color-bg-elevated)]">
               {shownUrl ? (
                 <PreviewPane
                   key={`${effectiveView}-${nonce}`}
@@ -507,11 +521,11 @@ export function ProjectHome({
           </div>
 
           <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-3.5">
-            <h2 class="mb-1.5 flex items-center justify-between text-xs font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-muted)]">
+            <h2 class="mb-1.5 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-muted)]">
               L’équipe de {name}
               <a
                 href={tabHref(uuid, 'agents')}
-                class="text-[11px] font-normal normal-case tracking-normal text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]"
+                class="inline-flex items-center justify-end text-[11px] font-normal normal-case tracking-normal text-[var(--color-ink-faint)] hover:text-[var(--color-ink)] max-lg:text-[13px]"
               >
                 Gérer
               </a>
@@ -525,12 +539,12 @@ export function ProjectHome({
                   <PersonaAvatar persona={m.persona.key} size={32} />
                   <div class="min-w-0 flex-1 leading-tight">
                     <div class="text-[13.5px] font-semibold">{m.persona.name}</div>
-                    <div class="truncate text-xs text-[var(--color-ink-faint)]">{m.detail || m.persona.role}</div>
+                    <div class="line-clamp-2 text-xs text-[var(--color-ink-faint)] lg:line-clamp-none lg:truncate">{m.detail || m.persona.role}</div>
                   </div>
                   {m.persona.key === 'braise' && m.label === 'Attend ton OK' ? (
                     <button
                       type="button"
-                      class="flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-warn)]/30 bg-[var(--color-warn)]/10 px-2 py-0.5 text-[11.5px] text-[var(--color-warn)] hover:bg-[var(--color-warn)]/15"
+                      class="flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-warn)]/30 bg-[var(--color-warn)]/10 px-2 py-0.5 text-[11.5px] text-[var(--color-warn)] hover:bg-[var(--color-warn)]/15 max-lg:px-3 max-lg:text-[13px]"
                       onClick={onNewFeature}
                       title="Lire le plan et l’approuver"
                     >
@@ -564,7 +578,7 @@ export function ProjectHome({
               </dl>
               <button
                 type="button"
-                class="mt-3 w-full text-center text-[11px] text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]"
+                class="mt-2 w-full text-center text-[11px] text-[var(--color-ink-faint)] hover:text-[var(--color-ink)] max-lg:text-xs"
                 onClick={() => setAdvancedOpen(true)}
               >
                 Adresse, variables, base, sauvegardes… → Réglages avancés
@@ -587,12 +601,13 @@ export function ProjectHome({
         title={`Mettre ${name} en ligne ?`}
         description="DevForge reconstruit l’app depuis GitHub puis remplace la version en ligne."
         size="sm"
+        class="df-tap"
         footer={
-          <div class="flex justify-end gap-2">
-            <Button size="sm" variant="ghost" disabled={deployBusy} onClick={() => setConfirmOpen(false)}>
+          <div class="flex w-full gap-2 sm:justify-end">
+            <Button size="sm" variant="ghost" class="max-sm:flex-1 max-lg:h-11" disabled={deployBusy} onClick={() => setConfirmOpen(false)}>
               Annuler
             </Button>
-            <Button size="sm" disabled={deployBusy} onClick={() => void deployNow()}>
+            <Button size="sm" class="max-sm:flex-1 max-lg:h-11" disabled={deployBusy} onClick={() => void deployNow()}>
               {deployBusy ? <Spinner /> : <Rocket size={14} aria-hidden />}
               Mettre en ligne
             </Button>
@@ -764,13 +779,15 @@ function AdvancedSettingsModal({
       title={`Réglages avancés · ${name}`}
       description="Tout ce dont tu n’as pas besoin au quotidien. Chaque tuile ouvre sa page."
       size="xl"
+      fullOnMobile
+      class="df-tap"
       footer={
-        <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
-          <a href={tabHref(uuid, 'overview')} class="inline-flex items-center gap-1.5 text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]">
+        <div class="flex w-full flex-wrap items-center justify-between gap-2 text-xs">
+          <a href={tabHref(uuid, 'overview')} class="inline-flex items-center gap-1.5 text-[var(--color-ink-faint)] hover:text-[var(--color-ink)] max-lg:text-[13px]">
             <LayoutDashboard size={13} aria-hidden />
             Ancien tableau de bord
           </a>
-          <a href={tabHref(uuid, 'settings', '&section=danger')} class="text-[var(--color-danger)] hover:underline">
+          <a href={tabHref(uuid, 'settings', '&section=danger')} class="inline-flex items-center text-[var(--color-danger)] hover:underline max-lg:text-[13px]">
             Supprimer l’app…
           </a>
         </div>
@@ -803,12 +820,13 @@ function AdvancedSettingsModal({
         title="Effacer toute la conversation ?"
         description={`Tout l’historique avec Braise sur ${name} sera supprimé définitivement. Le code, les specs et l’app en ligne ne sont pas touchés.`}
         size="sm"
+        class="df-tap"
         footer={
-          <div class="flex justify-end gap-2">
-            <Button size="sm" variant="ghost" disabled={clearing} onClick={() => setClearOpen(false)}>
+          <div class="flex w-full gap-2 sm:justify-end">
+            <Button size="sm" variant="ghost" class="max-sm:flex-1 max-lg:h-11" disabled={clearing} onClick={() => setClearOpen(false)}>
               Annuler
             </Button>
-            <Button size="sm" variant="danger" disabled={clearing} onClick={() => void clearConversation()}>
+            <Button size="sm" variant="danger" class="max-sm:flex-1 max-lg:h-11" disabled={clearing} onClick={() => void clearConversation()}>
               {clearing ? <Spinner /> : <Eraser size={14} aria-hidden />}
               Effacer tout l’historique
             </Button>

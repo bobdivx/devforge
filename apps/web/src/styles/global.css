@@ -501,3 +501,32 @@ pre {
   }
 }
 
+
+/*
+ * Cibles tactiles ≥ 44 px sous lg (téléphone, tablette) dans les zones marquées .df-tap.
+ * Les liens en ligne dans un paragraphe ne sont pas concernés (min-height ignoré en inline).
+ */
+@media (max-width: 1023.98px) {
+  .df-tap :is(button, a[href], [role='tab'], [role='button'], select):not(.df-tap-skip, [role='switch']) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* Interrupteurs : on garde le dessin, on agrandit la zone de toucher. */
+  .df-tap [role='switch']::after {
+    content: '';
+    position: absolute;
+    inset: -10px -2px;
+  }
+  /* Clavier ouvert : le dock bas s'efface pour ne pas couvrir la zone de saisie. */
+  body:has(:is(input:not([type='checkbox'], [type='radio'], [type='range']), textarea, [contenteditable='true']):focus) .df-dock {
+    display: none;
+  }
+  /* Scroll horizontal propre (chips) : pas de barre visible. */
+  .df-scroll-x {
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .df-scroll-x::-webkit-scrollbar {
+    display: none;
+  }
+}
