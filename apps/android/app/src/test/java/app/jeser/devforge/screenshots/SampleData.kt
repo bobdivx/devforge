@@ -1,6 +1,13 @@
 package app.jeser.devforge.screenshots
 
+import app.jeser.devforge.data.Agent
+import app.jeser.devforge.data.ContainerStatus
 import app.jeser.devforge.data.DeployCard
+import app.jeser.devforge.data.GitFile
+import app.jeser.devforge.data.GitInfo
+import app.jeser.devforge.data.GitSync
+import app.jeser.devforge.data.GitWorkdir
+import app.jeser.devforge.data.PreviewStatus
 import app.jeser.devforge.data.Deployment
 import app.jeser.devforge.data.InboxEvent
 import app.jeser.devforge.data.Me
@@ -20,6 +27,7 @@ object SampleData {
         gitRepository = "https://github.com/bobdivx/Vigie", gitBranch = "main",
         deploy = DeployCard("success", "9b620d0", "Landing commerciale publique"), updatedAt = ago(42),
     )
+
     val projects = listOf(
         vigie,
         Project("p-shop", "Boutique de Léa", status = "failed", productionUrl = "https://boutique.jeser.app",
@@ -28,7 +36,9 @@ object SampleData {
             gitRepository = "https://github.com/x/tesla", deploy = DeployCard("running", "77aa001", "Nouveau tableau de bord"), updatedAt = ago(2)),
         Project("p-pop", "popcornn", status = "live", productionUrl = "https://client.popcornn.app",
             gitRepository = "https://github.com/x/pop", deploy = DeployCard("success", "ae471f0", "Merge pull request #41"), updatedAt = ago(60 * 20)),
-        Project("p-studio", "template-studio", status = "draft", updatedAt = ago(60 * 24 * 3)),
+        Project("p-studio", "template-studio", status = "stopped", productionUrl = "https://template-studio.jeser.app",
+            gitRepository = "https://github.com/x/template-studio", updatedAt = ago(60 * 24 * 3)),
+        Project("p-draft", "Carnet de recettes", status = "draft", updatedAt = ago(60 * 24)),
         Project("p-meteo", "Météo du jardin", status = "unhealthy", productionUrl = "https://meteo.jeser.app",
             gitRepository = "https://github.com/x/meteo", deploy = DeployCard("success", "1234567", "Graphiques"), updatedAt = ago(60 * 5)),
     )
@@ -72,7 +82,21 @@ object SampleData {
         ),
     )
 
+    val agents = listOf(
+        Agent("a-1", "Coordinateur", "coordinator", status = "idle"),
+        Agent("a-2", "Ops", "ops"), Agent("a-3", "Deploy", "deploy"),
+        Agent("a-4", "Reviewer", "reviewer"),
+        Agent("a-5", "Réparation", "custom", kind = "custom", triggerType = "event", triggerConfig = "{\"event\":\"deploy_fail\"}"),
+    )
+
     val project = ProjectUiState(
+        container = ContainerStatus("running", true, "Up 26 hours (healthy)"),
+        checkedAt = ago(0),
+        git = GitInfo(true, "main", "https://github.com/bobdivx/Vigie", GitSync("up_to_date", 0, 0, "9b620d0"),
+            GitWorkdir(true, true, listOf(GitFile("M", "src/pages/contact.astro"), GitFile("M", "src/styles.css")))),
+        agents = agents,
+        specs = listOf(SpecFeature("001-contact", "Page contact", "awaiting_validation", updatedAt = ago(7))),
+        preview = PreviewStatus("stopped", "https://dev-vigie.jeser.app"),
         uuid = "p-vigie",
         project = vigie,
         deployments = deployments,

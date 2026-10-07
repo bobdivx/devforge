@@ -495,6 +495,15 @@ fn container_name_ok(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
+/// Dernières lignes des logs d’exécution du conteneur (stdout + stderr, horodatées).
+pub fn docker_runtime_logs(name: &str, tail: u32) -> String {
+    let tail = tail.clamp(1, 1000);
+    format!(
+        "docker logs --tail {tail} --timestamps {} 2>&1",
+        shell_escape(name)
+    )
+}
+
 pub fn docker_ps_status(name: &str) -> String {
     format!(
         "docker ps -a --filter name={} --format '{{{{.Status}}}}'",

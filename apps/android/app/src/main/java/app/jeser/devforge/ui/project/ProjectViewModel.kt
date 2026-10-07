@@ -5,11 +5,21 @@ import androidx.lifecycle.viewModelScope
 import app.jeser.devforge.AppGraph
 import app.jeser.devforge.data.ApiClient
 import app.jeser.devforge.data.ApiException
+import app.jeser.devforge.data.Agent
 import app.jeser.devforge.data.AgentMessage
+import app.jeser.devforge.data.ContainerState
+import app.jeser.devforge.data.ContainerStatus
 import app.jeser.devforge.data.Deployment
+import app.jeser.devforge.data.GitInfo
+import app.jeser.devforge.data.LiveSummary
+import app.jeser.devforge.data.PersonaStatus
+import app.jeser.devforge.data.PreviewStatus
 import app.jeser.devforge.data.Project
 import app.jeser.devforge.data.SpecFeature
 import app.jeser.devforge.data.UnauthorizedException
+import app.jeser.devforge.data.liveSummary
+import app.jeser.devforge.data.parseContainerStatus
+import app.jeser.devforge.data.teamStatus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +36,9 @@ data class ChatItem(
     val createdAt: String? = null,
     val hasPlan: Boolean = false,
 )
+
+/** Logs d'exécution de l'app (conteneur), lecture seule. */
+data class RuntimeLogsState(val text: String? = null, val loading: Boolean = true, val error: String? = null)
 
 data class LogsState(val deployment: Deployment, val text: String? = null, val loading: Boolean = true, val error: String? = null)
 data class SpecState(val feature: SpecFeature, val markdown: String? = null, val loading: Boolean = true, val deciding: Boolean = false, val error: String? = null)
@@ -48,10 +61,27 @@ data class ProjectUiState(
     val logs: LogsState? = null,
     val spec: SpecState? = null,
     val creatingSpec: Boolean = false,
+    /** État Docker (rafraîchi toutes les 10 s quand l'écran est ouvert). */
+    val container: ContainerStatus? = null,
+    val checkedAt: String? = null,
+    val git: GitInfo? = null,
+    val agents: List<Agent> = emptyList(),
+    val specs: List<SpecFeature> = emptyList(),
+    val preview: PreviewStatus? = null,
+    val previewStarting: Boolean = false,
+    /** Action start / stop / restart en cours. */
+    val lifecycleBusy: String? = null,
+    val runtimeLogs: RuntimeLogsState? = null,
+    /** Lien à ouvrir une fois (aperçu prêt). */
+    val openUrl: String? = null,
 ) {
     val latest: Deployment? get() = deployments.firstOrNull()
     val lastFailed: Boolean get() = latest?.isFailed == true
     val canDeploy: Boolean get() = !project?.gitRepository.isNullOrBlank() && latest?.isRunning != true && !deploying
+    val containerState: ContainerState get() = parseContainerStatus(container)
+    val summary: LiveSummary get() = liveSummary(project, containerState, latest)
+    val team: List<PersonaStatus> get() = teamStatus(agents, specs, latest)
+    val canControl: Boolean get() = containerState.exists && lifecycleBusy == null && latest?.isRunning != true
 }
 
 object ChipText {
@@ -87,8 +117,12 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
                 _state.update { it.copy(project = detail.project, deployments = detail.deployments.ifEmpty { it.deployments }, loading = false) }
                 launch { refreshDeployments() }
                 launch { refreshSpecs() }
-                val coord = api.agents(uuid).firstOrNull { it.role == "coordinator" }
-                _state.update { it.copy(coordinatorUuid = coord?.uuid) }
+                launch { refreshContainer() }
+                launch { runCatching { api.git(uuid) }.onSuccess { g -> _state.update { it.copy(git = g) } } }
+                launch { runCatching { api.preview(uuid) }.onSuccess { pv -> _state.update { it.copy(preview = pv) } } }
+                val agents = api.agents(uuid)
+                val coord = agents.firstOrNull { it.role == "coordinator" }
+                _state.update { it.copy(coordinatorUuid = coord?.uuid, agents = agents) }
                 coord?.let { refreshMessages(it.uuid) }
             } catch (e: UnauthorizedException) {
                 _state.update { it.copy(loading = false) }
@@ -115,12 +149,46 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
 
     private suspend fun refreshSpecs() {
         runCatching { api.specs(uuid) }.onSuccess { list ->
-            _state.update { it.copy(waitingSpecs = list.filter { f -> f.awaitingValidation }) }
+            _state.update { it.copy(specs = list, waitingSpecs = list.filter { f -> f.awaitingValidation }) }
+        }
+    }
+
+    private suspend fun refreshContainer() {
+        runCatching { api.containerStatus(uuid) }.onSuccess { c ->
+            val now = java.time.OffsetDateTime.now().toString()
+            _state.update { s -> if (s.container == c) s.copy(checkedAt = now) else s.copy(container = c, checkedAt = now) }
+        }
+    }
+
+    private var statusPoll: Job? = null
+    /** Rafraîchissement rapide après une action (toutes les 2 s pendant ~30 s). */
+    private var fastUntil = 0L
+
+    /** États réels pendant que l'écran est ouvert : conteneur 10 s, sonde HTTP 30 s, GitHub 60 s. */
+    private fun startStatusPolling() {
+        if (statusPoll?.isActive == true) return
+        statusPoll = viewModelScope.launch {
+            var tick = 0
+            while (isActive) {
+                delay(if (System.currentTimeMillis() < fastUntil) 2_000 else 10_000)
+                tick++
+                refreshContainer()
+                if (tick % 3 == 0 || System.currentTimeMillis() < fastUntil) {
+                    runCatching { api.project(uuid, live = true).project }.onSuccess { p ->
+                        _state.update { s -> if (s.project == p) s else s.copy(project = p) }
+                    }
+                }
+                if (tick % 6 == 0) {
+                    runCatching { api.git(uuid) }.onSuccess { g -> _state.update { s -> if (s.git == g) s else s.copy(git = g) } }
+                    runCatching { api.agents(uuid) }.onSuccess { a -> _state.update { s -> if (s.agents == a) s else s.copy(agents = a) } }
+                }
+            }
         }
     }
 
     /** Rafraîchit tant que l'écran est visible : vite pendant une mise en ligne, sinon toutes les 30 s. */
     fun startPolling() {
+        startStatusPolling()
         if (poll?.isActive == true) return
         poll = viewModelScope.launch {
             var tick = 0
@@ -143,7 +211,98 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
 
     fun stopPolling() {
         poll?.cancel()
+        statusPoll?.cancel()
     }
+
+    /**
+     * Démarrer / Arrêter / Redémarrer. Arrêter et Redémarrer n'arrivent ici
+     * qu'après la feuille de confirmation.
+     */
+    fun lifecycle(action: String) {
+        if (_state.value.lifecycleBusy != null) return
+        val name = _state.value.project?.name ?: "L'app"
+        _state.update { it.copy(lifecycleBusy = action) }
+        viewModelScope.launch {
+            val msg = try {
+                val r = api.lifecycle(uuid, action)
+                if (r.ok) when (action) {
+                    "stop" -> "$name est arrêtée."
+                    "start" -> "$name démarre."
+                    else -> "$name redémarre."
+                } else "Action impossible : ${r.error ?: "le serveur a refusé"}"
+            } catch (e: UnauthorizedException) {
+                null
+            } catch (e: ApiException) {
+                "Action impossible : ${e.message}"
+            } catch (e: IOException) {
+                "Action envoyée, vérification en cours…"
+            }
+            fastUntil = System.currentTimeMillis() + 30_000
+            refreshContainer()
+            runCatching { api.project(uuid, live = true).project }.onSuccess { p -> _state.update { it.copy(project = p) } }
+            _state.update { it.copy(lifecycleBusy = null, notice = msg ?: it.notice) }
+        }
+    }
+
+    fun openRuntimeLogs() {
+        _state.update { it.copy(runtimeLogs = RuntimeLogsState()) }
+        refreshRuntimeLogs()
+        // Les logs de la dernière mise en ligne sont dans le même panneau.
+        _state.value.latest?.let { d -> if (_state.value.logs == null) loadDeployLogs(d, open = false) }
+    }
+
+    fun refreshRuntimeLogs() {
+        _state.update { s -> s.copy(runtimeLogs = (s.runtimeLogs ?: RuntimeLogsState()).copy(loading = true, error = null)) }
+        viewModelScope.launch {
+            try {
+                val r = api.runtimeLogs(uuid, 300)
+                _state.update { s ->
+                    s.copy(runtimeLogs = s.runtimeLogs?.copy(text = r.logs, loading = false, error = if (r.ok) null else r.error))
+                }
+            } catch (e: ApiException) {
+                val msg = if (e.code == 404) "Logs de l'app pas encore disponibles sur ce serveur." else e.message
+                _state.update { s -> s.copy(runtimeLogs = s.runtimeLogs?.copy(loading = false, error = msg)) }
+            } catch (e: IOException) {
+                _state.update { s -> s.copy(runtimeLogs = s.runtimeLogs?.copy(loading = false, error = "Pas de connexion à l'instance.")) }
+            }
+        }
+    }
+
+    fun closeRuntimeLogs() = _state.update { it.copy(runtimeLogs = null, logs = null) }
+
+    /** Aperçu brouillon : local, jamais publié. Démarre si besoin puis ouvre le lien. */
+    fun openPreview() {
+        val pv = _state.value.preview
+        if (pv?.running == true && !pv.previewUrl.isNullOrBlank()) {
+            _state.update { it.copy(openUrl = pv.previewUrl) }
+            return
+        }
+        if (_state.value.previewStarting) return
+        _state.update { it.copy(previewStarting = true, notice = "Braise prépare l'aperçu du brouillon…") }
+        viewModelScope.launch {
+            try {
+                var cur = api.startPreview(uuid)
+                repeat(30) {
+                    if (cur.running && !cur.previewUrl.isNullOrBlank()) return@repeat
+                    delay(3_000)
+                    cur = runCatching { api.preview(uuid) }.getOrDefault(cur)
+                }
+                _state.update {
+                    it.copy(
+                        preview = cur,
+                        openUrl = cur.previewUrl?.takeIf { _ -> cur.running },
+                        notice = if (cur.running) null else "L'aperçu met du temps à démarrer. Réessaie dans un instant.",
+                    )
+                }
+            } catch (e: IOException) {
+                _state.update { it.copy(notice = "Aperçu impossible : ${e.message ?: "pas de connexion"}") }
+            } finally {
+                _state.update { it.copy(previewStarting = false) }
+            }
+        }
+    }
+
+    fun urlOpened() = _state.update { it.copy(openUrl = null) }
 
     fun send(text: String) {
         val msg = text.trim()
@@ -203,7 +362,9 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
         }
     }
 
-    fun openLogs(d: Deployment) {
+    fun openLogs(d: Deployment) = loadDeployLogs(d, open = true)
+
+    private fun loadDeployLogs(d: Deployment, @Suppress("UNUSED_PARAMETER") open: Boolean) {
         _state.update { it.copy(logs = LogsState(d)) }
         viewModelScope.launch {
             try {

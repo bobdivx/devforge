@@ -24,6 +24,9 @@ data class AppsUiState(
     val loading: Boolean = true,
     val refreshing: Boolean = false,
     val error: String? = null,
+    /** Apps dont une action démarrer / arrêter est en cours. */
+    val busy: Set<String> = emptySet(),
+    val notice: String? = null,
 )
 
 class AppsViewModel(private val graph: AppGraph) : ViewModel() {
@@ -70,4 +73,26 @@ class AppsViewModel(private val graph: AppGraph) : ViewModel() {
     fun stopPolling() {
         poll?.cancel()
     }
+
+    /** Interrupteur de la tuile. Arrêter n'arrive ici qu'après la feuille de confirmation. */
+    fun setRunning(uuid: String, run: Boolean) {
+        if (uuid in _state.value.busy) return
+        val name = _state.value.projects.firstOrNull { it.uuid == uuid }?.name ?: "L'app"
+        _state.update { it.copy(busy = it.busy + uuid) }
+        viewModelScope.launch {
+            val msg = try {
+                val r = graph.api.lifecycle(uuid, if (run) "start" else "stop")
+                if (r.ok) (if (run) "$name démarre." else "$name est arrêtée.")
+                else "Action impossible : ${r.error ?: "le serveur a refusé"}"
+            } catch (e: ApiException) {
+                "Action impossible : ${e.message}"
+            } catch (e: IOException) {
+                "Action envoyée, vérification en cours…"
+            }
+            runCatching { graph.api.projects() }.onSuccess { list -> _state.update { it.copy(projects = list) } }
+            _state.update { it.copy(busy = it.busy - uuid, notice = msg) }
+        }
+    }
+
+    fun noticeShown() = _state.update { it.copy(notice = null) }
 }

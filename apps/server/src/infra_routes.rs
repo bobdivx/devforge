@@ -50,6 +50,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/projects/{uuid}/preview/start", post(preview_start))
         .route("/api/v1/projects/{uuid}/preview/stop", post(preview_stop))
         .route("/api/v1/projects/{uuid}/status", get(project_status))
+        .route(
+            "/api/v1/projects/{uuid}/runtime-logs",
+            get(project_runtime_logs),
+        )
         .route("/api/v1/system/proxy/status", get(proxy_status))
         .route("/api/v1/system/proxy/restart", post(proxy_restart))
         .route("/api/v1/system/proxy/ensure", post(proxy_ensure))
@@ -757,6 +761,26 @@ async fn project_status(
     let project = auth_project(&state, &headers, &uuid).await?;
     let status = state.deploy.status(&ctx(&project)).await;
     Ok(Json(json!({"data": status})))
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RuntimeLogsQuery {
+    tail: Option<u32>,
+}
+
+/// Logs d’exécution du conteneur (lecture seule) : utilisés par l’app Android (bouton Logs).
+async fn project_runtime_logs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<RuntimeLogsQuery>,
+) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    let project = auth_project(&state, &headers, &uuid).await?;
+    let out = state
+        .deploy
+        .runtime_logs(&ctx(&project), q.tail.unwrap_or(200))
+        .await;
+    Ok(Json(json!({"data": out})))
 }
 
 #[derive(Debug, serde::Serialize, sqlx::FromRow)]
