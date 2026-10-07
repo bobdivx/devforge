@@ -16,12 +16,13 @@ const variants: Record<Variant, string> = {
     'border border-[var(--color-line-strong)] bg-transparent text-[var(--color-ink)] hover:bg-white/5',
 };
 
+/** Sous lg (téléphone, tablette) : cibles tactiles de 44 px minimum. */
 const sizes: Record<Size, string> = {
-  sm: 'h-8 px-3 text-xs rounded-lg',
-  md: 'h-10 px-4 text-sm rounded-xl',
+  sm: 'h-8 px-3 text-xs rounded-lg max-lg:h-11',
+  md: 'h-10 px-4 text-sm rounded-xl max-lg:h-11',
   lg: 'h-11 px-5 text-sm rounded-xl',
   /** Carré au doigt, s’élargit quand le libellé s’affiche. */
-  icon: 'h-8 w-8 shrink-0 p-0 text-xs rounded-lg sm:w-auto sm:gap-1.5 sm:px-2.5',
+  icon: 'h-8 w-8 shrink-0 p-0 text-xs rounded-lg max-lg:h-11 max-sm:w-11 sm:w-auto sm:gap-1.5 sm:px-2.5',
 };
 
 type Props = {

@@ -11,6 +11,7 @@ import { ModelSentence } from './ModelSentence';
 import { ProjectAgentsHub } from './ProjectAgentsHub';
 import { ProjectHome } from './ProjectHome';
 import { StatusBadge } from './StatusBadge';
+import { DeployLogSheet } from './DeployLogSheet';
 import { ProjectSpecsModal } from './ProjectSpecsModal';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
@@ -21,6 +22,7 @@ import { ProjectRulesModal } from './workspace/ProjectRulesModal';
 import { NodeSelect } from './NodeSelect';
 import {
   ChevronDown,
+  ChevronRight,
   Copy,
   ExternalLink,
   FileCode,
@@ -1428,6 +1430,8 @@ function DeploymentsPanel({
   );
   const [logs, setLogs] = useState('');
   const [showAll, setShowAll] = useState(false);
+  /** Téléphone : le journal s'ouvre en plein écran au toucher d'un déploiement. */
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   useEffect(() => {
     setItems(initial);
@@ -1542,7 +1546,57 @@ function DeploymentsPanel({
 
   function selectDeployment(depUuid: string) {
     setSelectedUuid(depUuid);
+    if (window.matchMedia('(max-width: 767px)').matches) setSheetOpen(true);
   }
+
+  const toneDot = (tone: string) =>
+    'h-2 w-2 shrink-0 rounded-full ' +
+    (tone === 'ok'
+      ? 'bg-[var(--color-ok)]'
+      : tone === 'warn'
+        ? 'bg-[var(--color-warn)]'
+        : tone === 'danger'
+          ? 'bg-[var(--color-danger)]'
+          : 'bg-[var(--color-ink-faint)]');
+
+  const stopButton = canStop ? (
+    <Button
+      size="sm"
+      variant="danger"
+      class="max-lg:h-11"
+      disabled={cancelling}
+      onClick={stopSelected}
+      aria-label="Arrêter le déploiement"
+    >
+      {cancelling ? <Spinner /> : <Square size={12} strokeWidth={2.5} aria-hidden />}
+      Arrêter
+    </Button>
+  ) : null;
+
+  const selectedMeta = selected ? (
+    <div class="min-w-0">
+      <div class="flex flex-wrap items-center gap-2">
+        <Badge tone={deployTone(selected.status)}>{selected.status}</Badge>
+        <span class="font-mono text-xs text-[var(--color-ink-muted)]">
+          {selected.git_sha ? selected.git_sha.slice(0, 7) : '—'}
+        </span>
+        <span class="text-xs text-[var(--color-ink-faint)]">{formatWhen(selected.created_at)}</span>
+      </div>
+      {selected.git_message && (
+        <p class="mt-1 text-sm text-[var(--color-ink)] [overflow-wrap:anywhere] md:truncate">
+          {selected.git_message}
+        </p>
+      )}
+      {selected.status === 'queued' && (
+        <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
+          En attente : un autre déploiement occupe déjà ce nœud.
+        </p>
+      )}
+      {selected.error_summary && (
+        <p class="mt-1 text-sm text-[var(--color-danger)] [overflow-wrap:anywhere]">{selected.error_summary}</p>
+      )}
+    </div>
+  ) : null;
 
   return (
     <FadeIn>
@@ -1558,7 +1612,7 @@ function DeploymentsPanel({
                   : `${DEPLOYMENTS_VISIBLE_DEFAULT} visibles sur ${items.length} · en cours d’abord`}
             </p>
           </div>
-          <Button size="sm" variant="secondary" disabled={busy} onClick={deploy}>
+          <Button size="sm" variant="secondary" class="max-lg:h-11" disabled={busy} onClick={deploy}>
             {busy ? <Spinner /> : null}
             Déployer
           </Button>
@@ -1573,8 +1627,9 @@ function DeploymentsPanel({
         ) : (
           <div class="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row lg:items-stretch">
             {/* Strip / sidebar compact — pas une grille de grosses tuiles */}
-            <aside class="flex shrink-0 flex-col gap-2 lg:w-52">
-              <div class="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-x-visible lg:overflow-y-auto lg:max-h-[32rem] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {/* Mobile/tablette : liste verticale (une ligne par déploiement) puis journal. */}
+            <aside class="flex min-w-0 shrink-0 flex-col gap-2 lg:w-52">
+              <div class="flex flex-col gap-2 lg:max-h-[32rem] lg:overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {visible.map((d, index) => {
                   const tone = deployTone(d.status);
                   const sha = d.git_sha ? d.git_sha.slice(0, 7) : '—';
@@ -1584,35 +1639,56 @@ function DeploymentsPanel({
                       key={d.uuid}
                       type="button"
                       onClick={() => selectDeployment(d.uuid)}
+                      aria-current={selectedTile ? 'true' : undefined}
                       class={
-                        'flex min-w-[9.5rem] shrink-0 flex-col gap-1 rounded-xl border px-3 py-2.5 text-left transition lg:min-w-0 ' +
+                        'flex w-full min-w-0 shrink-0 flex-col gap-1 rounded-xl border px-3 py-2.5 text-left transition max-lg:min-h-[56px] max-lg:justify-center ' +
                         (selectedTile
                           ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
                           : 'border-[var(--color-line)] bg-[#1c1c1e] hover:border-[var(--color-line-strong)] hover:bg-[#252528]')
                       }
                       style={{ animationDelay: `${Math.min(index * 0.04, 0.2)}s` }}
                     >
-                      <div class="flex items-center justify-between gap-2">
-                        <span class="font-mono text-xs font-medium text-white">{sha}</span>
-                        <span
-                          class={
-                            'h-2 w-2 shrink-0 rounded-full ' +
-                            (tone === 'ok'
-                              ? 'bg-[var(--color-ok)]'
-                              : tone === 'warn'
-                                ? 'bg-[var(--color-warn)]'
-                                : tone === 'danger'
-                                  ? 'bg-[var(--color-danger)]'
-                                  : 'bg-[var(--color-ink-faint)]')
-                          }
-                        />
+                      {/* Téléphone / tablette : une ligne compacte */}
+                      <div class="flex min-w-0 items-center gap-3 lg:hidden">
+                        <span class={toneDot(tone)} aria-hidden />
+                        <div class="min-w-0 flex-1">
+                          <div class="flex min-w-0 items-center gap-2">
+                            <span class="font-mono text-xs font-medium text-white">{sha}</span>
+                            <Badge tone={tone}>{d.status}</Badge>
+                            <span class="ml-auto shrink-0 text-[11px] text-[var(--color-ink-faint)]">
+                              {formatWhen(d.created_at)}
+                            </span>
+                          </div>
+                          <div class="mt-1 truncate text-xs text-[var(--color-ink-muted)]">
+                            {d.git_message || 'Sans message'}
+                          </div>
+                        </div>
+                        <ChevronRight size={16} class="shrink-0 text-[var(--color-ink-faint)] md:hidden" aria-hidden />
                       </div>
-                      <Badge tone={tone}>{d.status}</Badge>
-                      <div class="line-clamp-1 text-[11px] text-[var(--color-ink-muted)]">
-                        {d.git_message || 'Sans message'}
-                      </div>
-                      <div class="text-[10px] text-[var(--color-ink-faint)]">
-                        {formatWhen(d.created_at)}
+                      {/* Bureau : tuile de la barre latérale */}
+                      <div class="hidden min-w-0 flex-col gap-1 lg:flex">
+                        <div class="flex items-center justify-between gap-2">
+                          <span class="font-mono text-xs font-medium text-white">{sha}</span>
+                          <span
+                            class={
+                              'h-2 w-2 shrink-0 rounded-full ' +
+                              (tone === 'ok'
+                                ? 'bg-[var(--color-ok)]'
+                                : tone === 'warn'
+                                  ? 'bg-[var(--color-warn)]'
+                                  : tone === 'danger'
+                                    ? 'bg-[var(--color-danger)]'
+                                    : 'bg-[var(--color-ink-faint)]')
+                            }
+                          />
+                        </div>
+                        <Badge tone={tone}>{d.status}</Badge>
+                        <div class="line-clamp-1 text-[11px] text-[var(--color-ink-muted)]">
+                          {d.git_message || 'Sans message'}
+                        </div>
+                        <div class="text-[10px] text-[var(--color-ink-faint)]">
+                          {formatWhen(d.created_at)}
+                        </div>
                       </div>
                     </button>
                   );
@@ -1622,7 +1698,7 @@ function DeploymentsPanel({
                 <Button
                   size="sm"
                   variant="ghost"
-                  class="self-start"
+                  class="self-start max-lg:h-11"
                   onClick={() => setShowAll((v) => !v)}
                 >
                   {showAll ? 'Voir moins' : `Voir plus (${hiddenCount})`}
@@ -1631,48 +1707,17 @@ function DeploymentsPanel({
             </aside>
 
             {/* Détail + logs : espace vertical principal */}
-            <Card padding="none" class="flex min-h-[22rem] min-w-0 flex-1 flex-col overflow-hidden">
+            {/* Détail + logs. Téléphone : feuille plein écran (DeployLogSheet). */}
+            <Card padding="none" class="hidden min-h-[22rem] min-w-0 flex-1 flex-col overflow-hidden md:flex">
               {selected ? (
                 <>
                   <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-line)] px-4 py-3">
-                    <div class="min-w-0">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <Badge tone={deployTone(selected.status)}>{selected.status}</Badge>
-                        <span class="font-mono text-xs text-[var(--color-ink-muted)]">
-                          {selected.git_sha ? selected.git_sha.slice(0, 7) : '—'}
-                        </span>
-                        <span class="text-xs text-[var(--color-ink-faint)]">
-                          {formatWhen(selected.created_at)}
-                        </span>
-                      </div>
-                      {selected.git_message && (
-                        <p class="mt-1 truncate text-sm text-[var(--color-ink)]">
-                          {selected.git_message}
-                        </p>
-                      )}
-                      {selected.status === 'queued' && (
-                        <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
-                          En attente : un autre déploiement occupe déjà ce nœud.
-                        </p>
-                      )}
-                      {selected.error_summary && (
-                        <p class="mt-1 text-sm text-[var(--color-danger)]">{selected.error_summary}</p>
-                      )}
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      disabled={!canStop || cancelling}
-                      onClick={stopSelected}
-                      aria-label="Arrêter le déploiement"
-                    >
-                      {cancelling ? <Spinner /> : <Square size={12} strokeWidth={2.5} aria-hidden />}
-                      Arrêter
-                    </Button>
+                    {selectedMeta}
+                    {stopButton}
                   </div>
                   <pre
                     ref={logsRef}
-                    class="min-h-0 flex-1 overflow-auto bg-black/40 p-4 font-mono text-xs whitespace-pre-wrap"
+                    class="min-h-0 max-h-[70dvh] flex-1 overflow-auto overscroll-contain bg-black/40 p-4 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere] lg:max-h-none"
                   >
                     {logs || 'Aucun log disponible.'}
                   </pre>
@@ -1686,6 +1731,14 @@ function DeploymentsPanel({
           </div>
         )}
       </div>
+      <DeployLogSheet
+        open={sheetOpen && !!selected}
+        onClose={() => setSheetOpen(false)}
+        title={selected ? `Déploiement ${selected.git_sha ? selected.git_sha.slice(0, 7) : ''}`.trim() : ''}
+        meta={selectedMeta}
+        actions={stopButton}
+        logs={logs}
+      />
     </FadeIn>
   );
 }
