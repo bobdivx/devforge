@@ -98,12 +98,10 @@ fun AppsScreen(
     state: AppsUiState,
     onRefresh: () -> Unit,
     onOpen: (String) -> Unit,
-    onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
     onNoticeShown: () -> Unit = {},
     initialInboxOpen: Boolean = false,
 ) {
-    var menu by remember { mutableStateOf(false) }
     var inboxOpen by rememberSaveable { mutableStateOf(initialInboxOpen) }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.notice) {
@@ -117,22 +115,6 @@ fun AppsScreen(
             TopAppBar(
                 title = { Text("Tes apps") },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DfColors.Bg),
-                actions = {
-                    Box {
-                        IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Compte") }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            state.me?.let { me ->
-                                DropdownMenuItem(
-                                    text = { Text(me.name?.takeIf { it.isNotBlank() } ?: me.email.orEmpty(), color = DfColors.InkMuted) },
-                                    onClick = {},
-                                    enabled = false,
-                                )
-                            }
-                            DropdownMenuItem(text = { Text("Rafraîchir") }, onClick = { menu = false; onRefresh() })
-                            DropdownMenuItem(text = { Text("Se déconnecter") }, onClick = { menu = false; onSignOut() })
-                        }
-                    }
-                },
             )
         },
     ) { padding ->

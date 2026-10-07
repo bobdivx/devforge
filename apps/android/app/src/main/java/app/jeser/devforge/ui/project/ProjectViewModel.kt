@@ -1,5 +1,8 @@
 package app.jeser.devforge.ui.project
 
+import app.jeser.devforge.data.DeployPlan
+import app.jeser.devforge.data.deployPlan
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.jeser.devforge.AppGraph
@@ -77,6 +80,8 @@ data class ProjectUiState(
 ) {
     val latest: Deployment? get() = deployments.firstOrNull()
     val lastFailed: Boolean get() = latest?.isFailed == true
+    /** Action de mise en ligne adaptée à l'état réel (publier, réessayer, reconstruire). */
+    val deployPlan: DeployPlan get() = deployPlan(!project?.gitRepository.isNullOrBlank(), latest, git, deploying)
     val canDeploy: Boolean get() = !project?.gitRepository.isNullOrBlank() && latest?.isRunning != true && !deploying
     val containerState: ContainerState get() = parseContainerStatus(container)
     val summary: LiveSummary get() = liveSummary(project, containerState, latest)

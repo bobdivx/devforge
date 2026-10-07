@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.jeser.devforge.data.DeployPlan
 import app.jeser.devforge.data.Project
 import app.jeser.devforge.ui.apps.hostOf
 import app.jeser.devforge.ui.components.Persona
@@ -70,20 +71,53 @@ fun shortRepo(url: String?): String? =
 /** Confirmation explicite avant toute mise en ligne. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DeployConfirmSheet(project: Project, busy: Boolean, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+fun DeployConfirmSheet(
+    project: Project,
+    plan: DeployPlan,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+    failure: String? = null,
+) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val host = hostOf(project.productionUrl)
+    val (emoji, title) = when (plan.kind) {
+        DeployPlan.Kind.PublishChanges -> "📤" to "Publier ${plan.pending} changement${if (plan.pending > 1) "s" else ""} ?"
+        DeployPlan.Kind.Retry -> "🔁" to "Réessayer la mise en ligne ?"
+        DeployPlan.Kind.Rebuild -> "🔄" to "Reconstruire ${project.name} ?"
+        else -> "🚀" to "Mettre ${project.name} en ligne ?"
+    }
+    val explanation = when (plan.kind) {
+        DeployPlan.Kind.PublishChanges ->
+            "Ces changements sont sur GitHub mais pas encore en ligne. DevForge reconstruit l'app avec eux, puis remplace la version en ligne" +
+                (host?.let { " sur $it." } ?: ".")
+        DeployPlan.Kind.Retry ->
+            "La dernière mise en ligne a échoué. DevForge relance la construction depuis GitHub, puis remplace la version en ligne si elle réussit."
+        DeployPlan.Kind.Rebuild -> plan.rebuildExplanation + " Quelques secondes d'indisponibilité possibles au remplacement."
+        else -> "Première publication : DevForge construit l'app depuis GitHub et la met en ligne" + (host?.let { " sur $it." } ?: ".")
+    }
     ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, sheetState = sheet, containerColor = DfColors.Surface) {
         SheetColumn {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("🚀", fontSize = 28.sp)
+                Text(emoji, fontSize = 28.sp)
                 Spacer(Modifier.width(12.dp))
-                Text("Mettre ${project.name} en ligne ?", style = MaterialTheme.typography.titleLarge)
+                Text(title, style = MaterialTheme.typography.titleLarge)
             }
-            Text(
-                "DevForge reconstruit l’app depuis GitHub puis remplace la version en ligne" +
-                    (hostOf(project.productionUrl)?.let { " sur $it." } ?: "."),
-                color = DfColors.InkMuted,
-            )
+            Text(explanation, color = DfColors.InkMuted)
+            if (plan.kind == DeployPlan.Kind.PublishChanges && plan.commits.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    plan.commits.takeLast(5).reversed().forEach { c ->
+                        Row {
+                            Text(c.sha.take(7), fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = DfColors.InkFaint, modifier = Modifier.padding(end = 8.dp, top = 2.dp))
+                            Text(c.message.lineSequence().firstOrNull().orEmpty(), fontSize = 14.sp)
+                        }
+                    }
+                    if (plan.commits.size > 5) Text("… et ${plan.commits.size - 5} autre${if (plan.commits.size > 6) "s" else ""}", color = DfColors.InkFaint, fontSize = 12.sp)
+                }
+            }
+            if (plan.kind == DeployPlan.Kind.Retry && !failure.isNullOrBlank()) {
+                Text("Dernière erreur : $failure", color = DfColors.Danger, style = MaterialTheme.typography.bodySmall)
+            }
             shortRepo(project.gitRepository)?.let { repo ->
                 Text(
                     "Source : $repo" + (project.gitBranch?.let { " · branche $it" } ?: ""),
@@ -92,19 +126,23 @@ fun DeployConfirmSheet(project: Project, busy: Boolean, onDismiss: () -> Unit, o
                 )
             }
             Text(
-                "Les changements du brouillon qui ne sont pas encore sur GitHub ne seront pas inclus.",
+                if (plan.draftFiles > 0) {
+                    "Le brouillon (${plan.draftFiles} fichier${if (plan.draftFiles > 1) "s" else ""}) n'est pas encore sur GitHub : il ne sera pas inclus. Demande à Braise de le publier d'abord."
+                } else {
+                    "Les changements du brouillon qui ne sont pas encore sur GitHub ne seront pas inclus."
+                },
                 color = DfColors.InkFaint,
                 style = MaterialTheme.typography.bodySmall,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
                 OutlinedButton(onClick = onDismiss, enabled = !busy, modifier = Modifier.weight(1f).heightIn(min = 52.dp)) { Text("Annuler") }
                 Button(
-                    onClick = { onConfirm("Mise en ligne depuis l'app Android") },
+                    onClick = { onConfirm(plan.message) },
                     enabled = !busy,
                     modifier = Modifier.weight(1f).heightIn(min = 52.dp),
                 ) {
                     if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = DfColors.OnAccent)
-                    else Text("🚀 Mettre en ligne")
+                    else Text(if (plan.kind == DeployPlan.Kind.InProgress || plan.kind == DeployPlan.Kind.None) "Mettre en ligne" else plan.shortLabel, maxLines = 1)
                 }
             }
         }

@@ -19,9 +19,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Subject
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -52,6 +53,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.jeser.devforge.data.AppStatus
+import app.jeser.devforge.data.DeployPlan
 import app.jeser.devforge.data.Deployment
 import app.jeser.devforge.data.SpecFeature
 import app.jeser.devforge.ui.apps.hostOf
@@ -171,6 +173,7 @@ fun ProjectScreen(
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
                                 StatusStrip(state, onClick = { sheet = ProjectSheet.Details })
+                                DeployBanner(state, onDeploy = { sheet = ProjectSheet.Deploy }, onLogs = { state.latest?.let(actions.onOpenLogs) ?: actions.onOpenRuntimeLogs() })
                                 RecentDeploys(state, onOpen = actions.onOpenLogs)
                             }
                             VerticalDivider(color = DfColors.Line)
@@ -183,7 +186,10 @@ fun ProjectScreen(
                         Column(Modifier.fillMaxSize()) {
                             // Une seule bande d'état : la discussion garde l'essentiel de l'écran.
                             AnimatedVisibility(visible = !imeOpen) {
-                                StatusStrip(state, onClick = { sheet = ProjectSheet.Details }, modifier = Modifier.padding(horizontal = side).padding(bottom = 4.dp))
+                                Column(Modifier.padding(horizontal = side).padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    StatusStrip(state, onClick = { sheet = ProjectSheet.Details })
+                                    DeployBanner(state, onDeploy = { sheet = ProjectSheet.Deploy }, onLogs = { state.latest?.let(actions.onOpenLogs) ?: actions.onOpenRuntimeLogs() })
+                                }
                             }
                             ChatPane(state, input, { input = it }, actions, onNewFeature = { sheet = ProjectSheet.NewFeature }, modifier = Modifier.weight(1f))
                         }
@@ -218,6 +224,8 @@ fun ProjectScreen(
             )
             ProjectSheet.Deploy -> DeployConfirmSheet(
                 project = project,
+                plan = state.deployPlan,
+                failure = state.latest?.takeIf { it.isFailed }?.errorSummary,
                 busy = state.deploying,
                 onDismiss = close,
                 onConfirm = { msg -> actions.onDeploy(msg); sheet = ProjectSheet.None },
@@ -290,6 +298,55 @@ fun StatusStrip(state: ProjectUiState, onClick: () -> Unit, modifier: Modifier =
     }
 }
 
+/* ---------------- Bandeau de mise en ligne ---------------- */
+
+/**
+ * N'apparaît que s'il y a quelque chose à faire : changements à publier, échec à réessayer,
+ * première publication, ou mise en ligne en cours. App à jour → rien (« Reconstruire » est dans « Plus »).
+ */
+@Composable
+fun DeployBanner(state: ProjectUiState, onDeploy: () -> Unit, onLogs: () -> Unit) {
+    val plan = state.deployPlan
+    if (!plan.primary && plan.kind != DeployPlan.Kind.InProgress) return
+    val tone = when (plan.kind) {
+        DeployPlan.Kind.Retry -> DfColors.Danger
+        DeployPlan.Kind.InProgress -> DfColors.Warn
+        else -> DfColors.Accent
+    }
+    Surface(
+        color = tone.copy(alpha = .08f),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, tone.copy(alpha = .3f)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (plan.kind == DeployPlan.Kind.InProgress) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = tone)
+            } else {
+                Icon(
+                    if (plan.kind == DeployPlan.Kind.Retry) Icons.Filled.Refresh else Icons.Filled.CloudUpload,
+                    contentDescription = null, tint = tone, modifier = Modifier.size(20.dp),
+                )
+            }
+            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                Text(plan.label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(plan.summary, color = DfColors.InkMuted, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (plan.kind == DeployPlan.Kind.InProgress) {
+                TextButton(onClick = onLogs, modifier = Modifier.heightIn(min = 48.dp)) { Text("Logs") }
+            } else {
+                Button(
+                    onClick = onDeploy,
+                    enabled = state.canDeploy,
+                    colors = ButtonDefaults.buttonColors(containerColor = tone, contentColor = if (plan.kind == DeployPlan.Kind.Retry) Color.White else DfColors.OnAccent),
+                    contentPadding = PaddingValues(horizontal = 14.dp),
+                    modifier = Modifier.heightIn(min = 40.dp),
+                ) { Text(plan.shortLabel, fontWeight = FontWeight.SemiBold) }
+            }
+        }
+    }
+}
+
 /* ---------------- Actions ---------------- */
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -329,7 +386,7 @@ private fun TopAction(
     }
 }
 
-/** Barre du haut : Ouvrir, Logs, Mettre en ligne (principal) et « Plus » (aperçu, redémarrer, arrêter…). */
+/** Barre du haut : Ouvrir, Logs et « Plus » (aperçu, redémarrer, arrêter, reconstruire…). La publication vit dans le bandeau. */
 @Composable
 private fun TopActions(state: ProjectUiState, actions: ProjectActions, onSheet: (ProjectSheet) -> Unit) {
     val project = state.project ?: return
@@ -341,11 +398,6 @@ private fun TopActions(state: ProjectUiState, actions: ProjectActions, onSheet: 
         enabled = !url.isNullOrBlank(),
     )
     TopAction(Icons.AutoMirrored.Filled.Subject, "Logs de l'app et de la dernière mise en ligne", onClick = actions.onOpenRuntimeLogs)
-    TopAction(
-        Icons.Filled.RocketLaunch, "Mettre en ligne (avec confirmation)",
-        onClick = { onSheet(ProjectSheet.Deploy) },
-        enabled = state.canDeploy, busy = state.deploying || state.latest?.isRunning == true, filled = true,
-    )
     TopAction(
         Icons.Filled.MoreVert, "Plus : aperçu, redémarrer, arrêter, détails",
         onClick = { onSheet(ProjectSheet.More) },

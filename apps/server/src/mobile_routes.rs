@@ -5,6 +5,9 @@
 //! - `app_down` : app en ligne qui ne répond plus (probe live, borné en temps) ;
 //! - `spec_waiting` : Braise attend une validation explicite (spec `awaiting_validation`).
 //!
+//! `GET /api/v1/mobile/conversations` — onglet « Braise » : dernière réplique de chaque
+//! conversation et ce qu'elle attend de toi (`spec` à valider, `plan` à lancer, `question`).
+//!
 //! Les identifiants sont stables : le client compare avec son instantané précédent
 //! pour ne notifier qu'une fois. Conçu pour un sync périodique ; un push (FCM /
 //! UnifiedPush) pourra réutiliser la même forme d'événement.
@@ -23,7 +26,9 @@ use crate::routes::ApiError;
 use crate::state::{AppState, Project};
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/api/v1/mobile/inbox", get(inbox))
+    Router::new()
+        .route("/api/v1/mobile/inbox", get(inbox))
+        .route("/api/v1/mobile/conversations", get(conversations))
 }
 
 #[derive(Deserialize)]
@@ -208,6 +213,139 @@ async fn inbox(
             "server_time": now_s,
         }
     })))
+}
+
+/// Ce que la dernière réplique attend de toi. Une spec à valider prime ; sinon, si Braise a
+/// parlé en dernier : un plan à lancer, ou une question. Rien si c'est toi qui as parlé en dernier.
+pub fn conversation_waiting(
+    last_role: &str,
+    content: &str,
+    tool_calls_json: &str,
+    spec_waiting: bool,
+) -> Option<&'static str> {
+    if spec_waiting {
+        return Some("spec");
+    }
+    if last_role != "assistant" {
+        return None;
+    }
+    if has_plan(tool_calls_json) {
+        return Some("plan");
+    }
+    let tail = content.trim_end().trim_end_matches(|c: char| !c.is_alphanumeric() && c != '?' && c != '？');
+    if tail.ends_with('?') || tail.ends_with('？') {
+        return Some("question");
+    }
+    None
+}
+
+/// Même règle que l'app : un appel `propose_plan` dont le résultat porte un plan titré.
+fn has_plan(tool_calls_json: &str) -> bool {
+    serde_json::from_str::<Vec<Value>>(tool_calls_json)
+        .unwrap_or_default()
+        .iter()
+        .any(|tc| {
+            tc.get("name").and_then(Value::as_str) == Some("propose_plan")
+                && tc.pointer("/result/plan/title").is_some()
+        })
+}
+
+/// Extrait lisible d'une réplique (sans balisage markdown courant), sur une ligne.
+pub fn excerpt(content: &str, max: usize) -> String {
+    let flat: String = content
+        .lines()
+        .map(|l| l.trim().trim_start_matches(['#', '>', '-', '*', ' ']).trim())
+        .filter(|l| !l.is_empty() && !l.starts_with("```"))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace("**", "")
+        .replace('`', "");
+    if flat.chars().count() <= max {
+        flat
+    } else {
+        let cut: String = flat.chars().take(max.saturating_sub(1)).collect();
+        format!("{}…", cut.trim_end())
+    }
+}
+
+async fn conversations(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let (_user, workspace) = crate::auth_routes::current_workspace(&state, &headers)
+        .await
+        .map_err(ApiError::from_auth)?;
+
+    let projects = sqlx::query_as::<_, Project>(
+        "SELECT * FROM projects WHERE workspace_uuid = $1 ORDER BY updated_at DESC",
+    )
+    .bind(&workspace.uuid)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+
+    // Dernière réplique (toi ou Braise) de chaque fil coordinateur.
+    let last: Vec<(String, String, String, String, String, String)> = sqlx::query_as(
+        r#"SELECT DISTINCT ON (m.project_uuid)
+                  m.project_uuid, m.role, m.content, m.tool_calls_json, m.created_at, a.status
+           FROM agent_messages m
+           JOIN project_agents a ON a.uuid = m.agent_uuid AND a.role = 'coordinator'
+           JOIN projects p ON p.uuid = m.project_uuid
+           WHERE p.workspace_uuid = $1 AND m.role IN ('user', 'assistant')
+           ORDER BY m.project_uuid, m.id DESC"#,
+    )
+    .bind(&workspace.uuid)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+
+    let mut items: Vec<Value> = Vec::new();
+    for p in &projects {
+        let spec = {
+            let root = crate::spec_routes::workdir_of(&p.uuid, p.workdir.as_deref());
+            if root.exists() {
+                devforge_agent::sdd::list_features(&root)
+                    .ok()
+                    .and_then(|fs| fs.into_iter().find(|f| f.phase == "awaiting_validation" && !f.dismissed))
+            } else {
+                None
+            }
+        };
+        let row = last.iter().find(|r| r.0 == p.uuid);
+        if row.is_none() && spec.is_none() {
+            continue;
+        }
+        let (role, content, tools, created_at, agent_status) = row
+            .map(|r| (r.1.as_str(), r.2.as_str(), r.3.as_str(), r.4.clone(), r.5.as_str()))
+            .unwrap_or(("", "", "[]", String::new(), "idle"));
+        let waiting = conversation_waiting(role, content, tools, spec.is_some());
+        let created = spec
+            .as_ref()
+            .map(|f| f.updated_at.clone())
+            .filter(|u| u > &created_at)
+            .unwrap_or(created_at);
+        items.push(json!({
+            "project_uuid": p.uuid,
+            "project_name": p.name,
+            "production_url": p.production_url,
+            "git_repository": p.git_repository,
+            "last_role": role,
+            "excerpt": excerpt(content, 160),
+            "created_at": created,
+            "waiting": waiting,
+            "spec_title": spec.as_ref().map(|f| f.title.clone()),
+            "working": agent_status == "working",
+        }));
+    }
+    // En attente d'abord, puis les plus récentes.
+    items.sort_by(|a, b| {
+        let wa = a["waiting"].is_null();
+        let wb = b["waiting"].is_null();
+        wa.cmp(&wb).then_with(|| {
+            b["created_at"].as_str().unwrap_or("").cmp(a["created_at"].as_str().unwrap_or(""))
+        })
+    });
+    Ok(Json(json!({ "data": { "conversations": items } })))
 }
 
 #[cfg(test)]

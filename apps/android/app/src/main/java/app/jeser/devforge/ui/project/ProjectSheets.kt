@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Visibility
@@ -269,7 +270,7 @@ private fun SheetAction(
     }
 }
 
-/** « Plus » : actions moins fréquentes. Redémarrer et Arrêter passent toujours par une confirmation. */
+/** « Plus » : actions moins fréquentes. Redémarrer, Arrêter et Reconstruire passent toujours par une confirmation. */
 @Composable
 fun MoreSheet(state: ProjectUiState, actions: ProjectActions, onDismiss: () -> Unit, onSheet: (ProjectSheet) -> Unit) {
     val running = state.containerState.running
@@ -295,6 +296,13 @@ fun MoreSheet(state: ProjectUiState, actions: ProjectActions, onDismiss: () -> U
                 onClick = { actions.onLifecycle("start"); onDismiss() },
                 enabled = state.canControl && state.containerState.kind != ContainerState.Kind.Missing,
                 busy = state.lifecycleBusy == "start", tint = DfColors.Ok,
+            )
+        }
+        val plan = state.deployPlan
+        if (plan.kind == app.jeser.devforge.data.DeployPlan.Kind.Rebuild) {
+            SheetAction(
+                Icons.Filled.Refresh, "Reconstruire", plan.rebuildExplanation + " Confirmation demandée.",
+                onClick = { onSheet(ProjectSheet.Deploy) }, enabled = state.canDeploy,
             )
         }
         SheetAction(

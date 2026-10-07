@@ -13,6 +13,7 @@ import {
   KeyRound,
   LayoutDashboard,
   MessagesSquare,
+  RefreshCw,
   Rocket,
   ScrollText,
   Settings2,
@@ -149,9 +150,74 @@ function shortRepo(url?: string | null) {
   return url.replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\.git$/, '');
 }
 
+type DeployIntent = {
+  kind: 'progress' | 'retry' | 'first' | 'publish' | 'rebuild';
+  /** Libellé du bouton. */
+  label: string;
+  title: string;
+  description: string;
+  /** Bouton principal (violet) seulement s'il y a vraiment quelque chose à publier ou à réparer. */
+  primary: boolean;
+  message: string;
+};
+
+/**
+ * « Mettre en ligne » prêtait à confusion quand l'app est déjà en ligne et à jour :
+ * le libellé suit l'état réel (changements sur GitHub, échec, première fois, rien à publier).
+ */
+export function deployIntent(name: string, sync: Project['sync'] | null | undefined, latest: Deployment | null): DeployIntent {
+  if (latest && isInProgress(latest.status)) {
+    return { kind: 'progress', label: 'Mise en ligne…', title: '', description: '', primary: true, message: '' };
+  }
+  if (latest && isFailed(latest.status)) {
+    return {
+      kind: 'retry',
+      label: 'Réessayer la mise en ligne',
+      title: `Réessayer la mise en ligne de ${name} ?`,
+      description: 'La dernière mise en ligne a échoué. DevForge relance la construction depuis GitHub, puis remplace la version en ligne si elle réussit.',
+      primary: true,
+      message: 'Nouvel essai de mise en ligne depuis la page projet',
+    };
+  }
+  if (!latest) {
+    return {
+      kind: 'first',
+      label: 'Mettre en ligne',
+      title: `Mettre ${name} en ligne ?`,
+      description: 'Première publication : DevForge construit l’app depuis GitHub et la met en ligne.',
+      primary: true,
+      message: 'Première mise en ligne depuis la page projet',
+    };
+  }
+  const n = sync?.state === 'behind' ? sync.behind_by ?? 0 : 0;
+  if (n > 0) {
+    const s = n > 1 ? 's' : '';
+    return {
+      kind: 'publish',
+      label: 'Publier les changements',
+      title: `Publier ${n} changement${s} ?`,
+      description: `${n} commit${s} sur GitHub ne ${n > 1 ? 'sont' : 'est'} pas encore en ligne. DevForge reconstruit l’app avec ces changements, puis remplace la version en ligne.`,
+      primary: true,
+      message: `Publication de ${n} changement${s} depuis la page projet`,
+    };
+  }
+  return {
+    kind: 'rebuild',
+    label: 'Reconstruire',
+    title: `Reconstruire ${name} ?`,
+    description:
+      sync?.state === 'up_to_date'
+        ? 'L’app est déjà à jour. Reconstruire relance une construction depuis GitHub sans changement de code.'
+        : 'Reconstruire relance une construction depuis GitHub avec le code actuel de la branche.',
+    primary: false,
+    message: 'Reconstruction depuis la page projet',
+  };
+}
+
 /**
  * Page projet par défaut : une conversation avec Braise, l'aperçu,
- * un bouton « Mettre en ligne ». Le reste vit dans « Réglages avancés ».
+ * un bouton de mise en ligne qui suit l'état réel (publier, réessayer, reconstruire).
+ * Le reste vit dans « Réglages avancés ».
  */
 export function ProjectHome({
   uuid,
@@ -182,6 +248,7 @@ export function ProjectHome({
   const status = appStatus(project, current);
   const liveUrl = project?.production_url || null;
   const name = project?.name || 'ton app';
+  const intent = deployIntent(name, project?.sync, latest);
 
   // Équipe + specs (lecture seule, rafraîchies doucement).
   useEffect(() => {
@@ -287,7 +354,7 @@ export function ProjectHome({
   async function deployNow() {
     setDeployBusy(true);
     try {
-      await api.createDeployment(uuid, { git_message: 'Mise en ligne depuis la page projet' });
+      await api.createDeployment(uuid, { git_message: intent.message || 'Mise en ligne depuis la page projet' });
       toast.push({ title: 'Mise en ligne lancée', detail: 'Reconstruction depuis GitHub…', tone: 'info' });
       setConfirmOpen(false);
       const list = await api.deployments(uuid);
@@ -410,13 +477,20 @@ export function ProjectHome({
           </Button>
           <Button
             size="sm"
+            variant={intent.primary ? undefined : 'secondary'}
             class="max-lg:h-11 max-lg:text-[13px]"
             disabled={!canDeploy || deployBusy || isInProgress(current?.status)}
-            title={canDeploy ? 'Reconstruire et mettre en ligne depuis GitHub' : 'Relie d’abord un dépôt GitHub'}
+            title={canDeploy ? (intent.description || intent.label) : 'Relie d’abord un dépôt GitHub'}
             onClick={() => setConfirmOpen(true)}
           >
-            {deployBusy || isInProgress(current?.status) ? <Spinner /> : <Rocket size={14} aria-hidden />}
-            {isInProgress(current?.status) ? 'Mise en ligne…' : 'Mettre en ligne'}
+            {deployBusy || isInProgress(current?.status) ? (
+              <Spinner />
+            ) : intent.kind === 'retry' || intent.kind === 'rebuild' ? (
+              <RefreshCw size={14} aria-hidden />
+            ) : (
+              <Rocket size={14} aria-hidden />
+            )}
+            {isInProgress(current?.status) ? 'Mise en ligne…' : intent.label}
           </Button>
           <Button
             size="sm"
@@ -601,8 +675,8 @@ export function ProjectHome({
       <Modal
         open={confirmOpen}
         onClose={() => !deployBusy && setConfirmOpen(false)}
-        title={`Mettre ${name} en ligne ?`}
-        description="DevForge reconstruit l’app depuis GitHub puis remplace la version en ligne."
+        title={intent.title || `Mettre ${name} en ligne ?`}
+        description={intent.description || 'DevForge reconstruit l’app depuis GitHub puis remplace la version en ligne.'}
         size="sm"
         class="df-tap"
         footer={
@@ -611,8 +685,8 @@ export function ProjectHome({
               Annuler
             </Button>
             <Button size="sm" class="max-sm:flex-1 max-lg:h-11" disabled={deployBusy} onClick={() => void deployNow()}>
-              {deployBusy ? <Spinner /> : <Rocket size={14} aria-hidden />}
-              Mettre en ligne
+              {deployBusy ? <Spinner /> : intent.kind === 'retry' || intent.kind === 'rebuild' ? <RefreshCw size={14} aria-hidden /> : <Rocket size={14} aria-hidden />}
+              {intent.kind === 'progress' ? 'Mettre en ligne' : intent.label}
             </Button>
           </div>
         }

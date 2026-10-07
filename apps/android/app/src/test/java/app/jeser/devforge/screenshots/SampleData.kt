@@ -4,7 +4,11 @@ import app.jeser.devforge.data.Agent
 import app.jeser.devforge.data.ContainerStatus
 import app.jeser.devforge.data.DeployCard
 import app.jeser.devforge.data.GitFile
+import app.jeser.devforge.data.AndroidInfo
+import app.jeser.devforge.data.Conversation
+import app.jeser.devforge.data.GitCommit
 import app.jeser.devforge.data.GitInfo
+import app.jeser.devforge.ui.hub.HubUiState
 import app.jeser.devforge.data.GitSync
 import app.jeser.devforge.data.GitWorkdir
 import app.jeser.devforge.data.PreviewStatus
@@ -104,5 +108,46 @@ object SampleData {
         coordinatorUuid = "a-1",
         waitingSpecs = listOf(SpecFeature("001-contact", "Page contact", "awaiting_validation", updatedAt = ago(7))),
         loading = false,
+    )
+
+    /** App en ligne et à jour : pas de bouton principal, « Reconstruire » dans « Plus ». */
+    val projectUpToDate = project.copy(deployments = deployments.drop(1))
+
+    /** Changements sur GitHub pas encore en ligne → « Publier les changements ». */
+    val projectPending = projectUpToDate.copy(
+        git = project.git!!.copy(
+            sync = GitSync(
+                "behind", 3, 0, "9b620d0", headSha = "c0ffee1",
+                commits = listOf(
+                    GitCommit("a1b2c3d4", "Corrige le pied de page"),
+                    GitCommit("b2c3d4e5", "Ajoute la page tarifs"),
+                    GitCommit("c0ffee12", "Page contact avec formulaire"),
+                ),
+            ),
+        ),
+    )
+
+    val hub = HubUiState(
+        conversations = listOf(
+            Conversation("p-vigie", "Vigie", "vigie.jeser.app", lastRole = "assistant",
+                excerpt = "J'ai écrit la spec Page contact. Relis-la : je ne construis rien avant ton accord.",
+                createdAt = ago(7), waiting = "spec", specTitle = "Page contact"),
+            Conversation("p-shop", "Boutique de Léa", "boutique-lea.fr", lastRole = "assistant",
+                excerpt = "Je peux garder le bleu actuel ou passer au vert sauge. Tu préfères lequel ?",
+                createdAt = ago(40), waiting = "question"),
+            Conversation("p-tesla", "tesla", "teslasphere.app", lastRole = "user",
+                excerpt = "Ajoute un mode sombre sur le tableau de bord", createdAt = ago(90), working = true),
+            Conversation("p-pop", "popcornn", "client.popcornn.app", lastRole = "assistant",
+                excerpt = "Tout va bien côté popcornn 🔥 L'app répond, dernière mise en ligne réussie hier.", createdAt = ago(60 * 26)),
+        ),
+        conversationsLoading = false,
+        alerts = inbox + listOf(
+            InboxEvent("deploy:old", "deploy_failed", "p-pop", "popcornn", "Mise en ligne échouée · popcornn",
+                "npm ERR! missing script: build", ago(60 * 30)),
+        ),
+        alertsLoading = false,
+        android = AndroidInfo(true, "2.0.200", "/api/v1/android/apk", 2_036_919),
+        appVersion = "2.0.199",
+        instance = "https://web.jeser.app",
     )
 }
