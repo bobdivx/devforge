@@ -325,10 +325,11 @@ export function ProjectDetailPage(props: Props) {
                     projectUuid={uuid}
                     groupUuid={project.group_uuid}
                     groupName={project.group_name}
-                    currentName={project.name}
+                    // Tableau de bord : le titre est déjà le nom de l'app, la pastille montre le groupe.
+                    currentName={tab === 'overview' ? undefined : project.name}
                     tab={tab}
                   />
-                ) : project ? (
+                ) : project && tab !== 'overview' ? (
                   <CurrentAppChip projectUuid={uuid} name={project.name} />
                 ) : null}
               </span>
