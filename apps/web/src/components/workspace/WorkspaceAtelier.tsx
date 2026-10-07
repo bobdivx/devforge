@@ -79,7 +79,7 @@ function TabButton({
   );
 }
 
-function PreviewPane({
+export function PreviewPane({
   previewUrl,
   previewStatus,
   nonce,
