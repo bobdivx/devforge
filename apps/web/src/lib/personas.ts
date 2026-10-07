@@ -28,7 +28,7 @@ export const PERSONAS: Record<PersonaKey, Persona> = {
   phare: {
     key: 'phare',
     name: 'Phare',
-    role: 'Veille sur l’app en ligne',
+    role: 'Veille sur l’app',
     tagline: 'Je surveille la santé, les mises en ligne et les tâches planifiées.',
     color: '#38bdf8',
   },
@@ -97,9 +97,6 @@ export type PersonaStatus = {
   agents: ProjectAgent[];
 };
 
-function isRoutine(a: ProjectAgent) {
-  return a.trigger_type === 'cron' || a.trigger_type === 'event';
-}
 
 function plural(n: number, one: string, many: string) {
   return `${n} ${n > 1 ? many : one}`;
@@ -153,7 +150,6 @@ export function teamStatus(
   {
     const list = by.phare;
     const enabled = list.filter((a) => a.enabled !== 0);
-    const routines = enabled.filter(isRoutine);
     const working = enabled.some((a) => a.status === 'working');
     let label: string;
     let tone: PersonaTone;
@@ -170,8 +166,8 @@ export function teamStatus(
       label = 'En pause';
       tone = 'neutral';
     }
-    const detail = routines.length ? plural(routines.length, 'routine active', 'routines actives') : undefined;
-    out.push({ persona: PERSONAS.phare, label, tone, detail, agents: list });
+    // Pas de compteur ici : des mots simples (le nombre de routines est dans Réglages avancés).
+    out.push({ persona: PERSONAS.phare, label, tone, agents: list });
   }
 
   // Rustine

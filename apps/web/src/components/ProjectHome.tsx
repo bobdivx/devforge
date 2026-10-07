@@ -4,6 +4,7 @@ import {
   Archive,
   Clock,
   Database,
+  Eraser,
   ExternalLink,
   Eye,
   GitBranch,
@@ -49,6 +50,7 @@ type Props = {
 };
 
 const IN_PROGRESS = ['queued', 'running', 'building', 'pending', 'deploying'];
+const KNOWN_SYNC = new Set(['up_to_date', 'behind', 'ahead', 'deploying', 'error']);
 
 function isInProgress(status?: string | null) {
   return !!status && IN_PROGRESS.includes(status);
@@ -233,7 +235,9 @@ export function ProjectHome({
   }, [refreshPreview]);
 
   const draftReady = previewStatus === 'running' && !!draftUrl;
-  const effectiveView: 'draft' | 'live' = view ?? (draftReady || !liveUrl ? 'draft' : 'live');
+  // Brouillon par défaut dès qu'un serveur d'aperçu tourne ou démarre ; sinon la version en ligne.
+  const draftActive = previewStatus === 'running' || previewStatus === 'starting';
+  const effectiveView: 'draft' | 'live' = view ?? (draftActive || !liveUrl ? 'draft' : 'live');
   const shownUrl = effectiveView === 'draft' ? (draftReady ? draftUrl : null) : liveUrl;
 
   async function startPreview() {
@@ -295,6 +299,8 @@ export function ProjectHome({
   }
 
   const team = useMemo(() => teamStatus(agents, specs, latest), [agents, specs, latest]);
+  const routineCount = useMemo(() => countActiveRoutines(agents), [agents]);
+  const coordinatorUuid = agents.find((a) => a.role === 'coordinator')?.uuid ?? null;
 
   const chips: ChatChip[] = [
     { key: 'feature', label: '✨ Nouvelle fonctionnalité', onClick: onNewFeature },
@@ -329,7 +335,8 @@ export function ProjectHome({
       tone: isFailed(latest.status) ? 'danger' : isInProgress(latest.status) ? 'warn' : 'ok',
     });
   }
-  if (project?.sync?.state) {
+  // « Sync inconnue », « Sans Git »… n'apprennent rien : on n'affiche que les états utiles.
+  if (project?.sync?.state && KNOWN_SYNC.has(project.sync.state)) {
     brief.push({ label: 'Code sur GitHub', value: sync.label, tone: sync.tone });
   }
   if (deployments.length > 1) {
@@ -479,10 +486,14 @@ export function ProjectHome({
                           ? 'L’aperçu démarre…'
                           : 'Le brouillon n’est pas affiché. Lance l’aperçu pour voir tes changements avant de les mettre en ligne.'}
                       </p>
-                      <Button size="sm" variant="secondary" disabled={previewBusy} onClick={() => void startPreview()}>
-                        {previewBusy ? <Spinner /> : <Eye size={14} aria-hidden />}
-                        Lancer l’aperçu
-                      </Button>
+                      {previewStatus === 'starting' ? (
+                        <Spinner />
+                      ) : (
+                        <Button size="sm" variant="secondary" disabled={previewBusy} onClick={() => void startPreview()}>
+                          {previewBusy ? <Spinner /> : <Eye size={14} aria-hidden />}
+                          Lancer l’aperçu
+                        </Button>
+                      )}
                     </>
                   ) : (
                     <p class="text-sm text-[var(--color-ink-muted)]">Pas encore en ligne.</p>
@@ -610,6 +621,8 @@ export function ProjectHome({
         uuid={uuid}
         project={project}
         latest={latest}
+        routineCount={routineCount}
+        coordinatorUuid={coordinatorUuid}
         onOpenRules={() => {
           setAdvancedOpen(false);
           onOpenRules();
@@ -625,6 +638,8 @@ function AdvancedSettingsModal({
   uuid,
   project,
   latest,
+  routineCount,
+  coordinatorUuid,
   onOpenRules,
 }: {
   open: boolean;
@@ -632,8 +647,29 @@ function AdvancedSettingsModal({
   uuid: string;
   project: Project | null;
   latest: Deployment | null;
+  routineCount: number;
+  coordinatorUuid: string | null;
   onOpenRules: () => void;
 }) {
+  const toast = useToast();
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
+
+  async function clearConversation() {
+    if (!coordinatorUuid) return;
+    setClearing(true);
+    try {
+      await api.clearAgentMessages(uuid, coordinatorUuid);
+      window.dispatchEvent(new CustomEvent('devforge:chat-cleared', { detail: { agentUuid: coordinatorUuid } }));
+      toast.push({ title: 'Conversation effacée', detail: 'Braise repart d’une page blanche.', tone: 'ok' });
+      setClearOpen(false);
+      onClose();
+    } catch (e) {
+      toast.push({ title: 'Effacement impossible', detail: String(e), tone: 'danger' });
+    } finally {
+      setClearing(false);
+    }
+  }
   const name = project?.name || 'l’app';
   const repo = shortRepo(project?.git_repository);
   const sync = projectSyncMeta(project?.sync ?? null);
@@ -670,10 +706,30 @@ function AdvancedSettingsModal({
     {
       title: 'Équipe & routines',
       tiles: [
-        { key: 'agents', title: 'Équipe & routines', description: 'Phare, Rustine, Plume et leurs réveils', icon: icon(Users), href: tabHref(uuid, 'agents') },
+        {
+          key: 'agents',
+          title: 'Équipe & routines',
+          description:
+            routineCount > 0
+              ? `${routineCount} routine${routineCount > 1 ? 's' : ''} active${routineCount > 1 ? 's' : ''}`
+              : 'Phare, Rustine, Plume et leurs réveils',
+          icon: icon(Users),
+          href: tabHref(uuid, 'agents'),
+        },
         { key: 'crons', title: 'Tâches planifiées', description: 'Commandes qui tournent à heure fixe', icon: icon(Clock), href: tabHref(uuid, 'crons') },
         { key: 'rules', title: 'Règles de l’équipe', description: 'Consignes en français (AGENTS.md)', icon: icon(ScrollText), onClick: onOpenRules },
         { key: 'workspace', title: 'Atelier détaillé', description: 'Tous les fils, fichiers du brouillon, serveur d’aperçu', icon: icon(MessagesSquare), href: tabHref(uuid, 'workspace') },
+        ...(coordinatorUuid
+          ? [
+              {
+                key: 'clear',
+                title: 'Effacer la conversation',
+                description: 'Repartir de zéro avec Braise',
+                icon: icon(Eraser),
+                onClick: () => setClearOpen(true),
+              },
+            ]
+          : []),
       ],
     },
     {
@@ -741,6 +797,32 @@ function AdvancedSettingsModal({
           </section>
         ))}
       </div>
+      <Modal
+        open={clearOpen}
+        onClose={() => !clearing && setClearOpen(false)}
+        title="Effacer toute la conversation ?"
+        description={`Tout l’historique avec Braise sur ${name} sera supprimé définitivement. Le code, les specs et l’app en ligne ne sont pas touchés.`}
+        size="sm"
+        footer={
+          <div class="flex justify-end gap-2">
+            <Button size="sm" variant="ghost" disabled={clearing} onClick={() => setClearOpen(false)}>
+              Annuler
+            </Button>
+            <Button size="sm" variant="danger" disabled={clearing} onClick={() => void clearConversation()}>
+              {clearing ? <Spinner /> : <Eraser size={14} aria-hidden />}
+              Effacer tout l’historique
+            </Button>
+          </div>
+        }
+      >
+        <p class="text-sm text-[var(--color-ink-muted)]">Cette action est irréversible.</p>
+      </Modal>
     </Modal>
   );
+}
+
+function countActiveRoutines(agents: ProjectAgent[]): number {
+  return agents.filter(
+    (a) => a.enabled !== 0 && (a.trigger_type === 'cron' || a.trigger_type === 'event'),
+  ).length;
 }
