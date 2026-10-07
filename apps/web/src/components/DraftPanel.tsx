@@ -142,13 +142,22 @@ export function DraftModal({ open, onClose, uuid, name, draft, onChanged, onDepl
     setMessage(draft?.suggested_message ?? '');
     setDiff(null);
     setDiffError(null);
-    if (draft?.dirty) {
-      api
-        .draftDiff(uuid)
-        .then((r) => setDiff(r.files))
-        .catch((e) => setDiffError(e instanceof Error ? e.message : String(e)));
-    }
   }, [open, uuid]);
+
+  // Diff chargé dès que le brouillon est connu (la modale peut s'ouvrir avant, via ?draft=1).
+  const draftKey = draft?.dirty ? `${draft.count}:${draft.updated_at ?? ''}` : '';
+  useEffect(() => {
+    if (!open || !draftKey) return;
+    let cancelled = false;
+    setMessage((m) => m || draft?.suggested_message || '');
+    api
+      .draftDiff(uuid)
+      .then((r) => !cancelled && setDiff(r.files))
+      .catch((e) => !cancelled && setDiffError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [open, uuid, draftKey]);
 
   const files: DraftFile[] = draft?.files ?? [];
   const stat = (p: string) => diff?.find((d) => d.path === p);
