@@ -240,6 +240,14 @@ class ApiClient(
         DataEnvelope.serializer(SpecFeature.serializer()),
     ).data
 
+    suspend fun conversations(): List<Conversation> =
+        get("/mobile/conversations", DataEnvelope.serializer(Conversations.serializer())).data.conversations
+
+    suspend fun androidInfo(): AndroidInfo = get("/android", DataEnvelope.serializer(AndroidInfo.serializer())).data
+
+    /** URL absolue de l'APK servi par l'instance (téléchargement dans le navigateur). */
+    fun apkUrl(path: String?): String? = path?.let { url(it.removePrefix("/api/v1")) }
+
     suspend fun inbox(since: String?, probe: Boolean = true): Inbox {
         val q = buildString {
             append("?probe=").append(probe)

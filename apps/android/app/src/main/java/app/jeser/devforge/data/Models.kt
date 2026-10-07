@@ -155,6 +155,17 @@ data class GitSync(
     @SerialName("html_url") val htmlUrl: String? = null,
     @SerialName("files_count") val filesCount: Int? = null,
     val error: String? = null,
+    @SerialName("head_sha") val headSha: String? = null,
+    /** Commits sur GitHub pas encore en ligne (du plus ancien au plus récent). */
+    val commits: List<GitCommit> = emptyList(),
+)
+
+@Serializable
+data class GitCommit(
+    val sha: String = "",
+    val message: String = "",
+    val author: String? = null,
+    val date: String? = null,
 )
 
 @Serializable
@@ -278,3 +289,31 @@ fun apiErrorMessage(body: String?): String? {
         }
     }.getOrNull()
 }
+
+/** Onglet Braise : dernière réplique de chaque conversation et ce qu'elle attend. */
+@Serializable
+data class Conversation(
+    @SerialName("project_uuid") val projectUuid: String,
+    @SerialName("project_name") val projectName: String = "",
+    @SerialName("production_url") val productionUrl: String? = null,
+    @SerialName("git_repository") val gitRepository: String? = null,
+    @SerialName("last_role") val lastRole: String = "",
+    val excerpt: String = "",
+    @SerialName("created_at") val createdAt: String? = null,
+    /** `spec` (spec à valider), `plan` (plan à lancer), `question`, ou null. */
+    val waiting: String? = null,
+    @SerialName("spec_title") val specTitle: String? = null,
+    val working: Boolean = false,
+)
+
+@Serializable
+data class Conversations(val conversations: List<Conversation> = emptyList())
+
+/** `GET /android` : APK servi par l'instance. */
+@Serializable
+data class AndroidInfo(
+    val available: Boolean = false,
+    val version: String? = null,
+    @SerialName("download_path") val downloadPath: String? = null,
+    @SerialName("size_bytes") val sizeBytes: Long? = null,
+)

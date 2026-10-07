@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import app.jeser.devforge.ui.theme.DevForgeTheme
 import app.jeser.devforge.ui.HomeRootPreview
+import app.jeser.devforge.ui.HomeTab
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import androidx.compose.ui.test.getBoundsInRoot
@@ -74,12 +75,12 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
     }
 
     @Test fun apps() {
-        compose.setContent { Shot { HomeRootPreview(SampleData.apps) } }
+        compose.setContent { Shot { HomeRootPreview(SampleData.apps, hub = SampleData.hub) } }
         shot("apps")
     }
 
     @Test fun appsInbox() {
-        compose.setContent { Shot { HomeRootPreview(SampleData.apps, initialInboxOpen = true) } }
+        compose.setContent { Shot { HomeRootPreview(SampleData.apps, initialInboxOpen = true, hub = SampleData.hub) } }
         shot("apps-inbox-sheet")
     }
 
@@ -103,6 +104,41 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
     @Test fun projectMoreSheet() {
         compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {}), initialSheet = ProjectSheet.More) } }
         shot("project-more-sheet")
+    }
+
+    @Test fun projectUpToDate() {
+        compose.setContent { Shot { ProjectScreen(SampleData.projectUpToDate, ProjectActions(onBack = {})) } }
+        shot("project-up-to-date")
+    }
+
+    @Test fun projectChangesPending() {
+        compose.setContent { Shot { ProjectScreen(SampleData.projectPending, ProjectActions(onBack = {})) } }
+        shot("project-changes-pending")
+    }
+
+    @Test fun publishConfirm() {
+        compose.setContent { Shot { ProjectScreen(SampleData.projectPending, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Deploy) } }
+        shot("publish-confirm")
+    }
+
+    @Test fun moreSheetUpToDate() {
+        compose.setContent { Shot { ProjectScreen(SampleData.projectUpToDate, ProjectActions(onBack = {}), initialSheet = ProjectSheet.More) } }
+        shot("project-more-sheet-up-to-date")
+    }
+
+    @Test fun tabBraise() {
+        compose.setContent { Shot { HomeRootPreview(SampleData.apps, tab = HomeTab.Braise, hub = SampleData.hub) } }
+        shot("tab-braise")
+    }
+
+    @Test fun tabAlerts() {
+        compose.setContent { Shot { HomeRootPreview(SampleData.apps, tab = HomeTab.Alerts, hub = SampleData.hub) } }
+        shot("tab-alerts")
+    }
+
+    @Test fun tabSettings() {
+        compose.setContent { Shot { HomeRootPreview(SampleData.apps, tab = HomeTab.Settings, hub = SampleData.hub) } }
+        shot("tab-settings")
     }
 
     @Test fun projectLogs() {
@@ -142,7 +178,7 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
     @Test fun notificationPrompt() {
         compose.setContent {
             Shot {
-                HomeRootPreview(SampleData.apps)
+                HomeRootPreview(SampleData.apps, hub = SampleData.hub)
                 app.jeser.devforge.ui.components.NotificationPrompt({}, {})
             }
         }

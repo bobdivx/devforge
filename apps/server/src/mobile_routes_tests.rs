@@ -75,3 +75,23 @@ fn spec_waiting_only_for_awaiting_validation() {
     f.phase = "implement".into();
     assert!(spec_waiting_event(&p, &f).is_none());
 }
+
+#[test]
+fn conversation_waiting_reasons() {
+    let plan = r#"[{"name":"propose_plan","result":{"plan":{"title":"Page contact"}}}]"#;
+    assert_eq!(conversation_waiting("assistant", "Voilà", "[]", true), Some("spec"));
+    assert_eq!(conversation_waiting("assistant", "Mon plan :", plan, false), Some("plan"));
+    assert_eq!(conversation_waiting("assistant", "On garde le bleu ? 🙂", "[]", false), Some("question"));
+    assert_eq!(conversation_waiting("assistant", "C'est fait.", "[]", false), None);
+    assert_eq!(conversation_waiting("user", "Tu peux ?", "[]", false), None);
+    assert_eq!(conversation_waiting("assistant", "ok", "pas du json", false), None);
+}
+
+#[test]
+fn excerpt_flattens_markdown_and_truncates() {
+    assert_eq!(excerpt("## Bilan\n- **App** en ligne\n```\ncode\n```", 80), "Bilan App en ligne code");
+    let long = "a".repeat(200);
+    let e = excerpt(&long, 10);
+    assert_eq!(e.chars().count(), 10);
+    assert!(e.ends_with('…'));
+}

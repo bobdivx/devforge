@@ -300,3 +300,92 @@ fun cleanLogs(raw: String, zone: java.time.ZoneId = java.time.ZoneId.systemDefau
             "$stamp  $body"
         }
         .joinToString("\n")
+
+/* ---------- Mise en ligne : l'action suit l'état réel ---------- */
+
+/**
+ * « Mettre en ligne » prêtait à confusion quand l'app est déjà en ligne et à jour.
+ * - commits GitHub pas encore en ligne → « Publier les changements » (principal) ;
+ * - dernière mise en ligne échouée → « Réessayer la mise en ligne » (principal) ;
+ * - jamais publiée → « Mettre en ligne » (principal) ;
+ * - à jour (ou synchro inconnue) → pas de bouton principal, « Reconstruire » dans « Plus ».
+ */
+data class DeployPlan(
+    val kind: Kind,
+    val pending: Int = 0,
+    val commits: List<GitCommit> = emptyList(),
+    val upToDate: Boolean = false,
+    val draftFiles: Int = 0,
+) {
+    enum class Kind { None, InProgress, Retry, FirstDeploy, PublishChanges, Rebuild }
+
+    /** Bouton principal (bandeau violet) seulement s'il y a vraiment quelque chose à faire. */
+    val primary: Boolean get() = kind == Kind.Retry || kind == Kind.FirstDeploy || kind == Kind.PublishChanges
+
+    val label: String get() = when (kind) {
+        Kind.PublishChanges -> "Publier les changements"
+        Kind.Retry -> "Réessayer la mise en ligne"
+        Kind.FirstDeploy -> "Mettre en ligne"
+        Kind.Rebuild -> "Reconstruire"
+        Kind.InProgress -> "Mise en ligne en cours…"
+        Kind.None -> ""
+    }
+
+    /** Bouton court du bandeau. */
+    val shortLabel: String get() = when (kind) {
+        Kind.PublishChanges -> "Publier"
+        Kind.Retry -> "Réessayer"
+        Kind.FirstDeploy -> "Mettre en ligne"
+        else -> label
+    }
+
+    /** Dernier commit en attente (le plus récent), première ligne. */
+    val lastCommit: String? get() = commits.lastOrNull()?.message?.lineSequence()?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+
+    val summary: String get() = when (kind) {
+        Kind.PublishChanges -> "$pending changement${if (pending > 1) "s" else ""} sur GitHub" + (lastCommit?.let { " · « $it »" } ?: "")
+        Kind.Retry -> "La dernière mise en ligne a échoué."
+        Kind.FirstDeploy -> "L'app n'a jamais été publiée."
+        Kind.Rebuild -> if (upToDate) "L'app est déjà à jour." else "Relance une construction depuis GitHub."
+        Kind.InProgress -> "Construction depuis GitHub…"
+        Kind.None -> ""
+    }
+
+    val rebuildExplanation: String get() =
+        if (upToDate) "L'app est déjà à jour. Reconstruire relance une construction depuis GitHub sans changement de code."
+        else "Reconstruire relance une construction depuis GitHub avec le code actuel de la branche."
+
+    /** Note de journal envoyée avec la mise en ligne. */
+    val message: String get() = when (kind) {
+        Kind.PublishChanges -> "Publication de $pending changement${if (pending > 1) "s" else ""} depuis l'app Android"
+        Kind.Retry -> "Nouvel essai de mise en ligne depuis l'app Android"
+        Kind.FirstDeploy -> "Première mise en ligne depuis l'app Android"
+        else -> "Reconstruction depuis l'app Android"
+    }
+}
+
+fun deployPlan(hasRepo: Boolean, latest: Deployment?, git: GitInfo?, deploying: Boolean): DeployPlan {
+    val draft = git?.workdir?.takeIf { it.available && it.dirty }?.files?.size ?: 0
+    if (!hasRepo) return DeployPlan(DeployPlan.Kind.None, draftFiles = draft)
+    if (deploying || latest?.isRunning == true) return DeployPlan(DeployPlan.Kind.InProgress, draftFiles = draft)
+    if (latest?.isFailed == true) return DeployPlan(DeployPlan.Kind.Retry, draftFiles = draft)
+    if (latest == null) return DeployPlan(DeployPlan.Kind.FirstDeploy, draftFiles = draft)
+    val sync = git?.sync?.takeIf { git.available }
+    val pending = if (sync?.state == "behind") (sync.behindBy ?: 0) else 0
+    if (pending > 0) return DeployPlan(DeployPlan.Kind.PublishChanges, pending = pending, commits = sync?.commits.orEmpty(), draftFiles = draft)
+    return DeployPlan(DeployPlan.Kind.Rebuild, upToDate = sync?.state == "up_to_date", draftFiles = draft)
+}
+
+/** « 2.0.199 » plus récent que « 2.0.198 » ? (comparaison numérique, suffixes ignorés). */
+fun isNewerVersion(remote: String?, local: String?): Boolean {
+    fun parts(v: String?) = v.orEmpty().substringBefore('-').split('.').map { it.trim().toIntOrNull() ?: 0 }
+    val r = parts(remote)
+    val l = parts(local)
+    if (remote.isNullOrBlank() || r.all { it == 0 }) return false
+    for (i in 0 until maxOf(r.size, l.size)) {
+        val a = r.getOrElse(i) { 0 }
+        val b = l.getOrElse(i) { 0 }
+        if (a != b) return a > b
+    }
+    return false
+}

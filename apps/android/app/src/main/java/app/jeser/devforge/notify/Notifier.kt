@@ -55,9 +55,11 @@ object Notifier {
     }
 
     fun show(context: Context, events: List<InboxEvent>) {
-        if (events.isEmpty() || !canNotify(context)) return
+        val settings = PrefsNotifSettings(context)
+        val wanted = events.filter { settings.enabled(it.kind) }
+        if (wanted.isEmpty() || !canNotify(context)) return
         val nm = NotificationManagerCompat.from(context)
-        for (e in events.take(6)) {
+        for (e in wanted.take(6)) {
             val channel = if (e.kind == "spec_waiting") CHANNEL_WAITING else CHANNEL_ALERTS
             val n = NotificationCompat.Builder(context, channel)
                 .setSmallIcon(R.drawable.ic_stat_devforge)
