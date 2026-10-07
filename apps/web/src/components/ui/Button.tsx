@@ -18,7 +18,7 @@ const variants: Record<Variant, string> = {
 
 /** Sous lg (téléphone, tablette) : cibles tactiles de 44 px minimum. */
 const sizes: Record<Size, string> = {
-  sm: 'h-8 px-3 text-xs rounded-lg max-lg:h-11',
+  sm: 'h-8 px-3 text-xs rounded-lg max-lg:h-11 max-lg:min-w-11',
   md: 'h-10 px-4 text-sm rounded-xl max-lg:h-11',
   lg: 'h-11 px-5 text-sm rounded-xl',
   /** Carré au doigt, s’élargit quand le libellé s’affiche. */

@@ -280,7 +280,7 @@ function SettingsPageInner() {
         <div class="flex min-w-0 items-center gap-2.5 sm:gap-3">
           <a
             href="/app/settings"
-            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink-muted)] transition hover:border-white/30 hover:bg-white/5 hover:text-white"
+            class="df-hit flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink-muted)] transition hover:border-white/30 hover:bg-white/5 hover:text-white"
             aria-label="Retour à Paramètres"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">

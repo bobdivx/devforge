@@ -308,7 +308,7 @@ export function AgentActionCard({
     <div class="overflow-hidden rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)]">
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-bg)]/40"
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-bg)]/40 max-lg:min-h-11"
         onClick={() => setOpen((o) => !o)}
       >
         <ActionIcon kind={kind} status={call.status} />
@@ -418,7 +418,7 @@ function AgentReflectionCard({
     <div class="overflow-hidden rounded-lg border border-dashed border-[var(--color-line)] bg-[var(--color-bg)]/40">
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-[var(--color-ink-muted)] hover:bg-[var(--color-surface)]/50"
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-[var(--color-ink-muted)] hover:bg-[var(--color-surface)]/50 max-lg:min-h-11"
         onClick={() => hasDetail && setOpen((o) => !o)}
       >
         <span class="text-[var(--color-ink-faint)]">·</span>

@@ -986,7 +986,7 @@ function ClusterInner() {
                   <Tr key={p.uuid}>
                     <Td>
                       <a
-                        class="font-medium hover:underline"
+                        class="df-hit inline-block font-medium hover:underline"
                         href={`/app/projects/view?uuid=${encodeURIComponent(p.uuid)}`}
                       >
                         {p.name}
@@ -995,7 +995,7 @@ function ClusterInner() {
                     <Td>
                       <button
                         type="button"
-                        class="text-left hover:underline"
+                        class="df-hit text-left hover:underline"
                         onClick={() => {
                           const full = nodes.find((n) => n.id === host.id);
                           if (full) setSelected(full);
@@ -1121,7 +1121,7 @@ function ClusterInner() {
               <p class="text-sm font-medium text-[var(--color-ink)]">Invitations</p>
               <button
                 type="button"
-                class="text-xs text-[var(--color-ink-muted)] hover:underline"
+                class="df-hit text-xs text-[var(--color-ink-muted)] hover:underline"
                 onClick={() => setAddOpen(true)}
               >
                 SSH
@@ -1537,7 +1537,7 @@ function ClusterInner() {
                     {projects.map((p) => (
                       <Tr key={p.uuid}>
                         <Td>
-                          <a class="hover:underline" href={`/app/projects/view?uuid=${encodeURIComponent(p.uuid)}`}>
+                          <a class="df-hit inline-block hover:underline" href={`/app/projects/view?uuid=${encodeURIComponent(p.uuid)}`}>
                             {p.name}
                           </a>
                         </Td>

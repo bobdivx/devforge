@@ -216,7 +216,7 @@ export function ProjectActionsPanel({
               <div class="mt-3">
                 <a
                   href={lastResult.gitHref}
-                  class="text-sm font-medium text-[var(--color-accent)] underline"
+                  class="df-hit inline-block text-sm font-medium text-[var(--color-accent)] underline"
                 >
                   Voir l’onglet Git → déployer ces commits
                 </a>
@@ -284,7 +284,7 @@ export function ProjectActionsPanel({
             {isAdmin && (
             <a
               href="/app/runners"
-              class="inline-flex items-center rounded-lg px-3 py-1.5 text-sm text-[var(--color-accent)] hover:underline"
+              class="df-hit inline-flex items-center rounded-lg px-3 py-1.5 text-sm text-[var(--color-accent)] hover:underline"
             >
               Voir tous les runners →
             </a>
@@ -341,7 +341,7 @@ export function ProjectActionsPanel({
                       href={r.html_url}
                       target="_blank"
                       rel="noreferrer"
-                      class="text-sm font-medium text-[var(--color-accent)] hover:underline"
+                      class="df-hit inline-block max-w-full text-sm font-medium text-[var(--color-accent)] hover:underline"
                     >
                       {r.name}
                     </a>

@@ -1156,7 +1156,7 @@ function AdminPageInner() {
           <div class="flex items-center gap-3">
             <a
               href="/app/admin"
-              class="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink-muted)] transition hover:border-white/30 hover:bg-white/5 hover:text-white"
+              class="df-hit flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink-muted)] transition hover:border-white/30 hover:bg-white/5 hover:text-white"
               aria-label="Retour à Admin"
             >
               <svg

@@ -325,7 +325,11 @@ export function ProjectDetailPage(props: Props) {
                     projectUuid={uuid}
                     groupUuid={project.group_uuid}
                     groupName={project.group_name}
+                    currentName={project.name}
+                    tab={tab}
                   />
+                ) : project ? (
+                  <CurrentAppChip projectUuid={uuid} name={project.name} />
                 ) : null}
               </span>
             )
@@ -540,14 +544,37 @@ function ProjectActivityStrip({
   );
 }
 
+/** Pastille « app courante » (apps sans groupe) : toujours le nom de l'app ouverte. */
+function CurrentAppChip({ projectUuid, name }: { projectUuid: string; name: string }) {
+  return (
+    <a
+      href={`/app/projects/view?uuid=${encodeURIComponent(projectUuid)}`}
+      class="df-hit inline-flex max-w-[14rem] items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1 text-xs font-medium text-[var(--color-ink)] hover:bg-white/5"
+      title={`App : ${name}`}
+      aria-label={`App : ${name}. Revenir à l’app`}
+    >
+      <span class="truncate">{name}</span>
+    </a>
+  );
+}
+
 function GroupSiblingSwitcher({
   projectUuid,
   groupUuid,
   groupName,
+  currentName,
+  tab,
 }: {
   projectUuid: string;
   groupUuid: string;
   groupName?: string | null;
+  /**
+   * Nom de l'app ouverte. Fourni sur les onglets détaillés (le titre est « Déploiements »,
+   * « Git »…) : la pastille affiche alors l'app courante, jamais seulement le groupe.
+   */
+  currentName?: string | null;
+  /** Onglet courant, conservé quand on passe à une autre app du groupe. */
+  tab?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [members, setMembers] = useState<AppGroupMember[]>([]);
@@ -590,15 +617,34 @@ function GroupSiblingSwitcher({
   }, [open]);
 
   const siblings = members.filter((m) => m.project_uuid !== projectUuid);
+  const group = groupName || 'Groupe';
+  // Préfixe « Groupe / » seulement s'il apporte quelque chose (pas « Popcornn / popcornn »).
+  const showGroupPrefix =
+    !!currentName && !!groupName && groupName.trim().toLowerCase() !== currentName.trim().toLowerCase();
+  const label = currentName ? (
+    <>
+      {showGroupPrefix && (
+        <span class="hidden max-w-[7rem] truncate text-[var(--color-ink-faint)] sm:inline">
+          {groupName}
+          <span aria-hidden> /</span>
+        </span>
+      )}
+      <span class="truncate text-[var(--color-ink)]">{currentName}</span>
+    </>
+  ) : (
+    <span class="truncate">{group}</span>
+  );
+  const tabSuffix = tab && tab !== 'home' ? `&tab=${encodeURIComponent(tab)}` : '';
+
   if (!loading && siblings.length === 0 && members.length <= 1) {
-    // Still show a compact link to the group page when alone in group
+    // Seule dans son groupe : lien compact vers la page du groupe.
     return (
       <a
         href={`/app/groups/view?uuid=${encodeURIComponent(groupUuid)}`}
-        class="inline-flex max-w-[12rem] items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1 text-xs font-medium text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]"
-        title={groupName || 'Groupe'}
+        class="df-hit inline-flex max-w-[14rem] items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1 text-xs font-medium text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]"
+        title={currentName ? `App : ${currentName} · groupe ${group}` : group}
       >
-        <span class="truncate">{groupName || 'Groupe'}</span>
+        {label}
       </a>
     );
   }
@@ -607,13 +653,18 @@ function GroupSiblingSwitcher({
     <div class="relative" ref={ref}>
       <button
         type="button"
-        class="inline-flex max-w-[14rem] items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1 text-xs font-medium text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+        class="df-hit inline-flex max-w-[16rem] items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1 text-xs font-medium text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
         aria-expanded={open}
         aria-haspopup="listbox"
+        aria-label={
+          currentName
+            ? `App : ${currentName} (groupe ${group}). Changer d’app du groupe`
+            : `Groupe ${group}. Apps du même groupe`
+        }
         onClick={() => setOpen((v) => !v)}
         title="Apps du même groupe"
       >
-        <span class="truncate">{groupName || 'Groupe'}</span>
+        {label}
         <ChevronDown size={12} class={cn('shrink-0 opacity-70', open && 'rotate-180')} aria-hidden />
       </button>
       {open && (
@@ -623,7 +674,7 @@ function GroupSiblingSwitcher({
         >
           <a
             href={`/app/groups/view?uuid=${encodeURIComponent(groupUuid)}`}
-            class="block rounded-lg px-3 py-2 text-xs font-medium text-[var(--color-accent)] hover:bg-white/5"
+            class="flex items-center rounded-lg px-3 py-2 text-xs font-medium text-[var(--color-accent)] hover:bg-white/5 max-lg:min-h-11"
             onClick={() => setOpen(false)}
           >
             Voir le groupe
@@ -639,9 +690,9 @@ function GroupSiblingSwitcher({
                   key={m.project_uuid}
                   role="option"
                   aria-selected={current}
-                  href={`/app/projects/view?uuid=${encodeURIComponent(m.project_uuid)}`}
+                  href={`/app/projects/view?uuid=${encodeURIComponent(m.project_uuid)}${tabSuffix}`}
                   class={cn(
-                    'flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs transition-colors',
+                    'flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs transition-colors max-lg:min-h-11',
                     current
                       ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
                       : 'text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
@@ -1008,17 +1059,18 @@ function ProjectOverview({
                   href={project.production_url}
                   target="_blank"
                   rel="noreferrer"
-                  class="mt-0.5 block truncate text-sm text-[var(--color-accent)] hover:underline"
+                  class="df-hit mt-0.5 block text-sm text-[var(--color-accent)] hover:underline"
                 >
-                  {project.production_url.replace(/^https?:\/\//, '')}
+                  <span class="block truncate">{project.production_url.replace(/^https?:\/\//, '')}</span>
                 </a>
               )}
-              <div class="mt-2 flex flex-wrap items-center gap-1">
+              {/* Touch : espacement élargi pour que chaque zone de toucher de 44 px reste à son bouton. */}
+              <div class="mt-2 flex flex-wrap items-center gap-1 max-lg:mt-5 max-lg:gap-3">
                 {project.production_url && (
                   <>
                     <button
                       type="button"
-                      class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+                      class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
                       title="Ouvrir l’app"
                       aria-label="Ouvrir l’app"
                       onClick={() => window.open(project.production_url!, '_blank', 'noopener,noreferrer')}
@@ -1027,7 +1079,7 @@ function ProjectOverview({
                     </button>
                     <button
                       type="button"
-                      class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+                      class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
                       title={copied ? 'Copié' : 'Copier l’URL'}
                       aria-label="Copier l’URL"
                       onClick={copyUrl}
@@ -1038,7 +1090,7 @@ function ProjectOverview({
                 )}
                 <button
                   type="button"
-                  class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
+                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
                   title="Déployer"
                   aria-label="Déployer"
                   disabled={deployBusy || !!lifeBusy || !project.git_repository}
@@ -1048,7 +1100,7 @@ function ProjectOverview({
                 </button>
                 <button
                   type="button"
-                  class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
+                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
                   title="Redémarrer"
                   aria-label="Redémarrer"
                   disabled={!!lifeBusy || deployBusy}
@@ -1058,7 +1110,7 @@ function ProjectOverview({
                 </button>
                 <button
                   type="button"
-                  class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
+                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
                   title="Arrêter"
                   aria-label="Arrêter"
                   disabled={!!lifeBusy || deployBusy}
@@ -1068,7 +1120,7 @@ function ProjectOverview({
                 </button>
                 <a
                   href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`}
-                  class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
                   title="Santé / déploiements"
                   aria-label="Santé / déploiements"
                 >
@@ -1076,7 +1128,7 @@ function ProjectOverview({
                 </a>
                 <button
                   type="button"
-                  class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
                   title="Règles & Directives Agent (AGENTS.md)"
                   aria-label="Règles & Directives Agent"
                   onClick={onOpenRules}
@@ -1128,7 +1180,7 @@ function ProjectOverview({
           <div>
             <button
               type="button"
-              class="mb-3 inline-flex items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+              class="df-hit mb-3 inline-flex items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
               aria-expanded={autresOpen}
               onClick={() => setAutresOpen((v) => !v)}
             >
@@ -1986,7 +2038,7 @@ function PostgresSection({
           value={name}
           onInput={(e) => setName((e.target as HTMLInputElement).value)}
         />
-        <label class="flex items-center gap-2 text-sm text-[var(--color-ink)]">
+        <label class="flex cursor-pointer items-center gap-2 text-sm text-[var(--color-ink)] max-lg:min-h-11">
           <input
             type="checkbox"
             checked={migrate}

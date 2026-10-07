@@ -216,7 +216,7 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
           <button
             type="button"
             class={cn(
-              'flex-1 px-3 py-2 text-xs font-medium',
+              'flex-1 px-3 py-2 text-xs font-medium max-lg:min-h-11',
               mobilePane === 'chat' ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink-muted)]',
             )}
             onClick={() => setMobilePane('chat')}
@@ -226,7 +226,7 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
           <button
             type="button"
             class={cn(
-              'flex-1 px-3 py-2 text-xs font-medium',
+              'flex-1 px-3 py-2 text-xs font-medium max-lg:min-h-11',
               mobilePane === 'atelier' ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink-muted)]',
             )}
             onClick={() => setMobilePane('atelier')}
