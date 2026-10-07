@@ -1,4 +1,5 @@
 import { api, type ClusterNode, type Project } from '../lib/api';
+import { AndroidAppBanner } from './AndroidAppBanner';
 import { nodeShortLabel } from '../lib/cluster-display';
 import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { cn } from '../lib/cn';
@@ -376,6 +377,7 @@ export function HomePage() {
 
   return (
     <AppShell active="home" title="Applications">
+      <AndroidAppBanner />
       {error && (
         <Alert tone="warn" class="mb-4">
           Impossible de joindre le serveur.

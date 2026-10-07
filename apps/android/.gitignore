@@ -1,0 +1,13 @@
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+captures/
+*.keystore
+*.jks
+keystore.properties
+
+# Android sources (package app.jeser.devforge.data)
+!app/src/main/java/app/jeser/devforge/data/

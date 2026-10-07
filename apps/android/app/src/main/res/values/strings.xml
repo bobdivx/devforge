@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DevForge</string>
+    <string name="channel_alerts">Alertes des apps</string>
+    <string name="channel_alerts_desc">Mise en ligne échouée, app qui ne répond plus.</string>
+    <string name="channel_waiting">Braise attend ton OK</string>
+    <string name="channel_waiting_desc">Une spec est prête et attend ta validation.</string>
+</resources>

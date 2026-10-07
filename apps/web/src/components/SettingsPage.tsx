@@ -248,6 +248,13 @@ function SettingsPageInner() {
             description="Profil, rôle et workspace"
             icon={<HubIcon name="user" />}
           />
+          <HubTile
+            index={1}
+            href="/app/android"
+            title="App Android"
+            description="Installer DevForge sur ton téléphone"
+            icon={<span class="text-lg leading-none" aria-hidden>📱</span>}
+          />
           {SETTINGS_CARDS.map((card, i) => (
             <SettingCard
               key={card.key}
@@ -256,10 +263,10 @@ function SettingsPageInner() {
                   ? { ...card, description: `Principal · ${principal}` }
                   : card
               }
-              index={i + 1}
+              index={i + 2}
             />
           ))}
-          {isAdmin && <AcmeEmailTile index={SETTINGS_CARDS.length + 1} />}
+          {isAdmin && <AcmeEmailTile index={SETTINGS_CARDS.length + 2} />}
         </HubGrid>
       </AppShell>
     );

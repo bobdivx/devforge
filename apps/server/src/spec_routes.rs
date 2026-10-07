@@ -45,7 +45,7 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-fn workdir_of(project_uuid: &str, raw: Option<&str>) -> PathBuf {
+pub(crate) fn workdir_of(project_uuid: &str, raw: Option<&str>) -> PathBuf {
     let raw = raw.unwrap_or("").trim();
     let resolved = if raw.is_empty() {
         devforge_deploy::resolve_project_workdir(

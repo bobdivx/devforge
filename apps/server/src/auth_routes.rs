@@ -249,6 +249,12 @@ pub async fn resolve_auth(
         return Ok(user.map(|u| (u, vec![ABILITY_READ.to_string(), ABILITY_WRITE.to_string()])));
     }
 
+    if token.starts_with(crate::mcp_oauth::ACCESS_TOKEN_PREFIX) {
+        // App native (OAuth PKCE) : uniquement les jetons portant le scope `api`.
+        return crate::mcp_oauth::resolve_api_access_token(&state.pool, token)
+            .await
+            .map_err(internal);
+    }
     if !token.starts_with("dfat_") {
         return Ok(None);
     }

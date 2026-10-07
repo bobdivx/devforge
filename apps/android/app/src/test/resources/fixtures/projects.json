@@ -1,0 +1,5 @@
+{"data":[
+ {"auto_deploy":true,"build_pack":"dockerfile","deploy":{"message":"Auto-deploy (1 commit) — Merge pull request #12","sha":"ae471f0","status":"success"},"git_branch":"dev","git_repository":"https://github.com/example/client","group_name":"Popcorn","group_slug":"popcorn","group_uuid":"9be29e1f-0000-0000-0000-000000000001","name":"popcorn","port":80,"production_url":"https://client.example.app","role":"client","slug":"popcorn-bba0","status":"live","sync":{"behind_by":0,"deployed_sha":"ae471f0","head_sha":null,"state":"unknown"},"updated_at":"2026-10-06T21:46:35.203689827+00:00","uuid":"bba0bc75-0000-0000-0000-000000000001"},
+ {"auto_deploy":false,"build_pack":"nixpacks","deploy":{"message":null,"sha":null,"status":"failed"},"git_branch":"main","git_repository":"https://github.com/example/shop","name":"Boutique","port":3000,"production_url":null,"slug":"boutique-1a2b","status":"failed","updated_at":"2026-10-07T08:00:00+00:00","uuid":"p-failed","future_field":{"nested":[1,2,3]}},
+ {"name":"Brouillon","uuid":"p-draft","status":"draft"}
+]}

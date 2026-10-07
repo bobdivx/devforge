@@ -129,6 +129,13 @@ fn scope_and_resource_rules() {
         granted_scope(Some("mcp offline_access")),
         "mcp offline_access"
     );
+    // `api` (REST, app Android) seulement sur demande explicite.
+    assert_eq!(
+        granted_scope(Some("mcp offline_access api")),
+        "mcp offline_access api"
+    );
+    assert_eq!(granted_scope(Some("api")), "mcp api");
+    assert!(redirect_uri_allowed("app.jeser.devforge:/oauth/callback"));
     assert!(resource_ok(BASE, "https://web.jeser.app/api/v1/mcp"));
     assert!(resource_ok(BASE, "https://web.jeser.app/"));
     assert!(!resource_ok(BASE, "https://web.jeser.app.evil.io/mcp"));

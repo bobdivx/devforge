@@ -41,6 +41,9 @@ const REQUEST_TTL_SECS: i64 = 900;
 
 pub const SCOPE_MCP: &str = "mcp";
 const SCOPE_OFFLINE: &str = "offline_access";
+/// API REST `/api/v1/*` (app Android native). Jamais accordé sans demande explicite :
+/// un connecteur MCP qui ne le demande pas reste limité au MCP.
+pub const SCOPE_API: &str = "api";
 
 /// Chemins MCP servis (le premier est la ressource par défaut).
 pub const MCP_PATHS: [&str; 2] = ["/api/v1/mcp", "/mcp"];
@@ -248,7 +251,7 @@ pub fn authorization_server_doc(base: &str) -> Value {
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
         "revocation_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
-        "scopes_supported": [SCOPE_MCP, SCOPE_OFFLINE],
+        "scopes_supported": [SCOPE_MCP, SCOPE_OFFLINE, SCOPE_API],
         "client_id_metadata_document_supported": true,
         "authorization_response_iss_parameter_supported": true,
         "service_documentation": base,
@@ -625,7 +628,7 @@ pub(crate) async fn register_client_core(pool: &sqlx::PgPool, body: &[u8]) -> Re
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],
         "token_endpoint_auth_method": method,
-        "scope": format!("{SCOPE_MCP} {SCOPE_OFFLINE}"),
+        "scope": format!("{SCOPE_MCP} {SCOPE_OFFLINE} {SCOPE_API}"),
     });
     if !client_uri.is_empty() {
         out["client_uri"] = json!(client_uri);
@@ -658,17 +661,17 @@ pub struct AuthorizeQuery {
     resource: Option<String>,
 }
 
-/// Scopes accordés : toujours `mcp`, plus `offline_access` si demandé. Les autres sont ignorés.
+/// Scopes accordés : toujours `mcp`, plus `offline_access` et `api` si demandés. Les autres sont ignorés.
 pub fn granted_scope(requested: Option<&str>) -> String {
-    let wants_offline = requested
-        .unwrap_or("")
-        .split_whitespace()
-        .any(|s| s == SCOPE_OFFLINE);
-    if wants_offline {
-        format!("{SCOPE_MCP} {SCOPE_OFFLINE}")
-    } else {
-        SCOPE_MCP.to_string()
+    let req: Vec<&str> = requested.unwrap_or("").split_whitespace().collect();
+    let mut out = vec![SCOPE_MCP];
+    if req.contains(&SCOPE_OFFLINE) {
+        out.push(SCOPE_OFFLINE);
     }
+    if req.contains(&SCOPE_API) {
+        out.push(SCOPE_API);
+    }
+    out.join(" ")
 }
 
 /// `resource` (RFC 8707) doit désigner cette instance.
@@ -853,7 +856,11 @@ async fn get_request(
     let r = load_request(&state, &id).await?;
     let redirect_host = reqwest::Url::parse(&r.redirect_uri)
         .ok()
-        .and_then(|u| u.host_str().map(str::to_string))
+        .and_then(|u| match u.host_str() {
+            Some(h) if !h.is_empty() => Some(h.to_string()),
+            // Schéma d'app native (ex. `app.jeser.devforge:/oauth/callback`).
+            _ => Some(format!("{}:", u.scheme())),
+        })
         .unwrap_or_default();
     Ok(Json(json!({
         "client_id": r.client_id,
@@ -1401,6 +1408,22 @@ pub async fn resolve_access_token(
     pool: &sqlx::PgPool,
     token: &str,
 ) -> Result<Option<(UserRow, Vec<String>)>, sqlx::Error> {
+    resolve_access_token_scoped(pool, token, SCOPE_MCP).await
+}
+
+/// Access token OAuth accepté sur l'API REST : seulement s'il porte le scope `api`.
+pub async fn resolve_api_access_token(
+    pool: &sqlx::PgPool,
+    token: &str,
+) -> Result<Option<(UserRow, Vec<String>)>, sqlx::Error> {
+    resolve_access_token_scoped(pool, token, SCOPE_API).await
+}
+
+async fn resolve_access_token_scoped(
+    pool: &sqlx::PgPool,
+    token: &str,
+    required_scope: &str,
+) -> Result<Option<(UserRow, Vec<String>)>, sqlx::Error> {
     if !token.starts_with(ACCESS_TOKEN_PREFIX) {
         return Ok(None);
     }
@@ -1416,7 +1439,7 @@ pub async fn resolve_access_token(
     let Some((id, user_uuid, scope)) = row else {
         return Ok(None);
     };
-    if !scope.split_whitespace().any(|s| s == SCOPE_MCP) {
+    if !scope.split_whitespace().any(|s| s == required_scope) {
         return Ok(None);
     }
     let _ = sqlx::query("UPDATE mcp_oauth_tokens SET last_used_at = $1 WHERE id = $2")

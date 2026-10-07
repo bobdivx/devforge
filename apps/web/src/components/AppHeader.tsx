@@ -256,6 +256,14 @@ export function AppHeader({
             <div class="my-1 border-t border-[var(--color-line)] lg:hidden" role="separator" />
             <a
               role="menuitem"
+              href="/app/android"
+              class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
+              onClick={() => setMenuOpen(false)}
+            >
+              📱 App Android
+            </a>
+            <a
+              role="menuitem"
               href="/app/team"
               class="block px-3 py-2.5 text-sm text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
               onClick={() => setMenuOpen(false)}
