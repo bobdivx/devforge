@@ -163,6 +163,7 @@ export function ProjectDetailPage(props: Props) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
   const [rulesModalOpen, setRulesModalOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [workspaceBeta, setWorkspaceBeta] = useState(true);
@@ -181,7 +182,13 @@ export function ProjectDetailPage(props: Props) {
 
   useEffect(() => {
     let cancelled = false;
+    if (!uuid) {
+      setError('Lien incomplet : il manque l’identifiant de l’app.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setError(null);
     // Premier paint : Postgres seul (pas de probe HTTP/Docker ni GitHub).
     api
       .project(uuid)
@@ -216,7 +223,7 @@ export function ProjectDetailPage(props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [uuid]);
+  }, [uuid, reloadKey]);
 
   // Garde l’Overview à jour : préférer le running courant au succès stale.
   useEffect(() => {
@@ -252,7 +259,11 @@ export function ProjectDetailPage(props: Props) {
 
   if (isHome) {
     return (
-      <AppShell active="projects" sideNavLabel="" wide>
+      <AppShell active="projects" sideNavLabel="" wide hideHeaderOnMobile>
+        {error && !project && !loading ? (
+          <ProjectLoadError error={error} onRetry={() => setReloadKey((k) => k + 1)} />
+        ) : (
+        <>
         {error && (
           <Alert tone="warn" class="mb-4">
             {error}
@@ -287,12 +298,15 @@ export function ProjectDetailPage(props: Props) {
           open={featureOpen}
           onClose={() => setFeatureOpen(false)}
         />
+        </>
+        )}
       </AppShell>
     );
   }
 
   return (
     <AppShell
+      hideHeaderOnMobile
       active="projects"
       projectNav={projectNavPrimary(uuid, navOpts)}
       projectNavMore={projectNavMore(uuid, navOpts)}
@@ -331,11 +345,13 @@ export function ProjectDetailPage(props: Props) {
         />
       }
     >
-      {error && (
+      {error && !project && !loading ? (
+        <ProjectLoadError error={error} onRetry={() => setReloadKey((k) => k + 1)} />
+      ) : error ? (
         <Alert tone="warn" class="mb-4">
           {error}
         </Alert>
-      )}
+      ) : null}
       {tab === 'overview' && loading && !project && (
         <p class="text-sm text-[var(--color-ink-muted)]">Chargement du projet…</p>
       )}
@@ -4554,5 +4570,39 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
         )}
       </Modal>
     </FadeIn>
+  );
+}
+
+/** Échec du chargement de l'app : message clair sur la page, jamais de redirection silencieuse. */
+function ProjectLoadError({ error, onRetry }: { error: string; onRetry: () => void }) {
+  const e = error.toLowerCase();
+  const reason = /not found|introuvable|404|no rows/.test(e)
+    ? 'Cette app n’existe pas ou a été supprimée.'
+    : /forbidden|unauthori|401|403|accès|access/.test(e)
+      ? 'Tu n’as pas accès à cette app avec ce compte.'
+      : /failed to fetch|network|injoignable|load failed/.test(e)
+        ? 'Le serveur DevForge ne répond pas pour l’instant.'
+        : /lien incomplet/.test(e)
+          ? 'Le lien est incomplet.'
+          : 'Le serveur a renvoyé une erreur.';
+  return (
+    <div class="mx-auto mt-6 max-w-lg rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-5 text-center sm:mt-12 sm:p-6" role="alert">
+      <div class="text-3xl" aria-hidden>
+        🧭
+      </div>
+      <h1 class="mt-2 text-xl font-semibold tracking-tight">Impossible d’ouvrir cette app</h1>
+      <p class="mt-2 text-sm text-[var(--color-ink-muted)]">{reason}</p>
+      <p class="mt-3 break-words rounded-lg bg-black/20 px-3 py-2 font-mono text-[11px] text-[var(--color-ink-faint)] [overflow-wrap:anywhere]">
+        {error}
+      </p>
+      <div class="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
+        <Button class="max-lg:h-11" onClick={onRetry}>
+          Réessayer
+        </Button>
+        <Button class="max-lg:h-11" variant="secondary" href="/app">
+          Retour aux apps
+        </Button>
+      </div>
+    </div>
   );
 }

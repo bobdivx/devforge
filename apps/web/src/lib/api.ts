@@ -538,7 +538,8 @@ export const api = {
   removeGroupMember: (uuid: string, projectUuid: string) =>
     request<{ data: AppGroup }>(`/groups/${uuid}/members/${projectUuid}`, { method: 'DELETE' }),
   project: async (uuid: string, opts?: { live?: boolean }) => {
-    const qs = opts?.live ? '?live=1' : '';
+    // L'API attend un booléen strict (`true`/`false`) : `?live=1` répondait 400.
+    const qs = opts?.live ? '?live=true' : '';
     const res = await request<{ data: Project | { project: Project; deployments: Deployment[] } }>(
       '/projects/' + uuid + qs,
     );

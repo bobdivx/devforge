@@ -456,12 +456,24 @@ export function AgentPlanActions({
   return (
     <div class="mt-2 flex flex-wrap gap-2" aria-label={plan.title}>
       {onApprovePlan && (
-        <Button size="sm" variant="secondary" disabled={busy} onClick={onApprovePlan}>
-          Exécuter en local
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy}
+          onClick={onApprovePlan}
+          title="Braise applique ce plan dans le brouillon. Rien n’est mis en ligne."
+        >
+          Construire en brouillon
         </Button>
       )}
       {canOpenPr && onOpenPr && (
-        <Button size="sm" variant="primary" disabled={busy} onClick={onOpenPr}>
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={busy}
+          onClick={onOpenPr}
+          title="Enregistre les changements du brouillon sur GitHub (pull request). Rien n’est mis en ligne."
+        >
           Valider et créer une PR
         </Button>
       )}
