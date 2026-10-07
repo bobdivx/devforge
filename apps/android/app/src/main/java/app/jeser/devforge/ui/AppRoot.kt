@@ -44,7 +44,6 @@ fun HomeRoot(
                 onRefresh = { appsVm.refresh() },
                 onOpen = { onSelect(it) },
                 onSignOut = onSignOut,
-                onSetRunning = appsVm::setRunning,
                 onNoticeShown = appsVm::noticeShown,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -93,10 +92,9 @@ private fun ProjectRoute(graph: AppGraph, uuid: String, onBack: (() -> Unit)?, o
 
 /** Même écran d'accueil, sans ViewModel (captures, aperçus). */
 @Composable
-fun HomeRootPreview(apps: AppsUiState, initialInboxOpen: Boolean = false, initialStopConfirm: String? = null) {
+fun HomeRootPreview(apps: AppsUiState, initialInboxOpen: Boolean = false) {
     AppsScreen(
         apps, {}, {}, {}, Modifier.fillMaxSize(),
         initialInboxOpen = initialInboxOpen,
-        initialStopConfirm = initialStopConfirm,
     )
 }

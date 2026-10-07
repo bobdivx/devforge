@@ -53,7 +53,7 @@ object SampleData {
     val apps = AppsUiState(projects = projects, inbox = inbox, me = Me("mathieu@jeser.app", "Mathieu"), loading = false)
 
     val deployments = listOf(
-        Deployment("d-3", "failed", "abc1234ff", "Ajoute la page contact", "npm ERR! missing script: build",
+        Deployment("d-3", "failed", "abc1234ff", "Ajoute la page contact avec formulaire, carte et horaires d'ouverture", "npm ERR! missing script: build",
             "Ajoute un script « build » dans package.json.", ago(12)),
         Deployment("d-2", "success", "9b620d051d", "Landing commerciale publique", createdAt = ago(60 * 26)),
         Deployment("d-1", "success", "5e1f00aa", "Première version", createdAt = ago(60 * 24 * 6)),

@@ -1,5 +1,6 @@
 package app.jeser.devforge.ui.project
 
+import app.jeser.devforge.data.cleanLogs
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -9,12 +10,20 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
@@ -68,31 +77,6 @@ private fun containerLabel(c: ContainerState): Pair<String, Color> = when (c.kin
     ContainerState.Kind.Unknown -> "Inconnu" to DfColors.InkFaint
 }
 
-/** Détail de l'état : conteneur, contrôle de santé, GitHub, brouillon. */
-@Composable
-fun StatusSheet(state: ProjectUiState, onDismiss: () -> Unit) {
-    val s = state.summary
-    val c = state.containerState
-    InfoSheet("État de ${state.project?.name.orEmpty()}", onDismiss) {
-        InfoRow("Statut", s.status.label, s.status.color(), s.since)
-        val (cl, cc) = containerLabel(c)
-        InfoRow("Conteneur", cl, cc, state.container?.message?.takeIf { it.isNotBlank() && c.exists }?.let { "Docker : $it" })
-        InfoRow(
-            "Contrôle de santé", s.health,
-            when (s.healthOk) { true -> DfColors.Ok; false -> DfColors.Danger; null -> DfColors.InkMuted },
-            relativeTime(state.checkedAt).takeIf { it.isNotEmpty() }?.let { "Vérifié $it · actualisé toutes les 10 s" },
-        )
-        syncLabel(state.git)?.let { InfoRow("GitHub", it.removePrefix("GitHub : ").replaceFirstChar { ch -> ch.uppercase() }, sub = state.git?.branch?.let { b -> "Branche $b" }) }
-        state.git?.workdir?.takeIf { it.available }?.let { w ->
-            InfoRow(
-                "Brouillon local",
-                if (w.dirty) "${w.files.size} fichier${if (w.files.size > 1) "s" else ""} modifié${if (w.files.size > 1) "s" else ""}" else "Rien en attente",
-                sub = if (w.dirty) "Pas encore en ligne : publie avec « Mettre en ligne » une fois sur GitHub." else null,
-            )
-        }
-    }
-}
-
 /** Historique des mises en ligne ; un toucher ouvre les logs. */
 @Composable
 fun DeploysSheet(state: ProjectUiState, onDismiss: () -> Unit, onOpen: (app.jeser.devforge.data.Deployment) -> Unit) {
@@ -110,28 +94,6 @@ fun DeploysSheet(state: ProjectUiState, onDismiss: () -> Unit, onOpen: (app.jese
             Text("Pas encore de mise en ligne. Le brouillon reste local.", color = DfColors.InkFaint)
         }
         state.deployments.take(20).forEach { d -> DeployRow(d, onClick = { onOpen(d) }) }
-    }
-}
-
-/** Domaines de l'app (+ lien d'aperçu du brouillon). */
-@Composable
-fun DomainSheet(state: ProjectUiState, onDismiss: () -> Unit) {
-    val uri = LocalUriHandler.current
-    val clip = LocalClipboardManager.current
-    val hosts = state.project?.productionUrl?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
-    InfoSheet("Domaine", onDismiss) {
-        if (hosts.isEmpty()) {
-            Text("Pas encore de domaine : l'app n'a jamais été mise en ligne. Le brouillon reste local.", color = DfColors.InkMuted)
-        }
-        hosts.forEach { h ->
-            val url = if (h.startsWith("http")) h else "https://$h"
-            DomainRow(url.removePrefix("https://").removePrefix("http://").trimEnd('/'), "En ligne", onOpen = { runCatching { uri.openUri(url) } },
-                onCopy = { clip.setText(AnnotatedString(url)) })
-        }
-        state.preview?.previewUrl?.let { p ->
-            DomainRow(p.removePrefix("https://"), if (state.preview.running) "Aperçu du brouillon (local)" else "Aperçu du brouillon · arrêté",
-                onOpen = { runCatching { uri.openUri(p) } }, onCopy = { clip.setText(AnnotatedString(p)) })
-        }
     }
 }
 
@@ -156,15 +118,109 @@ private fun roleOf(k: PersonaKey) = when (k) {
     PersonaKey.Plume -> "Relit le code"
 }
 
-/** L'équipe et son état réel (agents, specs, dernière mise en ligne). */
 @Composable
-fun TeamSheet(state: ProjectUiState, onDismiss: () -> Unit) {
-    InfoSheet("L'équipe", onDismiss) {
+private fun SectionLabel(text: String) {
+    Text(text.uppercase(), color = DfColors.InkFaint, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = .8.sp,
+        modifier = Modifier.padding(top = 6.dp))
+}
+
+/**
+ * Tout le détail de l'app dans une seule feuille : état, dernière mise en ligne (texte complet),
+ * domaine / HTTPS, GitHub, brouillon, équipe.
+ */
+@Composable
+fun DetailsSheet(
+    state: ProjectUiState,
+    onDismiss: () -> Unit,
+    onOpenLogs: (app.jeser.devforge.data.Deployment) -> Unit,
+    onHistory: () -> Unit,
+) {
+    val s = state.summary
+    val c = state.containerState
+    val uri = LocalUriHandler.current
+    val clip = LocalClipboardManager.current
+    InfoSheet(state.project?.name.orEmpty(), onDismiss) {
+        SectionLabel("État")
+        InfoRow("Statut", s.status.label, s.status.color(), s.since)
+        val (cl, cc) = containerLabel(c)
+        InfoRow("Conteneur", cl, cc, state.container?.message?.takeIf { it.isNotBlank() && c.exists }?.let { "Docker : $it" })
+        InfoRow(
+            "Contrôle de santé", s.health,
+            when (s.healthOk) { true -> DfColors.Ok; false -> DfColors.Danger; null -> DfColors.InkMuted },
+            relativeTime(state.checkedAt).takeIf { it.isNotEmpty() }?.let { "Vérifié $it · actualisé toutes les 10 s" },
+        )
+
+        SectionLabel("Dernière mise en ligne")
+        val latest = state.latest
+        if (latest == null) {
+            Text("Pas encore de mise en ligne. Le brouillon reste local.", color = DfColors.InkMuted)
+        } else {
+            val (label, color) = deployLabel(latest)
+            Surface(color = DfColors.Card, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, if (latest.isFailed) DfColors.Danger.copy(alpha = .35f) else DfColors.Line), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // Message complet, jamais tronqué.
+                    Text(latest.gitMessage?.trim()?.takeIf { it.isNotBlank() } ?: "Mise en ligne", fontWeight = FontWeight.SemiBold, lineHeight = 21.sp)
+                    Text(
+                        listOfNotNull(label, latest.gitSha?.take(7), relativeTime(latest.createdAt).takeIf { it.isNotEmpty() }).joinToString(" · "),
+                        color = color, fontSize = 13.sp,
+                    )
+                    if (latest.isFailed && !latest.errorSummary.isNullOrBlank()) {
+                        Text(latest.errorSummary, color = DfColors.Danger, fontSize = 13.sp)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { onOpenLogs(latest) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Voir les logs") }
+                        TextButton(onClick = onHistory, modifier = Modifier.heightIn(min = 48.dp)) { Text("Historique") }
+                    }
+                }
+            }
+        }
+
+        SectionLabel("Domaine")
+        val hosts = state.project?.productionUrl?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+        if (hosts.isEmpty()) {
+            Text("Pas encore de domaine : l'app n'a jamais été mise en ligne.", color = DfColors.InkMuted)
+        }
+        val https = when (s.healthOk) { true -> "HTTPS · répond"; false -> "HTTPS · ne répond pas"; null -> "HTTPS" }
+        hosts.forEach { h ->
+            val url = if (h.startsWith("http")) h else "https://$h"
+            DomainRow(url.removePrefix("https://").removePrefix("http://").trimEnd('/'), https, onOpen = { runCatching { uri.openUri(url) } },
+                onCopy = { clip.setText(AnnotatedString(url)) })
+        }
+        state.preview?.previewUrl?.let { p ->
+            DomainRow(p.removePrefix("https://"), if (state.preview.running) "Aperçu du brouillon (local)" else "Aperçu du brouillon · arrêté",
+                onOpen = { runCatching { uri.openUri(p) } }, onCopy = { clip.setText(AnnotatedString(p)) })
+        }
+
+        val sync = syncLabel(state.git)
+        val workdir = state.git?.workdir?.takeIf { it.available }
+        if (sync != null || workdir != null) SectionLabel("GitHub")
+        sync?.let { label ->
+            Surface(color = DfColors.Card, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, DfColors.Line), modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+                        Text(label.removePrefix("GitHub : ").replaceFirstChar { ch -> ch.uppercase() }, fontWeight = FontWeight.SemiBold)
+                        state.git?.branch?.let { b -> Text("Branche $b", color = DfColors.InkMuted, fontSize = 13.sp) }
+                    }
+                    state.git?.sync?.htmlUrl?.let { link ->
+                        TextButton(onClick = { runCatching { uri.openUri(link) } }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Voir ↗") }
+                    }
+                }
+            }
+        }
+        workdir?.let { w ->
+            InfoRow(
+                "Brouillon local",
+                if (w.dirty) "${w.files.size} fichier${if (w.files.size > 1) "s" else ""} modifié${if (w.files.size > 1) "s" else ""}" else "Rien en attente",
+                sub = if (w.dirty) "Pas encore en ligne : publie avec « Mettre en ligne » une fois sur GitHub." else null,
+            )
+        }
+
+        SectionLabel("Équipe")
         state.team.forEach { t ->
             val p = t.key.persona()
-            Surface(color = DfColors.Card, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, DfColors.Line), modifier = Modifier.fillMaxWidth()) {
+            Surface(color = DfColors.Card, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, DfColors.Line), modifier = Modifier.fillMaxWidth()) {
                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    PersonaAvatar(p, 44.dp)
+                    PersonaAvatar(p, 40.dp)
                     Column(Modifier.weight(1f).padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("${p.displayName} ${p.emoji}", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -173,11 +229,82 @@ fun TeamSheet(state: ProjectUiState, onDismiss: () -> Unit) {
                             Text(t.label, color = t.tone.color(), fontSize = 13.sp, fontWeight = FontWeight.Medium)
                         }
                         Text(roleOf(t.key), color = DfColors.InkFaint, fontSize = 12.sp)
-                        t.detail?.let { Text(it, color = DfColors.InkMuted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                        t.detail?.let { Text(it, color = DfColors.InkMuted, fontSize = 13.sp) }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SheetAction(
+    icon: ImageVector,
+    title: String,
+    sub: String,
+    onClick: () -> Unit,
+    tint: Color = DfColors.Ink,
+    enabled: Boolean = true,
+    busy: Boolean = false,
+) {
+    val alpha = if (enabled) 1f else .4f
+    Surface(
+        onClick = onClick,
+        enabled = enabled && !busy,
+        color = DfColors.Card,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, DfColors.Line),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+    ) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(40.dp).background(tint.copy(alpha = .12f * alpha), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = tint)
+                else Icon(icon, contentDescription = null, tint = tint.copy(alpha = alpha), modifier = Modifier.size(22.dp))
+            }
+            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                Text(title, fontWeight = FontWeight.SemiBold, color = DfColors.Ink.copy(alpha = alpha))
+                Text(sub, color = DfColors.InkMuted.copy(alpha = alpha), fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+/** « Plus » : actions moins fréquentes. Redémarrer et Arrêter passent toujours par une confirmation. */
+@Composable
+fun MoreSheet(state: ProjectUiState, actions: ProjectActions, onDismiss: () -> Unit, onSheet: (ProjectSheet) -> Unit) {
+    val running = state.containerState.running
+    InfoSheet("Plus d'actions", onDismiss) {
+        SheetAction(
+            Icons.Filled.Visibility, "Aperçu du brouillon", "Ouvre la version en cours, en local. Rien n'est publié.",
+            onClick = { actions.onOpenPreview(); onDismiss() }, busy = state.previewStarting, tint = DfColors.Accent,
+        )
+        SheetAction(
+            Icons.Filled.RestartAlt, "Redémarrer", "Relance le conteneur, sans reconstruire. Confirmation demandée.",
+            onClick = { onSheet(ProjectSheet.Restart) },
+            enabled = state.canControl && running, busy = state.lifecycleBusy == "restart",
+        )
+        if (running || state.lifecycleBusy == "stop") {
+            SheetAction(
+                Icons.Filled.Stop, "Arrêter", "Le site ne répond plus jusqu'au redémarrage. Confirmation demandée.",
+                onClick = { onSheet(ProjectSheet.Stop) },
+                enabled = state.canControl, busy = state.lifecycleBusy == "stop", tint = DfColors.Danger,
+            )
+        } else {
+            SheetAction(
+                Icons.Filled.PlayArrow, "Démarrer", "Relance l'app arrêtée.",
+                onClick = { actions.onLifecycle("start"); onDismiss() },
+                enabled = state.canControl && state.containerState.kind != ContainerState.Kind.Missing,
+                busy = state.lifecycleBusy == "start", tint = DfColors.Ok,
+            )
+        }
+        SheetAction(
+            Icons.Filled.Info, "Détails de l'app", "État, dernière mise en ligne, domaine, GitHub, équipe.",
+            onClick = { onSheet(ProjectSheet.Details) },
+        )
+        SheetAction(
+            Icons.Filled.History, "Historique des mises en ligne", "Toutes les publications et leurs logs.",
+            onClick = { onSheet(ProjectSheet.Deploys) },
+        )
     }
 }
 
@@ -232,7 +359,7 @@ fun RuntimeLogsSheet(state: ProjectUiState, onDismiss: () -> Unit, onRefresh: ()
                     (text as String?).isNullOrBlank() -> Text(empty as String, color = DfColors.InkFaint)
                     // Défilement horizontal pour les lignes de logs seulement ; les messages, eux, passent à la ligne.
                     else -> SelectionContainer(Modifier.horizontalScroll(rememberScrollState())) {
-                        Text((text as String).takeLast(60_000), fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 15.sp, color = DfColors.InkMuted, softWrap = false)
+                        Text(cleanLogs((text as String).takeLast(60_000)), fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 15.sp, color = DfColors.InkMuted, softWrap = false)
                     }
                 }
             }

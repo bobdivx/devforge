@@ -38,8 +38,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -54,9 +52,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,14 +62,12 @@ import app.jeser.devforge.data.AppStatus
 import app.jeser.devforge.data.InboxEvent
 import app.jeser.devforge.data.Project
 import app.jeser.devforge.ui.components.AppIcon
-import app.jeser.devforge.ui.components.ConfirmActionSheet
 import app.jeser.devforge.ui.components.DfTile
 import app.jeser.devforge.ui.components.Persona
 import app.jeser.devforge.ui.components.PersonaAvatar
 import app.jeser.devforge.ui.components.PersonaMessage
 import app.jeser.devforge.ui.components.color
 import app.jeser.devforge.ui.components.relativeTime
-import app.jeser.devforge.ui.components.stopConfirm
 import app.jeser.devforge.ui.theme.DfColors
 
 fun hostOf(url: String?): String? =
@@ -95,7 +88,7 @@ fun gridColumns(width: Dp): Int = when {
     else -> 2
 }
 
-/** L'interrupteur n'a de sens que pour une app déjà publiée (un conteneur existe). */
+/** Une app déjà publiée (un conteneur existe). */
 fun Project.hasContainer(): Boolean = appStatus in setOf(AppStatus.Live, AppStatus.Down, AppStatus.Stopped, AppStatus.Failed) &&
     !productionUrl.isNullOrBlank()
 
@@ -107,14 +100,11 @@ fun AppsScreen(
     onOpen: (String) -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
-    onSetRunning: (String, Boolean) -> Unit = { _, _ -> },
     onNoticeShown: () -> Unit = {},
     initialInboxOpen: Boolean = false,
-    initialStopConfirm: String? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
     var inboxOpen by rememberSaveable { mutableStateOf(initialInboxOpen) }
-    var confirmStop by rememberSaveable { mutableStateOf(initialStopConfirm) }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.notice) {
         state.notice?.let { snackbar.showSnackbar(it); onNoticeShown() }
@@ -186,12 +176,7 @@ fun AppsScreen(
                             }
                         }
                         items(state.projects, key = { it.uuid }) { p ->
-                            AppTile(
-                                p,
-                                busy = p.uuid in state.busy,
-                                onClick = { onOpen(p.uuid) },
-                                onToggle = { run -> if (run) onSetRunning(p.uuid, true) else confirmStop = p.uuid },
-                            )
+                            AppTile(p, onClick = { onOpen(p.uuid) })
                         }
                         item(span = { GridItemSpan(maxLineSpan) }, key = "nav-spacer") {
                             Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
@@ -204,17 +189,6 @@ fun AppsScreen(
 
     if (inboxOpen && state.inbox.isNotEmpty()) {
         InboxSheet(state.inbox, onDismiss = { inboxOpen = false }, onOpen = { inboxOpen = false; onOpen(it) })
-    }
-    confirmStop?.let { uuid ->
-        val p = state.projects.firstOrNull { it.uuid == uuid }
-        if (p != null) {
-            ConfirmActionSheet(
-                stopConfirm(p.name, hostOf(p.productionUrl)),
-                busy = uuid in state.busy,
-                onDismiss = { confirmStop = null },
-                onConfirm = { onSetRunning(uuid, false); confirmStop = null },
-            )
-        }
     }
 }
 
@@ -298,13 +272,12 @@ private fun InboxSheet(events: List<InboxEvent>, onDismiss: () -> Unit, onOpen: 
     }
 }
 
-/** Tuile d'app : icône, nom, statut réel, domaine, et un seul interrupteur (en marche / arrêtée). */
+/** Tuile d'app : icône, nom, statut réel. Un toucher ouvre l'app ; les contrôles vivent dans la page de l'app. */
 @Composable
-fun AppTile(project: Project, busy: Boolean, onClick: () -> Unit, onToggle: (Boolean) -> Unit) {
+fun AppTile(project: Project, onClick: () -> Unit) {
     val status = project.appStatus
-    val host = hostOf(project.productionUrl)
-    DfTile(onClick = onClick, minHeight = 212.dp) {
-        AppIcon(project.name, project.productionUrl, project.gitRepository, status, size = 60.dp)
+    DfTile(onClick = onClick, minHeight = 148.dp) {
+        AppIcon(project.name, project.productionUrl, project.gitRepository, status, size = 56.dp)
         Text(
             project.name,
             fontWeight = FontWeight.SemiBold,
@@ -314,38 +287,5 @@ fun AppTile(project: Project, busy: Boolean, onClick: () -> Unit, onToggle: (Boo
             textAlign = TextAlign.Center,
         )
         Text(status.label, color = status.color(), fontSize = 12.5.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-        Text(
-            host ?: "Brouillon local",
-            color = DfColors.InkFaint,
-            fontSize = 11.5.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
-        // Emplacement fixe de l'interrupteur : toutes les tuiles gardent la même hauteur.
-        Box(Modifier.size(width = 64.dp, height = 48.dp), contentAlignment = Alignment.Center) {
-            if (project.hasContainer()) {
-                val on = status != AppStatus.Stopped
-                if (busy) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = DfColors.Accent)
-                } else {
-                    // Le Switch consomme le toucher : il n'ouvre jamais la tuile.
-                    Switch(
-                        checked = on,
-                        onCheckedChange = { onToggle(it) },
-                        colors = SwitchDefaults.colors(
-                            checkedTrackColor = DfColors.Ok.copy(alpha = .85f),
-                            checkedThumbColor = DfColors.Bg,
-                            uncheckedTrackColor = DfColors.Surface2,
-                        ),
-                        modifier = Modifier.semantics {
-                            contentDescription = if (on) "Arrêter ${project.name}" else "Démarrer ${project.name}"
-                            stateDescription = if (on) "En marche" else "Arrêtée"
-                        },
-                    )
-                }
-            }
-        }
     }
 }
-

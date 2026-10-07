@@ -19,37 +19,41 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Subject
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.RocketLaunch
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.jeser.devforge.data.AppStatus
-import app.jeser.devforge.data.ContainerState
 import app.jeser.devforge.data.Deployment
 import app.jeser.devforge.data.SpecFeature
-import app.jeser.devforge.data.Tone
-import app.jeser.devforge.data.syncLabel
 import app.jeser.devforge.ui.apps.hostOf
 import app.jeser.devforge.ui.components.AppIcon
 import app.jeser.devforge.ui.components.ConfirmActionSheet
@@ -57,9 +61,7 @@ import app.jeser.devforge.ui.components.Persona
 import app.jeser.devforge.ui.components.PersonaAvatar
 import app.jeser.devforge.ui.components.PersonaMessage
 import app.jeser.devforge.ui.components.TileBg
-import app.jeser.devforge.ui.components.TileLabel
 import app.jeser.devforge.ui.components.color
-import app.jeser.devforge.ui.components.persona
 import app.jeser.devforge.ui.components.relativeTime
 import app.jeser.devforge.ui.components.restartConfirm
 import app.jeser.devforge.ui.components.stopConfirm
@@ -87,7 +89,7 @@ data class ProjectActions(
 )
 
 /** Feuilles de la page app (une seule ouverte à la fois). */
-enum class ProjectSheet { None, Status, Deploys, Domain, Team, Stop, Restart, Deploy, NewFeature }
+enum class ProjectSheet { None, Details, More, Deploys, Stop, Restart, Deploy, NewFeature }
 
 private data class Chip(val key: String, val label: String, val danger: Boolean = false)
 
@@ -115,7 +117,7 @@ fun ProjectScreen(
     }
 
     val project = state.project
-    val summary = state.summary
+    val onSheet: (ProjectSheet) -> Unit = { sheet = it }
     Scaffold(
         modifier = modifier,
         containerColor = DfColors.Bg,
@@ -125,16 +127,12 @@ fun ProjectScreen(
                 title = {
                     if (project != null) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            AppIcon(project.name, project.productionUrl, project.gitRepository, status = null, size = 32.dp)
-                            Column(Modifier.padding(start = 8.dp)) {
-                                Text(project.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    listOfNotNull(summary.status.label, summary.since).joinToString(" · "),
-                                    color = summary.status.color(),
-                                    fontSize = 12.5.sp,
-                                    maxLines = 1,
-                                )
+                            // Petit écran : on garde la place pour le nom et les actions.
+                            if (LocalConfiguration.current.screenWidthDp >= 400) {
+                                AppIcon(project.name, project.productionUrl, project.gitRepository, status = null, size = 28.dp)
+                                Spacer(Modifier.width(8.dp))
                             }
+                            Text(project.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 },
@@ -143,6 +141,7 @@ fun ProjectScreen(
                         IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour aux apps") }
                     }
                 },
+                actions = { if (project != null) TopActions(state, actions, onSheet) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DfColors.Bg),
             )
         },
@@ -164,16 +163,14 @@ fun ProjectScreen(
                 )
                 else -> BoxWithConstraints(Modifier.fillMaxSize()) {
                     val wide = maxWidth >= 900.dp
-                    val onSheet: (ProjectSheet) -> Unit = { sheet = it }
                     if (wide) {
                         Row(Modifier.fillMaxSize()) {
                             Column(
-                                Modifier.width(400.dp).fillMaxHeight().verticalScroll(rememberScrollState())
+                                Modifier.width(380.dp).fillMaxHeight().verticalScroll(rememberScrollState())
                                     .padding(start = 20.dp, end = 16.dp, bottom = 16.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                StatusTiles(state, columns = 2, onSheet = onSheet)
-                                ActionRow(state, actions, onSheet = onSheet)
+                                StatusStrip(state, onClick = { sheet = ProjectSheet.Details })
                                 RecentDeploys(state, onOpen = actions.onOpenLogs)
                             }
                             VerticalDivider(color = DfColors.Line)
@@ -182,17 +179,12 @@ fun ProjectScreen(
                     } else {
                         // Hauteur réelle du clavier (isImeVisible vaut true tant que les insets ne sont pas connus).
                         val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-                        val cols = if (maxWidth >= 600.dp) 4 else 2
-                        val side = if (maxWidth >= 600.dp) 24.dp else 16.dp
+                        val side = if (maxWidth >= 600.dp) 24.dp else 12.dp
                         Column(Modifier.fillMaxSize()) {
-                            // Clavier ouvert : on replie l'état pour laisser la place à la discussion.
+                            // Une seule bande d'état : la discussion garde l'essentiel de l'écran.
                             AnimatedVisibility(visible = !imeOpen) {
-                                Column(Modifier.padding(horizontal = side), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    StatusTiles(state, columns = cols, onSheet = onSheet)
-                                    ActionRow(state, actions, onSheet = onSheet)
-                                }
+                                StatusStrip(state, onClick = { sheet = ProjectSheet.Details }, modifier = Modifier.padding(horizontal = side).padding(bottom = 4.dp))
                             }
-                            HorizontalDivider(color = DfColors.Line, modifier = Modifier.padding(top = 10.dp))
                             ChatPane(state, input, { input = it }, actions, onNewFeature = { sheet = ProjectSheet.NewFeature }, modifier = Modifier.weight(1f))
                         }
                     }
@@ -204,10 +196,14 @@ fun ProjectScreen(
     if (project != null) {
         val close = { sheet = ProjectSheet.None }
         when (sheet) {
-            ProjectSheet.Status -> StatusSheet(state, onDismiss = close)
+            ProjectSheet.Details -> DetailsSheet(
+                state,
+                onDismiss = close,
+                onOpenLogs = { d -> sheet = ProjectSheet.None; actions.onOpenLogs(d) },
+                onHistory = { sheet = ProjectSheet.Deploys },
+            )
+            ProjectSheet.More -> MoreSheet(state, actions, onDismiss = close, onSheet = onSheet)
             ProjectSheet.Deploys -> DeploysSheet(state, onDismiss = close, onOpen = { d -> sheet = ProjectSheet.None; actions.onOpenLogs(d) })
-            ProjectSheet.Domain -> DomainSheet(state, onDismiss = close)
-            ProjectSheet.Team -> TeamSheet(state, onDismiss = close)
             ProjectSheet.Stop -> ConfirmActionSheet(
                 stopConfirm(project.name, hostOf(project.productionUrl)),
                 busy = state.lifecycleBusy == "stop",
@@ -245,230 +241,116 @@ fun ProjectScreen(
     state.spec?.let { SpecSheet(it, onDismiss = actions.onCloseSpec, onDecide = actions.onDecideSpec) }
 }
 
-/* ---------------- Tuiles d'état ---------------- */
+/* ---------------- Bande d'état ---------------- */
 
+/** « ● En ligne · 25 h · Santé OK · jeser.app › » : un toucher ouvre tout le détail. */
 @Composable
-private fun InfoTile(
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    tone: Color? = null,
-    content: @Composable ColumnScope.() -> Unit,
-) {
+fun StatusStrip(state: ProjectUiState, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val project = state.project ?: return
+    val s = state.summary
+    val latest = state.latest
+    val host = hostOf(project.productionUrl)
+    val alert = s.status in setOf(AppStatus.Failed, AppStatus.Down) || latest?.isFailed == true
+    val text = buildAnnotatedString {
+        withStyle(SpanStyle(color = s.status.color(), fontWeight = FontWeight.SemiBold)) { append(s.status.label) }
+        val parts = buildList<Pair<String, Color>> {
+            s.since?.let { add(it.removePrefix("depuis ") to DfColors.InkMuted) }
+            when {
+                latest?.isRunning == true -> add("mise en ligne en cours" to DfColors.Warn)
+                latest?.isFailed == true -> add("mise en ligne échouée" to DfColors.Danger)
+            }
+            when (s.healthOk) {
+                true -> add("Santé OK" to DfColors.InkMuted)
+                false -> add("ne répond pas" to DfColors.Danger)
+                null -> Unit
+            }
+            add((host ?: "brouillon local") to DfColors.InkFaint)
+        }
+        parts.forEach { (t, c) ->
+            withStyle(SpanStyle(color = DfColors.InkFaint)) { append(" · ") }
+            withStyle(SpanStyle(color = c)) { append(t) }
+        }
+    }
     Surface(
         onClick = onClick,
         color = TileBg,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, tone?.copy(alpha = .35f) ?: Color.Transparent),
-        modifier = modifier.heightIn(min = 80.dp),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, if (alert) DfColors.Danger.copy(alpha = .35f) else Color.Transparent),
+        modifier = modifier.fillMaxWidth().heightIn(min = 48.dp).semantics {
+            contentDescription = "État de l'app : ${text.text}. Toucher pour le détail."
+            role = Role.Button
+        },
     ) {
-        Column(
-            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            TileLabel(label)
-            content()
+        Row(Modifier.padding(start = 14.dp, end = 8.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).background(s.status.color(), CircleShape))
+            Spacer(Modifier.width(8.dp))
+            Text(text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Icon(Icons.Filled.ExpandMore, contentDescription = null, tint = DfColors.InkFaint, modifier = Modifier.padding(start = 4.dp).size(20.dp))
         }
     }
 }
 
-@Composable
-private fun TileValue(text: String, color: Color = DfColors.Ink) {
-    Text(text, color = color, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-}
-
-@Composable
-private fun TileSub(text: String, color: Color = DfColors.InkMuted) {
-    Text(text, color = color, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-}
-
-/** État, dernier déploiement, domaine, équipe : un toucher ouvre le détail dans une feuille. */
-@Composable
-fun StatusTiles(state: ProjectUiState, columns: Int, onSheet: (ProjectSheet) -> Unit) {
-    val project = state.project ?: return
-    val summary = state.summary
-    val latest = state.latest
-    val host = hostOf(project.productionUrl)
-    val tiles: List<@Composable (Modifier) -> Unit> = listOf(
-        { m ->
-            InfoTile("État", onClick = { onSheet(ProjectSheet.Status) }, modifier = m,
-                tone = summary.status.color().takeIf { summary.status in setOf(AppStatus.Failed, AppStatus.Down) }) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(8.dp).background(summary.status.color(), CircleShape))
-                    Spacer(Modifier.width(6.dp))
-                    TileValue(summary.status.label, summary.status.color())
-                }
-                val healthShort = if (summary.healthOk == true) "Santé : OK" else summary.health
-                TileSub(summary.since ?: healthShort, if (summary.since == null && summary.healthOk == false) DfColors.Danger else DfColors.InkMuted)
-                if (summary.since != null) {
-                    TileSub(healthShort, if (summary.healthOk == false) DfColors.Danger else DfColors.InkFaint)
-                }
-            }
-        },
-        { m ->
-            val (label, color) = latest?.let { deployLabel(it) } ?: ("Aucune" to DfColors.InkFaint)
-            InfoTile("Dernier déploiement", onClick = { onSheet(ProjectSheet.Deploys) }, modifier = m,
-                tone = DfColors.Danger.takeIf { latest?.isFailed == true }) {
-                TileValue(latest?.gitMessage?.lineSequence()?.firstOrNull()?.takeIf { it.isNotBlank() } ?: if (latest == null) "Pas encore publié" else "Mise en ligne")
-                TileSub(listOfNotNull(label, latest?.let { relativeTime(it.createdAt).takeIf { r -> r.isNotEmpty() } }).joinToString(" · "), color)
-                syncLabel(state.git)?.let { TileSub(it.removePrefix("GitHub : ").replaceFirstChar { c -> c.uppercase() }.let { s -> "GitHub · $s" }, DfColors.InkFaint) }
-            }
-        },
-        { m ->
-            InfoTile("Domaine", onClick = { onSheet(ProjectSheet.Domain) }, modifier = m) {
-                TileValue(host ?: "Pas de domaine", if (host != null) DfColors.Accent else DfColors.InkFaint)
-                TileSub(
-                    when {
-                        host == null -> "Le brouillon reste local"
-                        summary.healthOk == true -> "HTTPS · répond"
-                        summary.healthOk == false -> "HTTPS · ne répond pas"
-                        else -> "HTTPS"
-                    },
-                    if (summary.healthOk == false && host != null) DfColors.Danger else DfColors.InkMuted,
-                )
-            }
-        },
-        { m ->
-            val team = state.team
-            val top = team.firstOrNull { it.tone == Tone.Warn || it.tone == Tone.Danger } ?: team.firstOrNull { it.tone == Tone.Accent }
-            InfoTile("Équipe", onClick = { onSheet(ProjectSheet.Team) }, modifier = m) {
-                Row(horizontalArrangement = Arrangement.spacedBy((-6).dp)) {
-                    team.forEach { PersonaAvatar(it.key.persona(), 24.dp) }
-                }
-                TileSub(
-                    top?.let { "${it.key.persona().displayName} · ${it.label.lowercase()}" } ?: "Tout le monde veille",
-                    top?.tone?.color() ?: DfColors.InkMuted,
-                )
-            }
-        },
-    )
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        tiles.chunked(columns).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(IntrinsicSize.Min)) {
-                row.forEach { tile -> tile(Modifier.weight(1f).fillMaxHeight()) }
-                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
-            }
-        }
-    }
-}
-
-/* ---------------- Boutons de contrôle ---------------- */
+/* ---------------- Actions ---------------- */
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ActionButton(
+private fun TopAction(
     icon: ImageVector,
-    label: String,
     tooltip: String,
-    shortLabel: String = label,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
     enabled: Boolean = true,
     busy: Boolean = false,
-    tint: Color = DfColors.Ink,
     filled: Boolean = false,
 ) {
-    val alpha = if (enabled) 1f else .38f
-    // Le poids (weight) s'applique à ce Box : TooltipBox ne le transmet pas à son ancre.
-    BoxWithConstraints(modifier) {
-    val narrow = maxWidth < 66.dp
     TooltipBox(
         positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
         tooltip = { PlainTooltip { Text(tooltip) } },
         state = rememberTooltipState(),
     ) {
-        Surface(
-            onClick = onClick,
-            enabled = enabled && !busy,
-            color = Color.Transparent,
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).semantics {
-                contentDescription = tooltip
-                role = Role.Button
-            },
-        ) {
-            Column(
-                Modifier.padding(vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Box(
-                    Modifier.size(44.dp).background(
-                        if (filled) tint.copy(alpha = alpha) else tint.copy(alpha = .12f * alpha),
-                        RoundedCornerShape(14.dp),
-                    ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (busy) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = if (filled) DfColors.OnAccent else tint)
-                    } else {
-                        Icon(icon, contentDescription = null, tint = if (filled) DfColors.OnAccent else tint.copy(alpha = alpha), modifier = Modifier.size(22.dp))
-                    }
-                }
-                // Libellé court quand la place manque (téléphone 360 dp) ; le libellé complet reste dans l'info-bulle.
-                Text(
-                    if (narrow) shortLabel else label,
-                    color = DfColors.InkMuted.copy(alpha = alpha),
-                    fontSize = 11.sp,
-                    lineHeight = 13.sp,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                )
+        val content: @Composable () -> Unit = {
+            if (busy) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = if (filled) DfColors.OnAccent else DfColors.Accent)
+            } else {
+                Icon(icon, contentDescription = tooltip, modifier = Modifier.size(22.dp))
             }
         }
-    }
-}
-}
-
-/** Contrôle de l'app : ouvrir, aperçu, redémarrer, arrêter / démarrer, logs, mettre en ligne. */
-@Composable
-fun ActionRow(state: ProjectUiState, actions: ProjectActions, onSheet: (ProjectSheet) -> Unit) {
-    val project = state.project ?: return
-    val uri = LocalUriHandler.current
-    val c = state.containerState
-    val running = c.running
-    val url = project.productionUrl?.split(',')?.firstOrNull()?.trim()
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        val m = Modifier.weight(1f)
-        ActionButton(
-            Icons.AutoMirrored.Filled.OpenInNew, "Ouvrir", "Ouvrir le site en ligne",
-            onClick = { url?.let { runCatching { uri.openUri(if (it.startsWith("http")) it else "https://$it") } } },
-            enabled = !url.isNullOrBlank(), modifier = m,
-        )
-        ActionButton(
-            Icons.Filled.Visibility, "Aperçu", "Aperçu du brouillon (local, rien n'est publié)",
-            onClick = actions.onOpenPreview, busy = state.previewStarting, modifier = m,
-        )
-        ActionButton(
-            Icons.Filled.RestartAlt, "Redémarrer", "Redémarrer le conteneur (avec confirmation)", shortLabel = "Relancer",
-            onClick = { onSheet(ProjectSheet.Restart) },
-            enabled = state.canControl && running, busy = state.lifecycleBusy == "restart", modifier = m,
-        )
-        if (running || state.lifecycleBusy == "stop") {
-            ActionButton(
-                Icons.Filled.Stop, "Arrêter", "Arrêter l'app (avec confirmation)",
-                onClick = { onSheet(ProjectSheet.Stop) },
-                enabled = state.canControl, busy = state.lifecycleBusy == "stop", tint = DfColors.Danger, modifier = m,
+        if (filled) {
+            FilledIconButton(
+                onClick = onClick,
+                enabled = enabled && !busy,
+                shape = RoundedCornerShape(14.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(containerColor = DfColors.Accent, contentColor = DfColors.OnAccent),
+                modifier = Modifier.size(48.dp).padding(4.dp),
+                content = content,
             )
         } else {
-            ActionButton(
-                Icons.Filled.PlayArrow, "Démarrer", "Démarrer l'app",
-                onClick = { actions.onLifecycle("start") },
-                enabled = state.canControl && c.kind != ContainerState.Kind.Missing,
-                busy = state.lifecycleBusy == "start", tint = DfColors.Ok, modifier = m,
-            )
+            IconButton(onClick = onClick, enabled = enabled && !busy, modifier = Modifier.size(48.dp), content = content)
         }
-        ActionButton(
-            Icons.AutoMirrored.Filled.Subject, "Logs", "Logs de l'app et de la dernière mise en ligne",
-            onClick = actions.onOpenRuntimeLogs, modifier = m,
-        )
-        ActionButton(
-            Icons.Filled.RocketLaunch, "Mettre en ligne", "Reconstruire depuis GitHub et publier (avec confirmation)",
-            onClick = { onSheet(ProjectSheet.Deploy) },
-            enabled = state.canDeploy, busy = state.deploying || state.latest?.isRunning == true,
-            tint = DfColors.Accent, filled = true, modifier = m,
-        )
     }
+}
+
+/** Barre du haut : Ouvrir, Logs, Mettre en ligne (principal) et « Plus » (aperçu, redémarrer, arrêter…). */
+@Composable
+private fun TopActions(state: ProjectUiState, actions: ProjectActions, onSheet: (ProjectSheet) -> Unit) {
+    val project = state.project ?: return
+    val uri = LocalUriHandler.current
+    val url = project.productionUrl?.split(',')?.firstOrNull()?.trim()
+    TopAction(
+        Icons.AutoMirrored.Filled.OpenInNew, "Ouvrir le site en ligne",
+        onClick = { url?.let { runCatching { uri.openUri(if (it.startsWith("http")) it else "https://$it") } } },
+        enabled = !url.isNullOrBlank(),
+    )
+    TopAction(Icons.AutoMirrored.Filled.Subject, "Logs de l'app et de la dernière mise en ligne", onClick = actions.onOpenRuntimeLogs)
+    TopAction(
+        Icons.Filled.RocketLaunch, "Mettre en ligne (avec confirmation)",
+        onClick = { onSheet(ProjectSheet.Deploy) },
+        enabled = state.canDeploy, busy = state.deploying || state.latest?.isRunning == true, filled = true,
+    )
+    TopAction(
+        Icons.Filled.MoreVert, "Plus : aperçu, redémarrer, arrêter, détails",
+        onClick = { onSheet(ProjectSheet.More) },
+        busy = state.lifecycleBusy != null || state.previewStarting,
+    )
 }
 
 @Composable
@@ -531,10 +413,10 @@ private fun ChatPane(
     }
 
     val chips = buildList {
-        if (state.lastFailed) add(Chip("repair", "🩹 Répare la mise en ligne", danger = true))
-        add(Chip("feature", "✨ Nouvelle fonctionnalité"))
-        add(Chip("health", "🩺 Est-ce que tout va bien ?"))
-        add(Chip("design", "🎨 Améliore le design"))
+        if (state.lastFailed) add(Chip("repair", "🩹 Réparer", danger = true))
+        add(Chip("feature", "✨ Nouveauté"))
+        add(Chip("health", "🩺 Ça va ?"))
+        add(Chip("design", "🎨 Design"))
     }
     val canChat = state.coordinatorUuid != null && !state.sending
     val lastPlanKey = state.messages.lastOrNull { it.hasPlan }?.key
@@ -543,7 +425,7 @@ private fun ChatPane(
     Column(modifier.fillMaxWidth()) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.weight(1f).fillMaxWidth(),
+            modifier = Modifier.weight(1f).fillMaxWidth().testTag("chat"),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -567,10 +449,14 @@ private fun ChatPane(
             }
             item(key = "bottom") { Spacer(Modifier.height(1.dp)) }
         }
+        val chipsState = rememberLazyListState()
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
+            state = chipsState,
+            contentPadding = PaddingValues(horizontal = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            // Fondu sur les bords quand il reste des suggestions à faire défiler : rien n'a l'air coupé.
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                .fadingEdges(start = chipsState.canScrollBackward, end = chipsState.canScrollForward),
         ) {
             items(chips, key = { it.key }) { chip ->
                 val c = if (chip.danger) DfColors.Danger else DfColors.Ink
@@ -587,16 +473,16 @@ private fun ChatPane(
                     shape = RoundedCornerShape(50),
                     color = if (chip.danger) DfColors.Danger.copy(alpha = .1f) else DfColors.Surface,
                     border = BorderStroke(1.dp, if (chip.danger) DfColors.Danger.copy(alpha = .35f) else DfColors.LineStrong),
-                    modifier = Modifier.heightIn(min = 48.dp),
                 ) {
-                    Box(Modifier.padding(horizontal = 14.dp).heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
+                    // 40 dp visibles ; la zone tactile reste à 48 dp (minimumInteractiveComponentSize).
+                    Box(Modifier.padding(horizontal = 14.dp).heightIn(min = 40.dp), contentAlignment = Alignment.Center) {
                         Text(chip.label, color = if (canChat) c else c.copy(alpha = .4f), fontSize = 14.sp)
                     }
                 }
             }
         }
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -755,3 +641,17 @@ fun deployLabel(d: Deployment): Pair<String, Color> = when {
     d.isSuccess -> "En ligne" to DfColors.Ok
     else -> d.status to DfColors.InkFaint
 }
+
+/** Fondu des bords d'une rangée défilante (indique qu'il y a une suite, sans couper un élément net). */
+private fun Modifier.fadingEdges(start: Boolean, end: Boolean, width: Dp = 28.dp): Modifier =
+    graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen).drawWithContent {
+        drawContent()
+        val w = width.toPx()
+        if (start) {
+            drawRect(Brush.horizontalGradient(listOf(Color.Transparent, Color.Black), startX = 0f, endX = w), blendMode = BlendMode.DstIn)
+        }
+        if (end) {
+            drawRect(Brush.horizontalGradient(listOf(Color.Black, Color.Transparent), startX = size.width - w, endX = size.width), blendMode = BlendMode.DstIn)
+        }
+    }
+
