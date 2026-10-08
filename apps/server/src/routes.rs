@@ -53,6 +53,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/agent/chat", post(agent_chat))
         .route("/api/v1/agent/tools/{tool}", post(agent_execute_tool))
         .route("/api/v1/projects/{uuid}/publish", post(publish_project))
+        .route(
+            "/api/v1/projects/{uuid}/publish-approval",
+            post(approve_publish),
+        )
         .route("/api/v1/databases", post(create_database))
         .route("/api/v1/databases/{uuid}", get(get_database))
         .route(
@@ -2949,7 +2953,8 @@ async fn attach_project_sqlite(state: &AppState, project: &Project) -> Result<()
                 key: "DATABASE_URL".into(),
                 value: "sqlite:data/app.db?mode=rwc".into(),
                 secret: false,
-            },
+                        preview_allowed: false,
+        },
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -3361,7 +3366,8 @@ async fn upsert_env(
                 key: body.key,
                 value: body.value,
                 secret: body.secret.unwrap_or(true),
-            },
+                        preview_allowed: false,
+        },
         )
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;
@@ -3466,6 +3472,42 @@ pub struct PublishProjectBody {
     pub private: Option<bool>,
 }
 
+
+async fn grant_publish(state: &AppState, project_uuid: &str) -> Result<(), ApiError> {
+    let now = chrono::Utc::now();
+    let expires = (now + chrono::Duration::minutes(15)).to_rfc3339();
+    sqlx::query(
+        r#"INSERT INTO project_publish_grants (project_uuid, granted_at, expires_at)
+           VALUES ($1, $2, $3)
+           ON CONFLICT(project_uuid) DO UPDATE SET
+             granted_at = excluded.granted_at,
+             expires_at = excluded.expires_at"#,
+    )
+    .bind(project_uuid)
+    .bind(now.to_rfc3339())
+    .bind(&expires)
+    .execute(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+    Ok(())
+}
+
+/// POST /api/v1/projects/{uuid}/publish-approval
+/// Accord humain court (15 min) : seul cet appel authentifié débloque trigger_deploy.
+async fn approve_publish(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let (_user, _ws, _project) = auth_project(&state, &headers, &uuid).await?;
+    grant_publish(&state, &uuid).await?;
+    Ok(Json(json!({
+        "ok": true,
+        "expires_in_seconds": 900,
+        "message": "Accord enregistré. L'agent peut publier pendant 15 minutes."
+    })))
+}
+
 /// POST /api/v1/projects/{uuid}/publish
 /// Workflow complet validé par l'utilisateur : create repo GitHub + sync workdir + optionnel deploy.
 async fn publish_project(
@@ -3475,6 +3517,7 @@ async fn publish_project(
     Json(body): Json<PublishProjectBody>,
 ) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
     let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
+    grant_publish(&state, &uuid).await?;
 
     // Dériver repo_name depuis le slug si non fourni
     let repo_name = body.repo_name.unwrap_or_else(|| {

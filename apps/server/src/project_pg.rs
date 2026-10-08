@@ -49,7 +49,8 @@ pub async fn provision_project_postgres(
                 key: "DATABASE_URL".into(),
                 value: inst.database_url(),
                 secret: true,
-            },
+                        preview_allowed: false,
+        },
         )
         .await
         .map_err(|e| e.to_string())?;

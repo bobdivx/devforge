@@ -157,6 +157,22 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    let _ = sqlx::query("ALTER TABLE project_env_vars ADD COLUMN preview_allowed BIGINT NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS project_publish_grants (
+            project_uuid TEXT PRIMARY KEY,
+            granted_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        );
+        "#,
+    )
+    .execute(pool)
+    .await?;
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS project_oidc_clients (

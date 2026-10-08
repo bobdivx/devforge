@@ -87,6 +87,7 @@ Voir [docs/MODULES.md](docs/MODULES.md) — inventaire crates (ports, domain, pr
 - **MCP serveur** : `GET /api/v1/mcp/tools` — tools DevForge exposés aux clients MCP.
 - **MCP client** : `GET/POST /api/v1/mcp/servers` — brancher d’autres MCP ; tools agent `mcp_*`.
 - **Env apps** : `GET/POST /api/v1/projects/{uuid}/env` — secrets masqués dans les réponses agent.
+- **Preview** : l'atelier ne monte pas les secrets de prod (opt-in `preview_allowed`). Publier exige `POST /api/v1/projects/{uuid}/publish-approval` (15 min) avant `trigger_deploy`.
 
 ## Archive alpha
 

@@ -79,6 +79,7 @@ impl Tool for UpsertEnvVarsTool {
                     key: key.into(),
                     value,
                     secret,
+                    preview_allowed: false,
                 },
             )
             .await

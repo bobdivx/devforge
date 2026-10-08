@@ -904,7 +904,8 @@ async fn link_project_resource(
                     key: key.into(),
                     value: value.into(),
                     secret: true,
-                },
+                            preview_allowed: false,
+        },
             )
             .await
             .map_err(|e| ApiError::message(e.to_string()))?;
@@ -918,7 +919,8 @@ async fn link_project_resource(
                 key: "TURSO_DATABASE_URL_AUTH".into(),
                 value: with_auth,
                 secret: true,
-            },
+                        preview_allowed: false,
+        },
         )
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;
