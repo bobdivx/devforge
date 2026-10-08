@@ -3,6 +3,7 @@ import type { ComponentChildren } from 'preact';
 import { api, type AppGroupMember, type ClusterNode, type Deployment, type InstanceDomain, type Project, type ProjectRuntime, type PublishedPort } from '../lib/api';
 import { nodeShortLabel, resolveNode } from '../lib/cluster-display';
 import { cn } from '../lib/cn';
+import { partitionEnvRows } from '../lib/env-groups';
 import { projectNavMore, projectNavPrimary } from '../lib/nav';
 import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { AppIcon, statusDotClass } from './AppIcon';
@@ -2315,6 +2316,7 @@ function EnvPanel({ uuid }: { uuid: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [devforgeOpen, setDevforgeOpen] = useState(true);
 
   async function load() {
     try {
@@ -2461,6 +2463,9 @@ function EnvPanel({ uuid }: { uuid: string }) {
     setFileName(null);
   }
 
+  const { custom, managed, managedByGroup } = partitionEnvRows(rows);
+  let tileIndex = 0;
+
   return (
     <div class="space-y-4">
       {error && (
@@ -2505,35 +2510,109 @@ function EnvPanel({ uuid }: { uuid: string }) {
             </Card>
           </div>
         ) : (
-          <HubGrid>
-            {rows.map((r, index) => (
+          <div class="space-y-4">
+            {custom.length > 0 && (
+              <div class="space-y-2">
+                <p class="text-xs font-medium uppercase tracking-wide text-[var(--color-ink-muted)]">
+                  Personnalisées
+                </p>
+                <HubGrid>
+                  {custom.map((r) => {
+                    const index = tileIndex++;
+                    return (
+                      <HubTile
+                        key={r.key}
+                        index={index}
+                        title={r.key}
+                        description={r.secret ? 'Secret' : r.value || 'Vide'}
+                        icon={<HubIcon name="key" />}
+                        onClick={() => openEdit(r.key)}
+                      />
+                    );
+                  })}
+                </HubGrid>
+              </div>
+            )}
+
+            <HubGrid>
+              <HubAddTile index={tileIndex++} label="Ajouter" onClick={() => setAdding(true)} />
               <HubTile
-                key={r.key}
-                index={index}
-                title={r.key}
-                description={r.secret ? 'Secret' : r.value || 'Vide'}
-                icon={<HubIcon name="key" />}
-                onClick={() => openEdit(r.key)}
+                index={tileIndex++}
+                title="Importer"
+                description="Fichier .env"
+                icon={<HubIcon name="folder" />}
+                onClick={() => setImportOpen(true)}
               />
-            ))}
-            <HubAddTile index={rows.length} label="Ajouter" onClick={() => setAdding(true)} />
-            <HubTile
-              index={rows.length + 1}
-              title="Importer"
-              description="Fichier .env"
-              icon={<HubIcon name="folder" />}
-              onClick={() => setImportOpen(true)}
-            />
-            <HubTile
-              index={rows.length + 2}
-              title="Sync"
-              description="Depuis le workdir"
-              icon={<HubIcon name="refresh" />}
-              onClick={() => {
-                if (!busy) void syncFromWorkdir();
-              }}
-            />
-          </HubGrid>
+              <HubTile
+                index={tileIndex++}
+                title="Sync"
+                description="Depuis le workdir"
+                icon={<HubIcon name="refresh" />}
+                onClick={() => {
+                  if (!busy) void syncFromWorkdir();
+                }}
+              />
+            </HubGrid>
+
+            {managed.length > 0 && (
+              <details
+                class="group overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]"
+                open={devforgeOpen}
+                onToggle={(e) => setDevforgeOpen((e.target as HTMLDetailsElement).open)}
+              >
+                <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h2 class="text-sm font-medium tracking-tight text-[var(--color-ink)]">
+                        Variables DevForge
+                      </h2>
+                      <Badge>{managed.length}</Badge>
+                    </div>
+                    <p class="mt-1 text-sm text-[var(--color-ink-muted)]">
+                      Injectées par la plateforme (SSO, base de données…)
+                    </p>
+                  </div>
+                  <ChevronDown
+                    size={18}
+                    strokeWidth={2}
+                    class="shrink-0 text-[var(--color-ink-muted)] transition-transform group-open:rotate-180"
+                    aria-hidden
+                  />
+                </summary>
+                <div class="space-y-5 border-t border-[var(--color-line)] px-4 py-4 sm:px-5">
+                  {managedByGroup.map((group) => (
+                    <div key={group.id} class="space-y-2">
+                      <div>
+                        <p class="text-xs font-medium uppercase tracking-wide text-[var(--color-ink-muted)]">
+                          {group.label}
+                        </p>
+                        <p class="text-xs text-[var(--color-ink-faint)]">{group.description}</p>
+                      </div>
+                      <HubGrid>
+                        {group.rows.map((r) => {
+                          const index = tileIndex++;
+                          return (
+                            <HubTile
+                              key={r.key}
+                              index={index}
+                              title={r.key}
+                              description={r.secret ? 'Secret' : r.value || 'Vide'}
+                              icon={<HubIcon name="key" />}
+                              onClick={() => openEdit(r.key)}
+                            />
+                          );
+                        })}
+                      </HubGrid>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            {rows.length === 0 && (
+              <p class="text-sm text-[var(--color-ink-muted)]">Aucune variable.</p>
+            )}
+          </div>
         )}
       </FadeIn>
 

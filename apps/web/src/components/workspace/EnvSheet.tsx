@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'preact/hooks';
-import { X } from 'lucide-preact';
+import { ChevronDown, X } from 'lucide-preact';
 import { api } from '../../lib/api';
-import { Button, Input, Portal, Spinner } from '../ui';
+import { partitionEnvRows } from '../../lib/env-groups';
+import { Badge, Button, Input, Portal, Spinner } from '../ui';
 import { cn } from '../../lib/cn';
 
 type Props = {
@@ -23,6 +24,7 @@ export function EnvSheet({ open, onClose, projectUuid, variant = 'sheet' }: Prop
   const [key, setKey] = useState('');
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
+  const [devforgeOpen, setDevforgeOpen] = useState(true);
   const isPanel = variant === 'panel';
 
   useEffect(() => {
@@ -80,6 +82,27 @@ export function EnvSheet({ open, onClose, projectUuid, variant = 'sheet' }: Prop
 
   if (!open) return null;
 
+  const { custom, managed, managedByGroup } = partitionEnvRows(rows);
+
+  function renderRow(r: EnvRow) {
+    return (
+      <li
+        key={r.key}
+        class="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2"
+      >
+        <div class="min-w-0 flex-1">
+          <div class="font-mono text-sm">{r.key}</div>
+          <div class="mt-0.5 truncate text-xs text-[var(--color-ink-muted)]">
+            {r.secret ? '••••••••' : r.value}
+          </div>
+        </div>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => remove(r.key)}>
+          Supprimer
+        </Button>
+      </li>
+    );
+  }
+
   const body = (
     <>
       {!isPanel && (
@@ -132,24 +155,46 @@ export function EnvSheet({ open, onClose, projectUuid, variant = 'sheet' }: Prop
         ) : rows.length === 0 ? (
           <p class="text-sm text-[var(--color-ink-muted)]">Aucune variable.</p>
         ) : (
-          <ul class="space-y-2">
-            {rows.map((r) => (
-              <li
-                key={r.key}
-                class="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2"
+          <div class="space-y-3">
+            {custom.length > 0 && (
+              <div class="space-y-2">
+                <p class="text-xs font-medium uppercase tracking-wide text-[var(--color-ink-muted)]">
+                  Personnalisées
+                </p>
+                <ul class="space-y-2">{custom.map(renderRow)}</ul>
+              </div>
+            )}
+            {managed.length > 0 && (
+              <details
+                class="group overflow-hidden rounded-xl border border-[var(--color-line)]"
+                open={devforgeOpen}
+                onToggle={(e) => setDevforgeOpen((e.target as HTMLDetailsElement).open)}
               >
-                <div class="min-w-0 flex-1">
-                  <div class="font-mono text-sm">{r.key}</div>
-                  <div class="mt-0.5 truncate text-xs text-[var(--color-ink-muted)]">
-                    {r.secret ? '••••••••' : r.value}
+                <summary class="flex cursor-pointer list-none items-center justify-between gap-2 bg-[var(--color-surface)] px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+                  <div class="flex min-w-0 items-center gap-2">
+                    <span class="text-sm font-medium">Variables DevForge</span>
+                    <Badge>{managed.length}</Badge>
                   </div>
+                  <ChevronDown
+                    size={16}
+                    strokeWidth={2}
+                    class="shrink-0 text-[var(--color-ink-muted)] transition-transform group-open:rotate-180"
+                    aria-hidden
+                  />
+                </summary>
+                <div class="space-y-3 border-t border-[var(--color-line)] p-3">
+                  {managedByGroup.map((group) => (
+                    <div key={group.id} class="space-y-1.5">
+                      <p class="text-xs font-medium uppercase tracking-wide text-[var(--color-ink-muted)]">
+                        {group.label}
+                      </p>
+                      <ul class="space-y-2">{group.rows.map(renderRow)}</ul>
+                    </div>
+                  ))}
                 </div>
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => remove(r.key)}>
-                  Supprimer
-                </Button>
-              </li>
-            ))}
-          </ul>
+              </details>
+            )}
+          </div>
         )}
       </div>
 
