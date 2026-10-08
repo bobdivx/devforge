@@ -146,7 +146,8 @@ impl Tool for StartLocalPreviewTool {
         }
 
         let project_env = load_project_env_vars(self.pool.as_ref(), &ctx.uuid).await;
-        // Clone env projet → workdir `.env` (isolation ; purge si vide).
+        // Preview atelier : pas de secrets de prod (sauf opt-in preview_allowed).
+        let project_env = devforge_env::env_for_preview(&project_env);
         let _ = devforge_env::materialize_dotenv_file(workdir_path, &project_env);
         let env_keys: Vec<String> = project_env_for_preview(&project_env)
             .into_iter()
@@ -1254,14 +1255,22 @@ fn project_env_for_preview(vars: &[(String, String)]) -> Vec<(String, String)> {
         .collect()
 }
 
-async fn load_project_env_vars(pool: &PgPool, project_uuid: &str) -> Vec<(String, String)> {
-    sqlx::query_as(
-        "SELECT key, value FROM project_env_vars WHERE project_uuid = $1 ORDER BY key",
+async fn load_project_env_vars(pool: &PgPool, project_uuid: &str) -> Vec<devforge_env::EnvVar> {
+    let rows: Vec<(String, String, i64, i64)> = sqlx::query_as(
+        "SELECT key, value, secret, COALESCE(preview_allowed, 0) FROM project_env_vars WHERE project_uuid = $1 ORDER BY key",
     )
     .bind(project_uuid)
     .fetch_all(pool)
     .await
-    .unwrap_or_default()
+    .unwrap_or_default();
+    rows.into_iter()
+        .map(|(key, value, secret, preview_allowed)| devforge_env::EnvVar {
+            key,
+            value,
+            secret: secret != 0,
+            preview_allowed: preview_allowed != 0,
+        })
+        .collect()
 }
 
 /// Env du process atelier : PATH OS + variables DevForge + overlay preview (PORT/NODE_ENV).

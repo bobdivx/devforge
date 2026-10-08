@@ -12,6 +12,9 @@ pub struct EnvVar {
     pub value: String,
     #[serde(default)]
     pub secret: bool,
+    /// Opt-in : un secret peut être monté en preview atelier. Défaut false.
+    #[serde(default)]
+    pub preview_allowed: bool,
 }
 
 impl EnvVar {
@@ -23,6 +26,24 @@ impl EnvVar {
             "value": if self.secret { "********" } else { self.value.as_str() }
         })
     }
+}
+
+
+/// Variables montées dans le process de preview atelier.
+/// Les secrets de prod restent hors du process, sauf opt-in `preview_allowed`.
+pub fn env_for_preview(vars: &[EnvVar]) -> Vec<(String, String)> {
+    vars.iter()
+        .filter(|v| !v.secret || v.preview_allowed)
+        .map(|v| (v.key.clone(), v.value.clone()))
+        .collect()
+}
+
+/// `true` si une valeur de secret prod se retrouve dans l'env monté en preview.
+pub fn preview_leaks_production_secret(mounted: &[(String, String)], vars: &[EnvVar]) -> bool {
+    let mounted_map: HashMap<&str, &str> = mounted.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    vars.iter().any(|v| {
+        v.secret && !v.preview_allowed && mounted_map.get(v.key.as_str()) == Some(&v.value.as_str())
+    })
 }
 
 /// Parse a `.env` file body into key/value pairs (comments & blank lines ignored).
@@ -57,6 +78,7 @@ pub fn parse_dotenv(content: &str) -> Result<Vec<EnvVar>> {
             key: key.to_string(),
             value,
             secret: true,
+            preview_allowed: false,
         });
     }
     Ok(out)
@@ -247,6 +269,7 @@ impl EnvStore for MemoryEnvStore {
             key: key.clone(),
             value: var.value,
             secret: var.secret,
+            preview_allowed: var.preview_allowed,
         };
         self.inner
             .write()
@@ -409,11 +432,13 @@ EMPTY=
                 key: "SCW_BUCKET".into(),
                 value: "sonozz".into(),
                 secret: true,
+                preview_allowed: false,
             },
             EnvVar {
                 key: "PORT".into(),
                 value: "4321".into(),
                 secret: false,
+                preview_allowed: false,
             },
         ];
         let incoming = vec![
@@ -421,16 +446,19 @@ EMPTY=
                 key: "SCW_BUCKET".into(),
                 value: "starbasefr".into(), // changé
                 secret: true,
+                preview_allowed: false,
             },
             EnvVar {
                 key: "PORT".into(),
                 value: "4321".into(), // identique
                 secret: false,
+                preview_allowed: false,
             },
             EnvVar {
                 key: "NEW_KEY".into(),
                 value: "x".into(),
                 secret: true,
+                preview_allowed: false,
             },
         ];
         let (to_write, stats) = env_vars_needing_write(&existing, &incoming, true);
@@ -448,15 +476,48 @@ EMPTY=
             key: "A".into(),
             value: "1".into(),
             secret: true,
+            preview_allowed: false,
         }];
         let incoming = vec![EnvVar {
             key: "A".into(),
             value: "2".into(),
             secret: true,
+            preview_allowed: false,
         }];
         let (to_write, stats) = env_vars_needing_write(&existing, &incoming, false);
         assert!(to_write.is_empty());
         assert_eq!(stats.skipped, 1);
         assert_eq!(stats.updated, 0);
+    }
+
+    #[test]
+    fn preview_does_not_receive_production_secrets() {
+        let vars = vec![
+            EnvVar {
+                key: "PUBLIC_URL".into(),
+                value: "https://preview.local".into(),
+                secret: false,
+                preview_allowed: false,
+            },
+            EnvVar {
+                key: "DATABASE_URL".into(),
+                value: "postgres://prod".into(),
+                secret: true,
+                preview_allowed: false,
+            },
+            EnvVar {
+                key: "PREVIEW_TOKEN".into(),
+                value: "preview-only".into(),
+                secret: true,
+                preview_allowed: true,
+            },
+        ];
+        let mounted = env_for_preview(&vars);
+        assert!(mounted.iter().any(|(k, v)| k == "PUBLIC_URL" && v == "https://preview.local"));
+        assert!(mounted.iter().any(|(k, _)| k == "PREVIEW_TOKEN"));
+        assert!(!mounted.iter().any(|(k, _)| k == "DATABASE_URL"));
+        assert!(!preview_leaks_production_secret(&mounted, &vars));
+        let leaked = vec![("DATABASE_URL".into(), "postgres://prod".into())];
+        assert!(preview_leaks_production_secret(&leaked, &vars));
     }
 }

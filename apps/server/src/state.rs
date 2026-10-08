@@ -303,6 +303,28 @@ impl ProjectStore for SqliteProjectStore {
             }));
         };
 
+        // L'agent ne publie pas tout seul : accord humain (grant court) requis.
+        let now = chrono::Utc::now().to_rfc3339();
+        let grant: Option<(String,)> = sqlx::query_as(
+            "SELECT expires_at FROM project_publish_grants WHERE project_uuid = $1",
+        )
+        .bind(project_uuid)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let allowed = grant
+            .as_ref()
+            .map(|(exp,)| exp.as_str() > now.as_str())
+            .unwrap_or(false);
+        if !allowed {
+            return Ok(json!({
+                "ok": false,
+                "error": "Accord explicite requis avant publication.",
+                "hint": "POST /api/v1/projects/{uuid}/publish-approval puis relance trigger_deploy.",
+                "code": "publish_approval_required"
+            }));
+        }
+
         // Vérifier les pré-requis
         let git_repo = project.git_repository.as_deref().unwrap_or("").trim();
         if git_repo.is_empty() {
@@ -431,6 +453,7 @@ impl EnvStore for SqliteEnvStore {
                 key,
                 value,
                 secret: secret != 0,
+                preview_allowed: false,
             })
             .collect())
     }
@@ -448,6 +471,7 @@ impl EnvStore for SqliteEnvStore {
             key,
             value,
             secret: secret != 0,
+                    preview_allowed: false,
         }))
     }
 
@@ -460,17 +484,19 @@ impl EnvStore for SqliteEnvStore {
         }
         let now = Utc::now().to_rfc3339();
         sqlx::query(
-            r#"INSERT INTO project_env_vars (project_uuid, key, value, secret, updated_at)
-               VALUES ($1, $2, $3, $4, $5)
+            r#"INSERT INTO project_env_vars (project_uuid, key, value, secret, preview_allowed, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6)
                ON CONFLICT(project_uuid, key) DO UPDATE SET
                  value = excluded.value,
                  secret = excluded.secret,
+                 preview_allowed = excluded.preview_allowed,
                  updated_at = excluded.updated_at"#,
         )
         .bind(project_uuid)
         .bind(&key)
         .bind(&var.value)
         .bind(if var.secret { 1 } else { 0 })
+        .bind(if var.preview_allowed { 1 } else { 0 })
         .bind(&now)
         .execute(&self.pool)
         .await
@@ -479,6 +505,7 @@ impl EnvStore for SqliteEnvStore {
             key,
             value: var.value,
             secret: var.secret,
+            preview_allowed: var.preview_allowed,
         })
     }
 
