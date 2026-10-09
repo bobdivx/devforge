@@ -1,38 +1,18 @@
-# DevForge MCP (Cursor)
+# DevForge MCP
 
-Plugin Cursor pour le serveur MCP d’une instance **DevForge auto-hébergée**.
+Plugin pour le serveur MCP de l’instance publique **https://web.jeser.app**.
 
-Il n’existe pas d’URL unique : chaque installation expose la sienne.
+`jeser.app` est la vitrine. L’API et le MCP sont sur `web.jeser.app`.
 
-## Installer
+Endpoint : `https://web.jeser.app/api/v1/mcp`
 
-1. Installer le plugin **devforge-mcp** depuis le marketplace Cursor, ou importer le dépôt `https://github.com/bobdivx/devforge`.
-2. Dans **Plugins → Configurer**, renseigner **URL MCP** :
-   `https://<hôte>/api/v1/mcp`
-   (Compte → Tokens affiche l’URL exacte de l’instance.)
-3. Activer le serveur **devforge**, puis **Connect**.
-4. Autoriser l’application sur la page `/oauth/consent/` de DevForge (compte DevForge ou Pocket ID).
+OAuth 2.1 / PKCE, sans client secret. Le bouton Connect ouvre `/oauth/consent/` sur l’instance. Les jetons se révoquent dans Compte → Tokens. Un jeton `dfat_…` peut remplacer OAuth (`Authorization: Bearer`).
 
-Aucun Client ID ni Client Secret : l’instance enregistre Cursor toute seule (OAuth 2.1, PKCE). Les jetons se révoquent dans **Compte → Tokens**.
+## Clients
 
-## Jeton API à la place d’OAuth
+- Cursor : `mcp.json` (et `.cursor-plugin/plugin.json`). Marketplace : importer `https://github.com/bobdivx/devforge`, plugin `devforge-mcp`.
+- Grok Build : `.grok-plugin/plugin.json` + `.mcp.json`.
+- Claude : `.claude-plugin/plugin.json` + `.mcp.json`.
+- Registre MCP : `server.json` (`app.jeser/devforge`).
 
-Créer un jeton `dfat_…` (Compte → Tokens) et coller dans `.cursor/mcp.json` :
-
-```json
-{
-  "mcpServers": {
-    "devforge": {
-      "url": "https://<hôte>/api/v1/mcp",
-      "headers": {
-        "Authorization": "Bearer dfat_…"
-      }
-    }
-  }
-}
-```
-
-## Publication sur le marketplace
-
-Le formulaire officiel demande une session Cursor : [cursor.com/marketplace/publish](https://cursor.com/marketplace/publish).  
-Le catalogue communautaire : [cursor.directory/plugins/new](https://cursor.directory/plugins/new) (compte GitHub ou Google). Coller l’URL du dépôt ; le manifeste `.cursor-plugin/marketplace.json` est détecté à la racine.
+Autre instance : remplacer l’URL dans `mcp.json` / `.mcp.json`.
