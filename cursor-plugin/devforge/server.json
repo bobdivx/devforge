@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "app.jeser/devforge",
+  "title": "DevForge",
+  "description": "Self-hosted DevForge PaaS: projects, deployments, logs, and agent tools. Public instance at web.jeser.app. OAuth 2.1 with PKCE; no client secret.",
+  "version": "1.0.0",
+  "websiteUrl": "https://web.jeser.app",
+  "repository": {
+    "url": "https://github.com/bobdivx/devforge",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://web.jeser.app/api/v1/mcp"
+    }
+  ]
+}
