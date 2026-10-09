@@ -233,12 +233,14 @@ impl ProxyFacade {
                         "[ensure_traefik] configuration du proxy à jour requise ({} → {want}) — remplacement sûr",
                         if cur.is_empty() { "?" } else { cur.as_str() }
                     );
+                    let publish = self.host_ports_available(executor, server_id).await;
                     let run = docker::traefik_run_command(
                         TRAEFIK_CONTAINER_NAME,
                         TRAEFIK_NETWORK,
                         &expected,
                         TRAEFIK_IMAGE,
                         acme.as_deref(),
+                        publish,
                     );
                     let pull = format!("docker image inspect {TRAEFIK_IMAGE} >/dev/null 2>&1 || docker pull {TRAEFIK_IMAGE}");
                     let _ = executor.exec(server_id, "", &pull, 180).await;
@@ -346,16 +348,35 @@ impl ProxyFacade {
 
         // Create Traefik container with full production config
         let acme = docker::acme_email();
+        let publish = self.host_ports_available(executor, server_id).await;
         let create_cmd = docker::traefik_run_command(
             TRAEFIK_CONTAINER_NAME,
             TRAEFIK_NETWORK,
             &host_data_path,
             TRAEFIK_IMAGE,
             acme.as_deref(),
+            publish,
         );
 
-        let create_res = executor.exec(server_id, "", &create_cmd, 60).await?;
-        
+        let mut create_res = executor.exec(server_id, "", &create_cmd, 60).await?;
+        if !create_res.ok
+            && create_res.output.to_ascii_lowercase().contains("port is already allocated")
+        {
+            eprintln!("[ensure_traefik] 80/443 hôte pris — recréation sans publication (tunnel → devforge-traefik:80)");
+            let _ = executor
+                .exec(server_id, "", &format!("docker rm -f {TRAEFIK_CONTAINER_NAME}"), 30)
+                .await;
+            let fallback = docker::traefik_run_command(
+                TRAEFIK_CONTAINER_NAME,
+                TRAEFIK_NETWORK,
+                &host_data_path,
+                TRAEFIK_IMAGE,
+                acme.as_deref(),
+                false,
+            );
+            create_res = executor.exec(server_id, "", &fallback, 60).await?;
+        }
+
         if create_res.ok {
             Ok(json!({
                 "ok": true,
@@ -375,7 +396,21 @@ impl ProxyFacade {
         }
     }
 
-    /// cloudflared en host network → Traefik :80. Recréé si le token change.
+
+    /// 80/443 hôte libres ? ZimaOS gateway les tient : publier alors laisse Traefik en Created.
+    async fn host_ports_available(
+        &self,
+        executor: &Arc<dyn RemoteExecutor>,
+        server_id: &str,
+    ) -> bool {
+        let probe = r#"sh -c 'taken=0; for p in 80 443; do if docker ps -q --filter publish=$p 2>/dev/null | grep -q .; then taken=1; fi; done; if [ "$taken" = 1 ]; then echo taken; else echo free; fi'"#;
+        match executor.exec(server_id, "", probe, 20).await {
+            Ok(r) => !r.output.to_ascii_lowercase().contains("taken"),
+            Err(_) => false,
+        }
+    }
+
+    /// cloudflared sur le réseau `devforge` → http://devforge-traefik:80 (pas le :80 hôte).
     pub async fn ensure_cloudflared(&self, server_id: &str, tunnel_token: &str) -> Result<Value> {
         let executor = self.executor.as_ref().ok_or_else(|| {
             DevForgeError::Message("executor required for cloudflared".into())
@@ -396,15 +431,39 @@ impl ProxyFacade {
         );
         let cur = executor.exec(server_id, "", &check, 20).await?;
         let line = cur.output.trim();
-        if line.starts_with(&mark) && line.contains("running") {
+        let net = executor
+            .exec(
+                server_id,
+                "",
+                &format!(
+                    r#"docker inspect {name} --format '{{{{.HostConfig.NetworkMode}}}} {{{{index .Config.Labels "devforge.cf_net"}}}}' 2>/dev/null || echo missing"#
+                ),
+                20,
+            )
+            .await
+            .map(|r| r.output)
+            .unwrap_or_default();
+        if line.starts_with(&mark)
+            && line.contains("running")
+            && net.contains("devforge")
+            && !net.contains("host")
+        {
             return Ok(json!({"ok": true, "status": "already_running", "container": name}));
         }
         let _ = executor
             .exec(server_id, "", &format!("docker rm -f {name} 2>/dev/null || true"), 20)
             .await;
+        let _ = executor
+            .exec(
+                server_id,
+                "",
+                "docker network inspect devforge >/dev/null 2>&1 || docker network create devforge",
+                20,
+            )
+            .await;
         let run = format!(
-            r#"docker run -d --name {name} --restart unless-stopped --network host \
-  --label devforge.managed=true --label devforge.cf_mark={} \
+            r#"docker run -d --name {name} --restart unless-stopped --network devforge \
+  --label devforge.managed=true --label devforge.cf_mark={} --label devforge.cf_net=devforge \
   cloudflare/cloudflared:latest tunnel --no-autoupdate run --token {}"#,
             shell_escape(&mark),
             shell_escape(token)

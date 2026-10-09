@@ -164,10 +164,9 @@ pub async fn provision_node(state: &AppState, server_id: &str) {
     }
     match dns.provider.as_str() {
         "cloudflare" => {
-            let host = ingress_for(state, &sid).await;
-            if host.ends_with("cfargotunnel.com") && cloudflared_running(state, &sid).await {
-                return;
-            }
+            // Toujours réappliquer le catch-all (origine docker) et le connecteur.
+            // L'ancien court-circuit laissait cloudflared en host network vers 127.0.0.1:80,
+            // donc le gateway ZimaOS, pendant que Traefik restait Created.
             match cloudflare_connect(cf_key(&dns), &dns.zone).await {
                 Ok(cf) => match cf.ensure_tunnel(&tunnel_name(&sid)).await {
                     Ok((id, token)) => {
@@ -218,6 +217,7 @@ async fn docker_running(
     Ok(res.output.trim().eq_ignore_ascii_case("true"))
 }
 
+#[allow(dead_code)]
 async fn cloudflared_running(state: &AppState, server_id: &str) -> bool {
     docker_running(state, server_id, "devforge-cloudflared")
         .await

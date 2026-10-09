@@ -23,6 +23,13 @@ Cloudflare : token Account Tunnel Edit + Zone DNS Edit + Account Read. Porkbun :
 
 Certificats : crate `domain` + **certbot ACME** via l’executor. Traefik gère aussi l’HTTP challenge.
 
+
+## ZimaOS : 80/443 déjà pris
+
+Le gateway ZimaOS occupe l'hôte `:80`. Publier `80:80` laisse `devforge-traefik` en `Created` (`port is already allocated`) et toutes les apps `df-*` injoignables.
+
+DevForge publie 80/443 seulement s'ils sont libres. Sinon Traefik écoute uniquement sur le réseau Docker `devforge`, et le tunnel Cloudflare vise `http://devforge-traefik:80` (plus `127.0.0.1:80`). `devforge-cloudflared` est sur ce réseau, pas en `network_mode: host`.
+
 ## Labels Traefik
 
 Au deploy, DevForge applique des labels (`docker update` / recreate) pour que Traefik route vers le conteneur `df-<uuid>`.

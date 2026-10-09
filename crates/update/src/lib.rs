@@ -822,11 +822,35 @@ impl UpdateFacade {
                 &traefik_dir,
                 "traefik:v3.6",
                 acme.as_deref(),
+                true,
             );
-            let create_res = self
+            let mut create_res = self
                 .executor
                 .exec(&self.config.server_id, ".", &create_cmd, 60)
                 .await?;
+            if !create_res.ok
+                && create_res
+                    .output
+                    .to_ascii_lowercase()
+                    .contains("port is already allocated")
+            {
+                let _ = self
+                    .executor
+                    .exec(&self.config.server_id, ".", "docker rm -f devforge-traefik", 30)
+                    .await;
+                let fallback = devforge_deploy::docker::traefik_run_command(
+                    "devforge-traefik",
+                    "devforge",
+                    &traefik_dir,
+                    "traefik:v3.6",
+                    acme.as_deref(),
+                    false,
+                );
+                create_res = self
+                    .executor
+                    .exec(&self.config.server_id, ".", &fallback, 60)
+                    .await?;
+            }
             if !create_res.ok {
                 let err_msg = format!(
                     "Failed to create Traefik: {}",

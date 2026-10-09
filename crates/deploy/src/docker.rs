@@ -1234,25 +1234,34 @@ pub fn traefik_config_hash(image: &str, network: &str, acme_email: Option<&str>)
 pub const TRAEFIK_CONFIG_LABEL: &str = "devforge.proxy.config";
 
 /// `docker run -d …` complet du reverse proxy (sans suppression préalable).
+/// Origine du tunnel Cloudflare : Traefik sur le réseau Docker, pas le :80 de l'hôte.
+/// ZimaOS tient déjà 80/443 ; publier ces ports laisse `devforge-traefik` en Created.
+pub const CLOUDFLARE_TUNNEL_ORIGIN: &str = "http://devforge-traefik:80";
+
 pub fn traefik_run_command(
     name: &str,
     network: &str,
     host_data_path: &str,
     image: &str,
     acme_email: Option<&str>,
+    publish_host_ports: bool,
 ) -> String {
     let mut parts: Vec<String> = vec![
         "docker run -d".into(),
         format!("--name {}", shell_escape(name)),
         "--restart unless-stopped".into(),
         format!("--network {}", shell_escape(network)),
-        "-p 80:80".into(),
-        "-p 443:443".into(),
-        "-p 443:443/udp".into(),
+    ];
+    if publish_host_ports {
+        parts.push("-p 80:80".into());
+        parts.push("-p 443:443".into());
+        parts.push("-p 443:443/udp".into());
+    }
+    parts.extend([
         "--add-host host.docker.internal:host-gateway".into(),
         "-v /var/run/docker.sock:/var/run/docker.sock:ro".into(),
         format!("-v {}:/traefik", shell_escape(host_data_path)),
-    ];
+    ]);
     for l in traefik_proxy_container_labels() {
         parts.push(format!("--label {}", shell_escape(&l)));
     }
@@ -1260,6 +1269,10 @@ pub fn traefik_run_command(
         "--label {}={}",
         TRAEFIK_CONFIG_LABEL,
         traefik_config_hash(image, network, acme_email)
+    ));
+    parts.push(format!(
+        "--label devforge.proxy.host_ports={}",
+        if publish_host_ports { "true" } else { "false" }
     ));
     parts.push(shell_escape(image));
     for a in traefik_args(network, acme_email) {
@@ -1405,14 +1418,18 @@ mod tests {
         assert!(!is_valid_acme_email("nobody"));
         assert!(!is_valid_acme_email("a@b"));
         assert!(!is_valid_acme_email("x@y.com; rm -rf /"));
-        let cmd = traefik_run_command("devforge-traefik", "devforge", "/DATA/x/proxy", "traefik:v3.6", Some("bobdivx@gmail.com"));
+        let cmd = traefik_run_command("devforge-traefik", "devforge", "/DATA/x/proxy", "traefik:v3.6", Some("bobdivx@gmail.com"), true);
         assert!(cmd.contains("acme.email=bobdivx@gmail.com"), "{cmd}");
+        assert!(cmd.contains("-p 80:80"), "{cmd}");
         assert!(!cmd.contains("devforge.local"), "{cmd}");
         assert!(cmd.contains("entrypoints.http.http.middlewares=devforge-retry@docker"));
         assert!(cmd.contains("devforge-retry.retry.attempts=3"));
         assert!(cmd.contains("-v '/DATA/x/proxy':/traefik") || cmd.contains("-v /DATA/x/proxy:/traefik"), "{cmd}");
-        let none = traefik_run_command("devforge-traefik", "devforge", "/p", "traefik:v3.6", Some("admin@devforge.local"));
+        let none = traefik_run_command("devforge-traefik", "devforge", "/p", "traefik:v3.6", Some("admin@devforge.local"), false);
         assert!(!none.contains("acme.email"), "{none}");
+        assert!(!none.contains("-p 80:80"), "{none}");
+        assert!(none.contains("devforge.proxy.host_ports=false"), "{none}");
+        assert!(none.contains("--network devforge"), "{none}");
         assert_ne!(
             traefik_config_hash("traefik:v3.6", "devforge", Some("bobdivx@gmail.com")),
             traefik_config_hash("traefik:v3.6", "devforge", None)
