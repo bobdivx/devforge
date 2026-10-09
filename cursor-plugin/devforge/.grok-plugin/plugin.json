@@ -1,0 +1,14 @@
+{
+  "name": "devforge",
+  "version": "1.0.0",
+  "description": "Connect Grok to a self-hosted DevForge instance: projects, deploys, logs, and agent tools over MCP.",
+  "author": {
+    "name": "DevForge",
+    "url": "https://jeser.app"
+  },
+  "homepage": "https://web.jeser.app",
+  "repository": "https://github.com/bobdivx/devforge",
+  "license": "see repository",
+  "keywords": ["devforge", "devforge mcp"],
+  "logo": "assets/logo.svg"
+}
