@@ -1,0 +1,12 @@
+{
+  "name": "devforge",
+  "version": "1.0.0",
+  "description": "Connect Claude to the DevForge instance at web.jeser.app over MCP.",
+  "author": {
+    "name": "DevForge",
+    "url": "https://jeser.app"
+  },
+  "homepage": "https://web.jeser.app",
+  "repository": "https://github.com/bobdivx/devforge",
+  "keywords": ["devforge", "devforge mcp"]
+}
