@@ -56,14 +56,12 @@ export function mobileAvatarNav(role?: string | null): NavItem[] {
   return globalNavForRole(role).filter((item) => !hidden.has(item.key));
 }
 
-const PROJECT_PRIMARY_KEYS = ['home', 'overview', 'workspace', 'deployments', 'agents', 'domains'] as const;
-const PROJECT_MORE_KEYS = ['git', 'actions', 'database', 'env', 'backups', 'settings'] as const;
+const PROJECT_PRIMARY_KEYS = ['overview', 'workspace', 'deployments', 'agents', 'domains'] as const;
+const PROJECT_MORE_KEYS = ['git', 'actions', 'database', 'env', 'backups', 'settings', 'home'] as const;
 
 function projectNavItems(uuid: string, opts?: { workspace?: boolean }): NavItem[] {
   const base = `/app/projects/view?uuid=${encodeURIComponent(uuid)}`;
   const items: NavItem[] = [
-    // Retour à la page simple (sans ?tab) depuis les pages détaillées.
-    { href: base, label: '← Retour à l’app', key: 'home' },
     { href: `${base}&tab=overview`, label: 'Tableau de bord', key: 'overview' },
     { href: `${base}&tab=workspace`, label: 'Workspace', key: 'workspace', beta: true },
     { href: `${base}&tab=deployments`, label: 'Déploiements', key: 'deployments' },
@@ -75,6 +73,8 @@ function projectNavItems(uuid: string, opts?: { workspace?: boolean }): NavItem[
     { href: `${base}&tab=env`, label: 'Env', key: 'env' },
     { href: `${base}&tab=backups`, label: 'Sauvegardes', key: 'backups' },
     { href: `${base}&tab=settings`, label: 'Paramètres', key: 'settings' },
+    // Ancien home (chat Braise) reste accessible explicitement.
+    { href: `${base}&tab=home`, label: 'Chat (Braise)', key: 'home' },
   ];
   if (opts?.workspace === false) return items.filter((item) => item.key !== 'workspace');
   return items;
