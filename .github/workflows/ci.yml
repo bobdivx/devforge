@@ -37,14 +37,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Composants JSX importés (évite ReferenceError au rendu)
         run: node scripts/check-jsx-imports.mjs
-      - name: Build web (même image que le Dockerfile)
+      - name: Build web + tests Vitest (même image que le Dockerfile)
         run: |
           docker run --rm \
             -v "$PWD/apps/web:/web" \
             -w /web \
             -e PUBLIC_SERVER_URL=/api/v1 \
             node:22-bookworm \
-            bash -lc 'npm install --include=optional && npm run build'
+            bash -lc 'npm install --include=optional && npm run build && npm test'
 
   no-forbidden-brands:
     runs-on: ubuntu-latest
