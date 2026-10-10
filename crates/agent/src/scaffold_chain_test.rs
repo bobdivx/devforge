@@ -32,6 +32,12 @@ impl ProjectStore for UrlStore {
     async fn deployment_logs(&self, _uuid: &str) -> Result<Value> {
         Ok(json!({ "ok": true, "logs": "" }))
     }
+    async fn list_deployments(&self, _project_uuid: &str) -> Result<Value> {
+        Ok(json!({ "ok": true, "deployments": [] }))
+    }
+    async fn cancel_deployment(&self, deployment_uuid: &str) -> Result<Value> {
+        Ok(json!({ "ok": true, "deployment_uuid": deployment_uuid, "status": "cancelled" }))
+    }
     async fn trigger_deploy(
         &self,
         project_uuid: &str,
