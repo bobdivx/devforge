@@ -225,6 +225,7 @@ pub(crate) async fn deploy_project(state: &AppState, project: &Project, message:
         if let Err(e) = state.proxy.ensure_traefik().await {
             tracing::error!(error = %e, project = %project.uuid, "auto-deploy: ensure Traefik failed");
         }
+        crate::routes::on_deploy_success(state, project, &dep_uuid).await;
     } else {
         let state_clone = state.clone();
         let project_uuid = project.uuid.clone();

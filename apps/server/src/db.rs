@@ -165,6 +165,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await;
 
+    crate::wake_causes::migrate(pool).await?;
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS project_publish_grants (

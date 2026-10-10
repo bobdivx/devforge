@@ -52,6 +52,7 @@ mod token_routes;
 mod tray;
 mod update_routes;
 mod user_prefs;
+mod wake_causes;
 mod worker;
 
 use axum::{middleware, routing::get, Json, Router};

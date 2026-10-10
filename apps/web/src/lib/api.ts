@@ -750,6 +750,12 @@ export const api = {
       method: 'POST',
       body: '{}',
     }),
+  /** Accord humain de publication (15 min) : débloque GitHub / déploiement pour l'agent. */
+  approvePublish: (projectUuid: string) =>
+    request<{ ok: boolean; expires_in_seconds: number; message?: string }>(
+      `/projects/${projectUuid}/publish-approval`,
+      { method: 'POST', body: '{}' },
+    ),
   agentMessages: (projectUuid: string, agentUuid: string) =>
     request<{
       data: Array<{

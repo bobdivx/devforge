@@ -320,3 +320,101 @@ mod tests {
         assert!(result.contains("120s"));
     }
 }
+
+/// Classe d'erreur LLM : décide des nouveaux essais (P1-09).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LlmErrorKind {
+    RateLimited { retry_after: Option<std::time::Duration> },
+    Server,
+    Timeout,
+    Auth,
+    BadRequest,
+    Parse,
+    Other,
+}
+
+impl LlmErrorKind {
+    /// Nombre de nouveaux essais sur le même fournisseur avant de passer au suivant.
+    /// Timeout : un seul (les délais de réponse vont jusqu'à 240 s).
+    pub fn max_retries(&self) -> u32 {
+        match self {
+            LlmErrorKind::RateLimited { .. } | LlmErrorKind::Server => 2,
+            LlmErrorKind::Timeout => 1,
+            _ => 0,
+        }
+    }
+}
+
+fn parse_retry_after(msg: &str) -> Option<std::time::Duration> {
+    let re = Regex::new(r"(?i)retry[-_ ]after[=: ]+(\d+(?:\.\d+)?)\s*s?").ok()?;
+    let secs: f64 = re.captures(msg)?.get(1)?.as_str().parse().ok()?;
+    Some(std::time::Duration::from_millis((secs * 1000.0) as u64))
+}
+
+/// Classe une erreur de fournisseur à partir de son message (`LLM 429 …`, `LLM HTTP: … timed out`).
+pub fn classify(e: &devforge_shared::DevForgeError) -> LlmErrorKind {
+    classify_message(&e.to_string())
+}
+
+pub fn classify_message(msg: &str) -> LlmErrorKind {
+    let l = msg.to_lowercase();
+    // Facturation / quota épuisé : réessayer ne sert à rien, on passe au suivant.
+    if l.contains("insufficient_quota") || l.contains("spending limit") || l.contains("available credits") {
+        return LlmErrorKind::Other;
+    }
+    let status = Regex::new(r"\bLLM (\d{3})\b")
+        .ok()
+        .and_then(|re| re.captures(msg))
+        .and_then(|c| c.get(1))
+        .and_then(|m| m.as_str().parse::<u16>().ok());
+    match status {
+        Some(429) => return LlmErrorKind::RateLimited { retry_after: parse_retry_after(msg) },
+        Some(401) | Some(403) => return LlmErrorKind::Auth,
+        Some(400) | Some(404) | Some(413) | Some(422) => return LlmErrorKind::BadRequest,
+        Some(408) => return LlmErrorKind::Timeout,
+        Some(s) if (500..600).contains(&s) => return LlmErrorKind::Server,
+        _ => {}
+    }
+    if l.contains("resource_exhausted") || l.contains("rate limit") || l.contains("too many requests") {
+        return LlmErrorKind::RateLimited { retry_after: parse_retry_after(msg) };
+    }
+    if l.contains("timed out") || l.contains("timeout") {
+        return LlmErrorKind::Timeout;
+    }
+    if l.contains("llm http:") || l.contains("connection reset") || l.contains("connection closed") {
+        return LlmErrorKind::Server;
+    }
+    if l.contains("llm json") || l.contains("parse") {
+        return LlmErrorKind::Parse;
+    }
+    LlmErrorKind::Other
+}
+
+#[cfg(test)]
+mod classify_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn classifies_common_errors() {
+        assert_eq!(
+            classify_message("LLM 429 Too Many Requests (retry-after=3s): slow down"),
+            LlmErrorKind::RateLimited { retry_after: Some(Duration::from_secs(3)) }
+        );
+        assert_eq!(classify_message("LLM 429 Too Many Requests: x"), LlmErrorKind::RateLimited { retry_after: None });
+        assert_eq!(classify_message("LLM 503 Service Unavailable: x"), LlmErrorKind::Server);
+        assert_eq!(classify_message("LLM 401 Unauthorized: bad key"), LlmErrorKind::Auth);
+        assert_eq!(classify_message("LLM 400 Bad Request: x"), LlmErrorKind::BadRequest);
+        assert_eq!(classify_message("LLM HTTP: operation timed out"), LlmErrorKind::Timeout);
+        assert_eq!(classify_message("LLM 429: insufficient_quota"), LlmErrorKind::Other);
+        assert_eq!(classify_message("LLM JSON: expected value"), LlmErrorKind::Parse);
+    }
+
+    #[test]
+    fn retry_budget() {
+        assert_eq!(LlmErrorKind::Server.max_retries(), 2);
+        assert_eq!(LlmErrorKind::Timeout.max_retries(), 1);
+        assert_eq!(LlmErrorKind::Auth.max_retries(), 0);
+        assert_eq!(LlmErrorKind::BadRequest.max_retries(), 0);
+    }
+}

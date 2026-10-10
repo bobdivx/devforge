@@ -22,6 +22,14 @@ import {
 import { cn } from '../lib/cn';
 import { cancelQueued, EMPTY_QUEUE, enqueue, flushOnIdle, type ComposerQueue } from '../lib/composer-queue';
 import { Markdown, MD_MESSAGE_CLASS } from '../lib/markdown';
+import {
+  approveThenSend,
+  needsUserActionFrom,
+  OPEN_PR_MESSAGE,
+  PUBLISH_APPROVAL_KIND,
+  PUBLISH_APPROVED_MESSAGE,
+  type NeedsUserAction,
+} from '../lib/publish-approval';
 import { prefersReducedMotion } from '../lib/motion';
 import { useKeyboardOverlap } from '../lib/useVisualViewport';
 import { Composer } from './chat/Composer';
@@ -112,12 +120,7 @@ type ChatMessage = {
   reflections?: AgentReflection[];
   plan?: AgentPlan | null;
   canOpenPr?: boolean;
-  needsUserAction?: {
-    kind: string;
-    message_fr: string;
-    settings_href?: string;
-    resume_hint?: string;
-  };
+  needsUserAction?: NeedsUserAction;
 };
 
 function metaFor(agent: ProjectAgent) {
@@ -249,12 +252,14 @@ type MessageItemProps = {
   animate: boolean;
   onSend(text: string): void;
   onRetry(errorId: string): void;
+  /** Accord de publication puis message à l'agent. */
+  onApprovePublish(text: string): void;
 };
 
 const WAKE_RE = /COORD-WAKE|Événement projet|Déploiement :/;
 
 /** Un message du fil. Mémoïsé : le polling ne re-rend (ni ne re-parse le Markdown) que ce qui change. */
-function MessageItemView({ m, persona, busy, animate, onSend, onRetry }: MessageItemProps) {
+function MessageItemView({ m, persona, busy, animate, onSend, onRetry, onApprovePublish }: MessageItemProps) {
   const isWake = m.role === 'user' && WAKE_RE.test(m.content);
   const wakeSummary = isWake
     ? m.content.split('\n').slice(0, 3).join(' ').slice(0, 180) + (m.content.length > 180 ? '…' : '')
@@ -317,7 +322,7 @@ function MessageItemView({ m, persona, busy, animate, onSend, onRetry }: Message
                 onApprovePlan={
                   m.canOpenPr ? undefined : () => onSend('Go — exécute ce plan en local, puis lance la preview.')
                 }
-                onOpenPr={() => onSend('Valide les changements locaux et ouvre une pull request.')}
+                onOpenPr={() => onApprovePublish(OPEN_PR_MESSAGE)}
               />
             )}
             {m.needsUserAction && (
@@ -327,7 +332,9 @@ function MessageItemView({ m, persona, busy, animate, onSend, onRetry }: Message
                     !
                   </span>
                   <div class="flex-1">
-                    <p class="mb-2 text-sm font-medium">Action requise</p>
+                    <p class="mb-2 text-sm font-medium">
+                      {m.needsUserAction.kind === PUBLISH_APPROVAL_KIND ? 'Validation requise' : 'Action requise'}
+                    </p>
                     <p class="mb-3 text-sm text-[var(--color-ink-muted)]">{m.needsUserAction.message_fr}</p>
                     {m.needsUserAction.settings_href && (
                       <Button size="sm" variant="outline" href={m.needsUserAction.settings_href} class="mb-2">
@@ -337,9 +344,22 @@ function MessageItemView({ m, persona, busy, animate, onSend, onRetry }: Message
                     {m.needsUserAction.resume_hint && (
                       <p class="mt-2 text-xs text-[var(--color-ink-faint)]">{m.needsUserAction.resume_hint}</p>
                     )}
-                    <Button size="sm" variant="secondary" disabled={busy} onClick={() => onSend('Continuer')} class="mt-3">
-                      Continuer
-                    </Button>
+                    {m.needsUserAction.kind === PUBLISH_APPROVAL_KIND ? (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={busy}
+                        onClick={() => onApprovePublish(PUBLISH_APPROVED_MESSAGE)}
+                        class="mt-3"
+                        title="Autorise l’agent à publier (GitHub, déploiement) pendant 15 minutes."
+                      >
+                        Valider la publication
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="secondary" disabled={busy} onClick={() => onSend('Continuer')} class="mt-3">
+                        Continuer
+                      </Button>
+                    )}
                   </div>
                 </div>
               </Card>
@@ -362,7 +382,9 @@ const MessageItem = memo(
     a.animate === b.animate &&
     a.persona === b.persona &&
     a.onSend === b.onSend &&
-    a.onRetry === b.onRetry,
+    a.onRetry === b.onRetry &&
+    a.onApprovePublish === b.onApprovePublish &&
+    !!a.m.needsUserAction === !!b.m.needsUserAction,
 );
 
 /** Chat agents projet — mode équipe ou fils de conversation. */
@@ -588,6 +610,7 @@ export function ProjectAgentsPanel({
           }
         }
         const plan = planFromToolCalls(tools);
+        const isLast = i === (r.data ?? []).length - 1;
         return {
           id: serverMessageId(m.uuid, i),
           role: m.role,
@@ -596,6 +619,8 @@ export function ProjectAgentsPanel({
           toolCalls: tools,
           plan,
           canOpenPr: wroteLocalFiles(tools),
+          // Dernier tour seulement (ex. réveil bloqué en attente de validation) : pas de vieux boutons.
+          needsUserAction: isLast && m.role === 'assistant' ? needsUserActionFrom(tools) : undefined,
         };
       });
       // Premier chargement de ce fil : c'est l'historique, pas d'animation en cascade.
@@ -909,18 +934,7 @@ export function ProjectAgentsPanel({
         controller.signal,
       );
       const tools = res.tool_calls ?? [];
-      let needsUserAction: ChatMessage['needsUserAction'];
-      for (const tool of tools) {
-        if (tool.result?.needs_user_action === true) {
-          needsUserAction = {
-            kind: tool.result.kind || 'unknown',
-            message_fr: tool.result.message_fr || 'Action utilisateur requise',
-            settings_href: tool.result.settings_href,
-            resume_hint: tool.result.resume_hint,
-          };
-          break;
-        }
-      }
+      const needsUserAction = needsUserActionFrom(tools);
 
       setMessages((m) => [
         ...m,
@@ -932,7 +946,7 @@ export function ProjectAgentsPanel({
           toolCalls: tools,
           reflections: res.reflections ?? [],
           plan: res.plan,
-          canOpenPr: wroteLocalFiles(tools),
+          canOpenPr: wroteLocalFiles(tools) || res.executed_plan === true,
           needsUserAction,
         },
       ]);
@@ -1014,6 +1028,31 @@ export function ProjectAgentsPanel({
   retryRef.current = retryAfterError;
   const onSendStable = useCallback((t: string) => void sendRef.current(t), []);
   const onRetryStable = useCallback((id: string) => retryRef.current(id), []);
+  const approveRef = useRef<(text: string) => Promise<void>>(async () => undefined);
+  approveRef.current = async (text: string) => {
+    try {
+      await approveThenSend(
+        () => api.approvePublish(projectUuid),
+        (t) => {
+          // Accord posé : les anciennes cartes « Validation requise » n'ont plus lieu d'être.
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.needsUserAction?.kind === PUBLISH_APPROVAL_KIND ? { ...m, needsUserAction: undefined } : m,
+            ),
+          );
+          void sendRef.current(t);
+        },
+        text,
+      );
+    } catch (e: unknown) {
+      toast.push({
+        title: 'Validation impossible',
+        detail: String((e as Error)?.message || e),
+        tone: 'danger',
+      });
+    }
+  };
+  const onApprovePublishStable = useCallback((t: string) => void approveRef.current(t), []);
 
   function onChip(chip: ChatChip) {
     if (chip.onClick) {
@@ -1367,6 +1406,7 @@ export function ProjectAgentsPanel({
                 animate={!history.current.ids.has(m.id)}
                 onSend={onSendStable}
                 onRetry={onRetryStable}
+                onApprovePublish={onApprovePublishStable}
               />
             ))}
             {busy && liveReflections.length > 0 && (

@@ -1,4 +1,9 @@
+pub mod claims;
+pub mod coerce;
+pub mod guard;
+pub mod roles;
 pub mod sdd;
+pub mod truncate;
 mod tools;
 
 use async_trait::async_trait;
@@ -26,15 +31,46 @@ use tools::{
     WriteProjectFileTool,
 };
 
+pub use tools::{post_deploy_verdict, smoke_url};
+
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
+    /// Accord de publication (P1-01). Absent = toute action distante est refusée.
+    gate: Option<Arc<dyn guard::PublishGate>>,
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),
+            gate: None,
         }
+    }
+
+    pub fn set_publish_gate(&mut self, gate: Arc<dyn guard::PublishGate>) {
+        self.gate = Some(gate);
+    }
+
+    /// Accord humain en cours pour ce projet (refus si pas de gate ou pas de projet).
+    pub async fn publish_allowed(&self, project_uuid: &str) -> bool {
+        if project_uuid.trim().is_empty() {
+            return false;
+        }
+        match &self.gate {
+            Some(gate) => gate.allowed(project_uuid).await,
+            None => false,
+        }
+    }
+
+    /// Schéma JSON des paramètres d'un outil (coercition des arguments).
+    pub fn schema(&self, name: &str) -> Option<Value> {
+        self.tools.get(name).map(|t| t.parameters())
+    }
+
+    pub fn names(&self) -> Vec<String> {
+        let mut n: Vec<String> = self.tools.keys().cloned().collect();
+        n.sort();
+        n
     }
 
     pub fn register(&mut self, tool: Arc<dyn Tool>) {
@@ -174,6 +210,7 @@ pub fn build_core_registry(
     registry.register(Arc::new(ListAgentToolFailuresTool { pool: pool.clone() }));
     registry.register(Arc::new(CreateProjectAgentTool { pool: pool.clone() }));
     registry.register(Arc::new(ReviewProjectSecurityTool { pool: pool.clone() }));
+    registry.set_publish_gate(Arc::new(guard::PgPublishGate { pool: pool.clone() }));
     registry.register(Arc::new(SddLoopTool { pool }));
     registry
 }
@@ -194,6 +231,9 @@ pub struct AgentReply {
     pub tool_calls: Vec<ToolCallRecord>,
     #[serde(default)]
     pub provider: String,
+    /// Le plan a déjà été exécuté dans ce tour (écritures locales) : pas de « Construire ».
+    #[serde(default)]
+    pub executed_plan: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -231,6 +271,8 @@ pub enum AgentEvent {
         provider: String,
         tool_calls: Vec<ToolCallRecord>,
     },
+    /// Jalon de progression (ex. « Modèle saturé, nouvel essai… »).
+    Milestone { label: String },
     Error { message: String },
 }
 
@@ -247,6 +289,8 @@ pub struct AgentChatContext {
     pub project_uuid: Option<String>,
     pub agent_uuid: Option<String>,
     pub agent_role: Option<String>,
+    /// `required` | `custom` | `subagent` (filtre des outils par rôle).
+    pub agent_kind: Option<String>,
     pub agent_name: Option<String>,
     pub project_brief: Option<String>,
     pub git_owner: Option<String>,
@@ -351,11 +395,16 @@ impl AgentRunner {
             );
             let mut args = force_args.unwrap_or_else(|| json!({}));
             inject_tool_defaults(&mut args, &ctx);
+            if let Some(schema) = self.registry.schema(tool) {
+                coerce::coerce_args(&schema, &mut args);
+            }
             let call_id = format!("forced-{tool}");
             emit(&progress, AgentEvent::ToolStart { id: call_id.clone(), name: tool.to_string(), arguments: args.clone() });
             let result = if let Some(blocked) = refuse_bare_spec_approval(tool, &args, message) {
                 blocked
             } else if let Some(blocked) = refuse_spec_publish(tool, message) {
+                blocked
+            } else if let Some(blocked) = self.remote_write_refusal(tool, &args, &ctx).await {
                 blocked
             } else {
                 self.registry.execute(tool, args.clone()).await?
@@ -366,6 +415,7 @@ impl AgentRunner {
                 reply: summarize(tool, &result),
                 tool_calls: vec![ToolCallRecord { id: call_id, name: tool.to_string(), arguments: args, result }],
                 provider,
+                executed_plan: false,
             });
         }
         self.run_loop(message, ctx, progress, llm).await
@@ -393,8 +443,19 @@ impl AgentRunner {
             }
         }
         messages.push(ChatMessage::user(message));
-        let tools = self.registry.definitions();
-        let mut records = Vec::new();
+        let role = ctx.agent_role.clone().unwrap_or_else(|| "ops".into());
+        let kind = ctx.agent_kind.clone();
+        let security_review = is_security_review_request(message);
+        let tools: Vec<ToolDefinition> = self
+            .registry
+            .definitions()
+            .into_iter()
+            .filter(|d| roles::role_allows(&role, kind.as_deref(), &d.name, security_review))
+            .collect();
+        let budget = truncate::budget_from_env();
+        let mut records: Vec<ToolCallRecord> = Vec::new();
+        let mut claim_nudged = false;
+        let mut post_deploy_nudged = false;
         let (llm, provider) = if let Some(pair) = llm_override {
             pair
         } else {
@@ -407,7 +468,8 @@ impl AgentRunner {
                     messages.push(ChatMessage::system(nudge));
                 }
                 if let Some(nudge) = detect_repeated_failures(&records) {
-                    return Ok(AgentReply { reply: nudge, tool_calls: records, provider });
+                    let executed_plan = executed_plan(&records);
+                    return Ok(AgentReply { reply: nudge, tool_calls: records, provider, executed_plan });
                 }
             }
             emit(
@@ -422,13 +484,21 @@ impl AgentRunner {
                     detail: String::new(),
                 },
             );
-            let turn: AssistantTurn = llm
-                .chat(ChatRequest {
-                    messages: messages.clone(),
-                    tools: tools.clone(),
-                    temperature: 0.2,
-                })
-                .await?;
+            let req = ChatRequest {
+                messages: messages.clone(),
+                tools: tools.clone(),
+                temperature: 0.2,
+            };
+            let turn: AssistantTurn = match &progress {
+                Some(tx) => {
+                    let tx = tx.clone();
+                    let notify: devforge_llm::RetryNotifier = Arc::new(move |label: String| {
+                        let _ = tx.send(AgentEvent::Milestone { label });
+                    });
+                    devforge_llm::with_retry_notifier(notify, llm.chat(req)).await?
+                }
+                None => llm.chat(req).await?,
+            };
             if !turn.content.trim().is_empty() {
                 let detail = turn.content.trim().to_string();
                 let label: String = detail.chars().take(120).collect();
@@ -446,25 +516,53 @@ impl AgentRunner {
                 );
             }
             if turn.tool_calls.is_empty() {
+                // P1-02 : « j'ai corrigé » sans aucun outil dans ce tour → un rappel, puis transparence.
+                if records.is_empty() && claims::unverified_claim(&turn.content) {
+                    if !claim_nudged && round + 1 < self.max_rounds {
+                        claim_nudged = true;
+                        messages.push(ChatMessage::assistant(turn.content.clone()));
+                        messages.push(ChatMessage::system(claims::CLAIM_NUDGE));
+                        continue;
+                    }
+                    if claim_nudged {
+                        return Ok(AgentReply {
+                            reply: format!("{}{}", claims::UNVERIFIED_PREFIX, turn.content.trim()),
+                            tool_calls: records,
+                            provider,
+                            executed_plan: false,
+                        });
+                    }
+                }
                 let reply = if turn.content.trim().is_empty() {
                     "Terminé.".into()
                 } else {
                     turn.content
                 };
+                let executed_plan = executed_plan(&records);
                 return Ok(AgentReply {
                     reply,
                     tool_calls: records,
                     provider,
+                    executed_plan,
                 });
             }
             messages.push(ChatMessage::assistant_tools(turn.content.clone(), turn.tool_calls.clone()));
             for call in turn.tool_calls {
                 let mut args = call.arguments.clone();
                 inject_tool_defaults(&mut args, &ctx);
+                if let Some(schema) = self.registry.schema(&call.name) {
+                    coerce::coerce_args(&schema, &mut args);
+                }
                 emit(&progress, AgentEvent::ToolStart { id: call.id.clone(), name: call.name.clone(), arguments: args.clone() });
                 let result = if let Some(blocked) = refuse_bare_spec_approval(&call.name, &args, message) {
                     blocked
                 } else if let Some(blocked) = refuse_spec_publish(&call.name, message) {
+                    blocked
+                } else if self.registry.has(&call.name)
+                    && !roles::role_allows(&role, kind.as_deref(), &call.name, security_review)
+                {
+                    roles::role_refusal(&role, &call.name)
+                } else if let Some(blocked) = self.remote_write_refusal(&call.name, &args, &ctx).await {
                     blocked
                 } else {
                     match self.registry.execute(&call.name, args.clone()).await {
@@ -490,17 +588,56 @@ impl AgentRunner {
                         });
                     }
                 }
-                records.push(ToolCallRecord { id: call.id.clone(), name: call.name.clone(), arguments: args, result: result.clone() });
-                let content = serde_json::to_string(&result).unwrap_or_else(|_| "{}".into());
+                // P1-04 : le modèle reçoit une version bornée ; `records` garde le résultat complet.
+                let content = truncate::for_model(&call.name, &args, &result, budget);
+                let deployed = ok && matches!(call.name.as_str(), "trigger_deploy" | "publish_to_github");
+                records.push(ToolCallRecord { id: call.id.clone(), name: call.name.clone(), arguments: args, result });
                 messages.push(ChatMessage::tool_result(&call.id, &call.name, content));
+                // P1-08 : pas de « c'est en ligne » sans vérification.
+                if deployed && !post_deploy_nudged {
+                    post_deploy_nudged = true;
+                    messages.push(ChatMessage::system(POST_DEPLOY_NUDGE));
+                }
             }
         }
+        let executed_plan = executed_plan(&records);
         Ok(AgentReply {
             reply: "Limite de tours agent atteinte — voici les tool calls effectués.".into(),
             tool_calls: records,
             provider,
+            executed_plan,
         })
     }
+
+    /// P1-01 : action distante sans accord humain récent → refus sans effet de bord.
+    async fn remote_write_refusal(&self, tool: &str, args: &Value, ctx: &AgentChatContext) -> Option<Value> {
+        if !guard::is_remote_write(tool, args) {
+            return None;
+        }
+        let project_uuid = args
+            .get("project_uuid")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_string)
+            .or_else(|| ctx.project_uuid.clone())
+            .unwrap_or_default();
+        if self.registry.publish_allowed(&project_uuid).await {
+            None
+        } else {
+            Some(guard::remote_write_blocked(tool, args))
+        }
+    }
+}
+
+pub const POST_DEPLOY_NUDGE: &str = "Avant de conclure : attends la fin du déploiement (list_deployments / get_deployment_logs avec l'uuid renvoyé) puis http_smoke sur production_url. Ne dis « en ligne » que si http_smoke renvoie un status 2xx/3xx, et cite ce status.";
+
+/// Écritures locales dans ce tour (le plan a été exécuté).
+pub fn executed_plan(records: &[ToolCallRecord]) -> bool {
+    records.iter().any(|r| {
+        r.name == "write_project_file"
+            && !guard::is_remote_write(&r.name, &r.arguments)
+            && r.result.get("ok").and_then(|v| v.as_bool()) != Some(false)
+    })
 }
 
 fn detect_duplicate_calls(records: &[ToolCallRecord]) -> Option<String> {
@@ -658,20 +795,24 @@ fn is_security_review_request(msg: &str) -> bool {
     NEEDLES.iter().any(|n| t.contains(n))
 }
 
-fn is_publish_request(msg: &str) -> bool {
-    let t = normalize_user_text(msg);
-    const NEEDLES: &[&str] = &["crée une pr", "creer une pr", "crée la pr", "creer la pr", "ouvre une pr", "ouvrir une pr", "open a pr", "pull request", "publie", "publier", "valide et crée", "valider et créer", "valide les changements", "merge ça", "déploie en prod", "deploie en prod", "déploie en production", "create_github_fix", "auto-réparation", "auto-reparation"];
-    NEEDLES.iter().any(|n| t.contains(n))
+const REMOTE_LOCK: &str = "Les actions distantes (GitHub, déploiement, variables de prod) sont verrouillées côté serveur tant que l'utilisateur n'a pas cliqué « Valider » ; si un outil répond publish_approval_required, arrête-toi et demande une seule fois.";
+
+fn local_first_rules(intent: guard::PublishIntent) -> String {
+    let gate = match intent {
+        guard::PublishIntent::Explicit => "L'utilisateur demande une publication : travaille depuis les fichiers locaux déjà écrits. Si l'outil répond publish_approval_required, l'interface affiche le bouton de validation : arrête-toi.".to_string(),
+        guard::PublishIntent::Negated => "L'utilisateur a demandé de NE PAS publier : reste strictement en local (aucun outil GitHub ni déploiement).".to_string(),
+        guard::PublishIntent::None => "Pas de demande de publication : n'appelle pas create_github_fix, sync_workdir_to_github, publish_to_github, create_github_repo, trigger_deploy ni mcp_call_tool en écriture. « go », « oui », « améliore le site » ne valident PAS une publication. N'invente pas un MCP « devforge-workdir » : shell = run_workdir_command (allowlist npm/node/astro…), fichiers = outils natifs.".to_string(),
+    };
+    format!("WORKFLOW (local d'abord, publication en dernier) :\n- Demande d'ANALYSE (question, « que proposes-tu », « analyse ») : propose_plan, puis arrête-toi et attends la réponse.\n- Demande d'EXÉCUTION (« fais », « corrige », « ajoute », « go ») : exécute directement en local sans redemander : list_project_files, read_project_file, write_project_file mode='local', run_workdir_command (build/test).\n- PREVIEW : après des edits, start_local_preview. Si public_ok=false ou logs_tail montre une erreur, corrige et relance (force=true). Ne dis jamais que la preview marche sans public_ok=true.\n- Si tu as déjà exécuté le plan dans ce tour, ne propose pas de le construire.\n- {REMOTE_LOCK}\n{gate}")
 }
 
-fn local_first_rules(publish_ok: bool) -> String {
-    let gate = if publish_ok {
-        "L'utilisateur a VALIDÉ explicitement une publication. Tu PEUX maintenant : create_github_pr, sync_workdir_to_github, publish_to_github, ou trigger_deploy. Travaille toujours depuis les fichiers locaux déjà écrits.".to_string()
-    } else {
-        "❌ INTERDIT (pas de validation PR) : create_github_pr, create_pull_request, publish_to_github, sync_workdir_to_github, create_github_repo, mcp_call_tool create_pull_request / create_or_update_file / create_branch. « go », « oui », « améliore le site » NE sont PAS une validation de PR. ✅ AUTORISÉ : propose_plan, sdd_loop, list_project_files, read_project_file, write_project_file mode=local, run_workdir_command, start_local_preview, get_project, get_deployment_logs, run_application_tests, http_smoke, list_env_vars, review_project_security (seulement si l'utilisateur demande une revue sécurité). ❌ N’invente PAS un MCP « devforge-workdir » — shell = run_workdir_command (allowlist npm/node/astro…), fichiers = tools natifs.".to_string()
-    };
-    format!("WORKFLOW OBLIGATOIRE (autonomie locale, PR en dernier) :\n1. PLAN : appelle propose_plan (titre + étapes) AVANT d'écrire des fichiers.\n2. EXÉCUTE EN LOCAL : list_project_files, read_project_file, write_project_file mode='local', run_workdir_command (build/test). Ne te contente pas de conseiller.\n3. PREVIEW : après des edits, appelle start_local_preview. Si public_ok=false ou logs_tail montre une erreur, corrige et relance (force=true). Ne dis jamais que la preview marche sans public_ok=true.\n4. RAPPORT : résume les fichiers touchés, puis UNE SEULE question : « Valide pour ouvrir une PR ? »\n{gate}")
+fn read_only_rules() -> String {
+    format!("Tu n'as pas d'outil d'écriture dans le code : pour modifier l'application, explique ce qu'il faut changer et délègue au Coordinateur.\n{REMOTE_LOCK}")
 }
+
+const STYLE: &str = "FORMAT DE RÉPONSE :\n- 1re phrase = le résultat (ce qui marche / ce qui casse / ce qui reste), sans préambule.\n- Puis au plus 3 puces factuelles (fichiers, commande, preuve : status HTTP, public_ok).\n- Une seule question à la fin, seulement si une décision de l'utilisateur est nécessaire.\n- Ne répète pas le plan ni la liste des outils appelés : l'interface les affiche déjà.\n- Chaque affirmation de succès cite sa preuve (sortie d'outil de CE tour).";
+
+const AUTONOMY: &str = "AUTONOMIE :\nAgis sans demander pour tout ce qui est local et réversible (lire, écrire en local, build, tests, preview).\nDemande une seule fois pour ce qui est distant ou destructif (publication, déploiement, suppression, variables prod) : l'interface affiche le bouton de validation.\nEn cas d'échec : une cause → un correctif → re-vérifie. Après 2 échecs identiques, arrête et explique ce qui bloque.";
 
 fn sdd_overlay(role: &str, latest: &str) -> String {
     if latest.contains("SDD-SPECIFY:") {
@@ -698,14 +839,19 @@ fn sdd_overlay(role: &str, latest: &str) -> String {
 
 fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
     let role = ctx.agent_role.as_deref().unwrap_or("ops");
+    let kind = ctx.agent_kind.as_deref();
     let name = ctx.agent_name.as_deref().unwrap_or("Agent");
-    let publish_ok = is_publish_request(latest);
+    let intent = guard::publish_intent(latest);
+    let publish_ok = intent == guard::PublishIntent::Explicit;
     let security_review = is_security_review_request(latest);
     let execute_nudge = is_execute_nudge(latest);
+    let can_write = roles::role_allows(role, kind, "write_project_file", security_review);
     let local = if security_review {
         "Cette demande est une revue sécurité : n'écris pas de fichiers et n'ouvre pas de PR. Un seul appel à review_project_security, puis le rapport des findings.".to_string()
+    } else if can_write {
+        local_first_rules(intent)
     } else {
-        local_first_rules(publish_ok)
+        read_only_rules()
     };
     let has_template_applied = ctx.history.iter().any(|(hist_role, content)| {
         hist_role == "user" && ((content.contains("Template") && content.contains("déjà appliqué")) || (content.contains("template") && content.contains("already applied")))
@@ -720,11 +866,11 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
             };
             format!("Tu es l'agent Déploiements. Priorité : statut des builds, versions en ligne, logs (get_project, get_deployment_logs, http_smoke). Ne lance un déploiement et ne modifie le code que si on te le demande clairement.\n{template_nudge}Conserve les routes Pocket ID du template (`/api/auth/login`, `/api/auth/callback/pocket-id`) : les comptes Pocket ID s'en servent pour entrer dans l'app.\n{local}")
         }
-        "runner" => "Tu es l'agent Runners. Tu surveilles les runners GitHub liés au dépôt (en ligne, occupés, en erreur). Rapporte les faits avec get_project et les outils GitHub disponibles. Ne modifie pas le code : le Workspace sert à ça. Si tu ne peux pas lire les runners, dis-le et oriente vers la page Runners.".into(),
-        "actions" => "Tu es l'agent Actions. Tu surveilles les workflows GitHub Actions du dépôt (succès, échec, en cours). Rapporte le dernier run utile. Ne réécris pas l'application : le Workspace sert à ça.".into(),
-        "crons" => "Tu es l'agent Crons. Tu surveilles les tâches planifiées du projet (actives, dernière exécution, échecs). Ne modifie le code que si on te le demande explicitement.".into(),
-        "reviewer" => format!("Tu es l'agent Revue : qualité, risques, CI. Tu signales ce qui cloche. Tu n'ouvres pas une PR et tu ne réécris le site que si on te le demande.\nRevue sécurité : seulement sur demande explicite, appelle review_project_security une fois. C'est une revue statique (secrets masqués, dépendances, motifs, en-têtes du projet). Rapporte les findings de l'outil. N'invente pas de faille et ne décris pas comment l'exploiter.\n{local}"),
-        "ops" => format!("Tu es l'agent Ops. Priorité : santé du projet, logs, variables d'environnement, smoke HTTP (get_project, get_deployment_logs, list_env_vars, http_smoke). Corrige le workdir seulement si on te le demande.\n{local}"),
+        "runner" => format!("Tu es l'agent Runners. Tu surveilles les runners GitHub liés au dépôt (en ligne, occupés, en erreur). Rapporte les faits avec get_project et les outils GitHub disponibles. Ne modifie pas le code : le Workspace sert à ça. Si tu ne peux pas lire les runners, dis-le et oriente vers la page Runners.\n{local}"),
+        "actions" => format!("Tu es l'agent Actions. Tu surveilles les workflows GitHub Actions du dépôt (succès, échec, en cours). Rapporte le dernier run utile. Ne réécris pas l'application : le Workspace sert à ça.\n{local}"),
+        "crons" => format!("Tu es l'agent Crons. Tu surveilles les tâches planifiées du projet (actives, dernière exécution, échecs).\n{local}"),
+        "reviewer" => format!("Tu es l'agent Revue : qualité, risques, CI. Tu signales ce qui cloche. Tu n'ouvres pas une PR et tu ne réécris pas le site.\nRevue sécurité : seulement sur demande explicite, appelle review_project_security une fois. C'est une revue statique (secrets masqués, dépendances, motifs, en-têtes du projet). Rapporte les findings de l'outil. N'invente pas de faille et ne décris pas comment l'exploiter.\n{local}"),
+        "ops" => format!("Tu es l'agent Ops. Priorité : santé du projet, logs, variables d'environnement, smoke HTTP (get_project, get_deployment_logs, list_env_vars, http_smoke).\n{local}"),
         // Coordinateur = fil permanent du projet. Les tâches lourdes passent par des subagents éphémères.
         "coordinator" => format!(
             "Tu es le Coordinateur — fil permanent de ce projet. Tu accumules le contexte, restes proactif sur les événements (échec deploy, santé dégradée), et orchestres.\nWORKERS : pour une tâche lourde ou isolée, appelle l’outil create_project_agent (kind=subagent, parent_agent_uuid=ton uuid injecté par défaut). Ne crée PAS un nouveau fil permanent / required par tâche. Optionnel : initial_message pour démarrer le worker. Tu coordonnes Deploy / Ops / Reviewer sans les remplacer.\n{sdd}{local}"
@@ -733,16 +879,46 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
     };
     let nudge = if security_review {
         "\nL'utilisateur demande une revue sécurité. Appelle review_project_security maintenant, une seule fois. Résume les findings (gravité, fichier, correctif). N'invente rien. Ne décris pas d'exploit. Ne réécris pas le code.\n"
-    } else if execute_nudge && !publish_ok {
-        "\nL'utilisateur a confirmé (go/oui). N'analyse PAS à nouveau. N'ouvre PAS de PR. Exécute le plan précédent EN LOCAL tout de suite (fichiers + start_local_preview).\n"
-    } else if publish_ok {
-        "\nL'utilisateur a demandé une PR / publication. Ouvre-la à partir des fichiers locaux déjà écrits.\n"
+    } else if execute_nudge && !publish_ok && can_write {
+        "\nL'utilisateur a confirmé (go/oui). N'analyse PAS à nouveau. N'ouvre PAS de PR. Si le plan précédent est déjà exécuté (fichiers écrits, preview OK), dis-le en citant le tour précédent ; sinon exécute-le EN LOCAL tout de suite (fichiers + start_local_preview).\n"
+    } else if publish_ok && can_write {
+        "\nL'utilisateur a demandé une PR / publication. Ouvre-la à partir des fichiers locaux déjà écrits. Si l'outil répond publish_approval_required, arrête-toi : l'interface affiche le bouton « Valider la publication ».\n"
     } else { "" };
     let scoped = if ctx.project_brief.is_some() || ctx.project_uuid.is_some() {
         "\nLe projet courant est déjà dans le contexte — ne demande pas l'UUID. Agis."
     } else { "" };
-    let mcp_guidance = "\n\nTOOLS LOCAUX (prioritaires, PAS du MCP) : propose_plan, sdd_loop, list_project_files, read_project_file, write_project_file (mode=local), run_workdir_command, start_local_preview, local_preview_status, list_project_agents, list_agent_messages, list_agent_tool_failures, create_project_agent, review_project_security (revue statique, seulement si demandée).\nIl n’existe PAS de serveur MCP « devforge-workdir » / « workdir » / « atelier » — n’invente pas ce nom, ne bloque PAS en attendant un MCP manquant, et ne demande JAMAIS à l’utilisateur de le configurer. Pour npm/build/test : run_workdir_command. Pour la preview : start_local_preview (npm install inclus).\nMCP distants (mcp_list_servers / mcp_call_tool) : uniquement GitHub, Turso, Slack… après validation PR pour GitHub. Pas besoin de lister les serveurs MCP à chaque tour.";
-    format!("Tu es {name} ({role}) sur DevForge. {role_focus}{nudge}{scoped}{mcp_guidance}\nRéponds en français, concret, orienté ACTION. N'invente pas de résultats. Le panneau Preview du workspace est l'endroit où l'utilisateur voit tes changements.")
+    let mcp_guidance = mcp_guidance(role, kind, security_review);
+    format!("Tu es {name} ({role}) sur DevForge. {role_focus}{nudge}{scoped}{mcp_guidance}\n\n{AUTONOMY}\n\n{STYLE}\nRéponds en français. N'invente pas de résultats. Le panneau Preview du workspace est l'endroit où l'utilisateur voit tes changements.")
+}
+
+/// Rappel des outils disponibles — seulement ceux du rôle (P1-05).
+fn mcp_guidance(role: &str, kind: Option<&str>, security_review: bool) -> String {
+    const LOCAL: &[&str] = &[
+        "propose_plan", "sdd_loop", "list_project_files", "read_project_file", "write_project_file", "run_workdir_command",
+        "start_local_preview", "local_preview_status", "list_project_agents", "list_agent_messages", "list_agent_tool_failures",
+        "create_project_agent", "review_project_security",
+    ];
+    let local: Vec<String> = LOCAL
+        .iter()
+        .filter(|t| roles::role_allows(role, kind, t, security_review || **t == "review_project_security"))
+        .map(|t| match *t {
+            "write_project_file" => "write_project_file (mode=local)".to_string(),
+            "review_project_security" => "review_project_security (revue statique, seulement si demandée)".to_string(),
+            other => other.to_string(),
+        })
+        .collect();
+    let mut out = String::new();
+    if !local.is_empty() {
+        out.push_str(&format!("\n\nTOOLS LOCAUX (prioritaires, PAS du MCP) : {}.", local.join(", ")));
+    }
+    out.push_str("\nIl n’existe PAS de serveur MCP « devforge-workdir » / « workdir » / « atelier » — n’invente pas ce nom, ne bloque PAS en attendant un MCP manquant, et ne demande JAMAIS à l’utilisateur de le configurer.");
+    if roles::role_allows(role, kind, "run_workdir_command", false) {
+        out.push_str(" Pour npm/build/test : run_workdir_command. Pour la preview : start_local_preview (npm install inclus).");
+    }
+    if roles::role_allows(role, kind, "mcp_call_tool", false) {
+        out.push_str("\nMCP distants (mcp_list_servers / mcp_call_tool) : uniquement GitHub, Turso, Slack… ; les écritures GitHub passent par la validation. Pas besoin de lister les serveurs MCP à chaque tour.");
+    }
+    out
 }
 
 pub fn parse_github_repo(git_url: &str) -> Option<(String, String)> {
@@ -770,6 +946,9 @@ pub fn parse_github_repo(git_url: &str) -> Option<(String, String)> {
 
 #[cfg(test)]
 mod scaffold_chain_test;
+
+#[cfg(test)]
+mod loop_tests;
 
 #[cfg(test)]
 mod approval_gate {

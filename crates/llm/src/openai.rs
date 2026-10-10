@@ -366,12 +366,18 @@ impl LlmProvider for OpenAiCompatibleProvider {
             .await
             .map_err(|e| err(format!("LLM HTTP: {}", error_chain(&e))))?;
         let status = res.status();
+        let retry_after = res
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<f64>().ok());
         let text = res
             .text()
             .await
             .map_err(|e| err(format!("LLM body: {e}")))?;
         if !status.is_success() {
-            return Err(err(format!("LLM {status}: {}", text.chars().take(800).collect::<String>())));
+            let ra = retry_after.map(|s| format!(" (retry-after={s}s)")).unwrap_or_default();
+            return Err(err(format!("LLM {status}{ra}: {}", text.chars().take(800).collect::<String>())));
         }
         let data: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| err(format!("LLM JSON: {e}")))?;

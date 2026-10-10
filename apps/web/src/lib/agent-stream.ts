@@ -15,6 +15,7 @@ export type AgentToolCall = {
     mode?: string;
     path?: string;
     needs_user_action?: boolean;
+    code?: string;
     kind?: string;
     message_fr?: string;
     settings_href?: string;
@@ -49,6 +50,8 @@ export type AgentChatResult = {
   tool_calls: AgentToolCall[];
   plan?: AgentPlan | null;
   reflections?: AgentReflection[];
+  /** Le plan a déjà été exécuté dans ce tour (écritures locales). */
+  executed_plan?: boolean;
 };
 
 type StreamHandlers = {
@@ -207,6 +210,7 @@ export async function streamAgentChat(
   const reflections: AgentReflection[] = [];
   let plan: AgentPlan | null = null;
   let streamError: string | null = null;
+  let executedPlan = false;
 
   const consume = (chunk: string) => {
     const parts = chunk.split('\n\n');
@@ -229,6 +233,9 @@ export async function streamAgentChat(
           reflections.push({ label, detail, round });
         }
         handlers.onThinking?.(label, round, detail || undefined);
+      } else if (type === 'milestone') {
+        // Jalon serveur (ex. « Modèle saturé, nouvel essai… ») : affiché comme étape en cours.
+        handlers.onThinking?.(String(payload.label || 'Nouvel essai…'), Number(payload.round || 0));
       } else if (type === 'tool_start') {
         const call: AgentToolCall = {
           call_id: payload.id ? String(payload.id) : undefined,
@@ -264,6 +271,7 @@ export async function streamAgentChat(
         handlers.onPlan?.(plan);
       } else if (type === 'reply') {
         reply = String(payload.content || '');
+        executedPlan = payload.executed_plan === true;
         provider = payload.provider ? String(payload.provider) : undefined;
         toolCalls = Array.isArray(payload.tool_calls)
           ? normalizeToolCalls(payload.tool_calls)
@@ -304,5 +312,6 @@ export async function streamAgentChat(
     tool_calls: toolCalls,
     plan,
     reflections,
+    executed_plan: executedPlan,
   };
 }

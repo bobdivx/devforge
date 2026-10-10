@@ -1385,47 +1385,37 @@ pub(crate) async fn finish_manual_deploy(
         } else {
             tracing::info!(project_uuid = %project.uuid, "Traefik verified after successful deploy");
         }
+        on_deploy_success(state, &project, &dep_uuid).await;
     }
 
-    // Auto-repair on failure (default ON)
+    // Échec : cause comptée (P1-07) → réparation auto seulement à la 1re occurrence.
     if !result.ok {
         let auto_repair_enabled = std::env::var("DEVFORGE_AUTO_REPAIR")
             .ok()
             .and_then(|v| v.parse::<bool>().ok())
             .unwrap_or(true); // Default ON
-
-        if auto_repair_enabled {
-            // Trigger repair async (don't block response)
-            let state_clone = state.clone();
-            let dep_uuid_clone = dep_uuid.clone();
-            tokio::spawn(async move {
-                let _ = auto_trigger_repair(&state_clone, &dep_uuid_clone).await;
-            });
-        }
-        // Wake coordinateur (fil permanent) — dédupliqué par uuid de déploiement
-        {
-            let state_clone = state.clone();
-            let project_uuid = project.uuid.clone();
-            let dep_uuid_clone = dep_uuid.clone();
-            let summary = dep
-                .as_ref()
-                .and_then(|d| d.error_summary.clone())
-                .unwrap_or_else(|| "Échec du déploiement".into());
-            let hint = dep
-                .as_ref()
-                .and_then(|d| d.error_hint.clone())
-                .unwrap_or_default();
-            tokio::spawn(async move {
-                let _ = wake_coordinator_deploy_fail(
-                    &state_clone,
-                    &project_uuid,
-                    &dep_uuid_clone,
-                    &summary,
-                    &hint,
-                )
-                .await;
-            });
-        }
+        let state_clone = state.clone();
+        let project_uuid = project.uuid.clone();
+        let dep_uuid_clone = dep_uuid.clone();
+        let summary = dep
+            .as_ref()
+            .and_then(|d| d.error_summary.clone())
+            .unwrap_or_else(|| "Échec du déploiement".into());
+        let hint = dep
+            .as_ref()
+            .and_then(|d| d.error_hint.clone())
+            .unwrap_or_default();
+        tokio::spawn(async move {
+            let _ = handle_deploy_failure(
+                &state_clone,
+                &project_uuid,
+                &dep_uuid_clone,
+                &summary,
+                &hint,
+                auto_repair_enabled,
+            )
+            .await;
+        });
     }
 
 }
@@ -1751,8 +1741,8 @@ fn build_repair_prompt(dep_uuid: &str, summary: &str, hint: &str, raw_logs: &str
              Appelle ces outils, dans cet ordre :\n\
              1. run_workdir_command avec command=\"npm install\"\n\
              2. sync_workdir_to_github avec paths=[\"package-lock.json\"] et commit_message=\"fix: resynchroniser package-lock.json\"\n\
-             3. trigger_deploy\n\
-             « up to date » veut dire que le workdir est déjà cohérent : pousse quand même le lockfile, puis redéploie.\n\
+             3. trigger_deploy, seulement si l'étape 2 a réussi.\n\
+             La publication est verrouillée côté serveur : si un outil répond publish_approval_required, arrête-toi et demande la validation UNE fois (l'interface affiche le bouton). Ne relance pas npm install en boucle.\n\
              Ne dis pas que c'est corrigé avant le résultat de trigger_deploy."
         );
     }
@@ -2254,6 +2244,108 @@ async fn agent_cron_tick(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
+/// Diagnostic de l'échec : celui enregistré sur le déploiement s'il est plus précis.
+async fn deploy_failure_summary(state: &AppState, dep_uuid: &str, summary: &str) -> String {
+    let stored: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT error_summary FROM deployments WHERE uuid = $1")
+            .bind(dep_uuid)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten();
+    match stored.and_then(|(s,)| s).filter(|s| !s.trim().is_empty()) {
+        Some(s) if summary.trim().is_empty() || summary.starts_with("Échec du déploiement") => s,
+        _ => summary.to_string(),
+    }
+}
+
+/// Échec de déploiement : compte la cause, répare (1re fois), escalade (2e) ou se tait (P1-07).
+pub(crate) async fn handle_deploy_failure(
+    state: &AppState,
+    project_uuid: &str,
+    dep_uuid: &str,
+    summary: &str,
+    hint: &str,
+    auto_repair: bool,
+) -> Result<(), String> {
+    let summary = deploy_failure_summary(state, dep_uuid, summary).await;
+    let cause = match crate::wake_causes::register_failure(
+        &state.pool,
+        project_uuid,
+        crate::wake_causes::KIND_DEPLOY_FAIL,
+        &summary,
+        dep_uuid,
+    )
+    .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, project_uuid, "cause de réveil non enregistrée — réveil normal");
+            crate::wake_causes::CauseState {
+                hash: crate::wake_causes::cause_hash(crate::wake_causes::KIND_DEPLOY_FAIL, &summary),
+                occurrences: 1,
+                last_action: None,
+                first_seen: chrono::Utc::now(),
+                decision: crate::wake_causes::WakeDecision::Normal,
+            }
+        }
+    };
+    tracing::info!(
+        project_uuid,
+        dep_uuid,
+        cause = %cause.hash,
+        occurrences = cause.occurrences,
+        decision = ?cause.decision,
+        "échec de déploiement"
+    );
+    let hint_line = if hint.is_empty() {
+        String::new()
+    } else {
+        format!("\nIndice : {hint}")
+    };
+    let content = match cause.decision {
+        crate::wake_causes::WakeDecision::Silent => {
+            tracing::info!(project_uuid, cause = %cause.hash, "même cause déjà escaladée : pas de réveil");
+            return Ok(());
+        }
+        crate::wake_causes::WakeDecision::Escalate => format!(
+            "Événement projet : échec de déploiement (récurrent).\n\
+             Déploiement : {dep_uuid}\n\
+             Cause #{hash}\n\n{text}",
+            hash = cause.hash,
+            text = crate::wake_causes::escalation_text(&cause, &summary)
+        ),
+        crate::wake_causes::WakeDecision::Normal => {
+            if auto_repair {
+                let st = state.clone();
+                let dep = dep_uuid.to_string();
+                let hash = cause.hash.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = auto_trigger_repair(&st, &dep, &hash).await {
+                        tracing::warn!(error = %e, dep_uuid = %dep, "auto-réparation non lancée");
+                    }
+                });
+            }
+            format!(
+                "Événement projet : échec de déploiement.\n\
+                 Déploiement : {dep_uuid}\n\
+                 Diagnostic : {summary}{hint_line}\n\
+                 Cause #{hash}\n\n\
+                 Tu es le Coordinateur (fil permanent). Analyse la situation, propose un plan, \
+                 et pour une réparation lourde délègue via un sous-agent (kind=subagent, parent=toi) \
+                 plutôt que de créer un nouveau fil permanent. Tu peux aussi t’appuyer sur l’agent Deploy.",
+                hash = cause.hash
+            )
+        }
+    };
+    let marker = crate::db::coordinator_deploy_fail_marker(dep_uuid);
+    let r = wake_coordinator(state, project_uuid, &marker, &content).await;
+    let event_marker = format!("{marker}:event-agents");
+    let _ = wake_event_agents(state, project_uuid, "deploy_fail", &event_marker, &content).await;
+    crate::wake_causes::mark_woken(&state.pool, project_uuid, &cause.hash).await;
+    r
+}
+
 pub(crate) async fn wake_coordinator_deploy_fail(
     state: &AppState,
     project_uuid: &str,
@@ -2261,26 +2353,65 @@ pub(crate) async fn wake_coordinator_deploy_fail(
     summary: &str,
     hint: &str,
 ) -> Result<(), String> {
-    let marker = crate::db::coordinator_deploy_fail_marker(dep_uuid);
-    let hint_line = if hint.is_empty() {
-        String::new()
-    } else {
-        format!("\nIndice : {hint}")
-    };
-    let content = format!(
-        "Événement projet : échec de déploiement.\n\
-         Déploiement : {dep_uuid}\n\
-         Diagnostic : {summary}{hint_line}\n\n\
-         Tu es le Coordinateur (fil permanent). Analyse la situation, propose un plan, \
-         et pour une réparation lourde délègue via un sous-agent (kind=subagent, parent=toi) \
-         plutôt que de créer un nouveau fil permanent. Tu peux aussi t’appuyer sur l’agent Deploy."
-    );
-    let r = wake_coordinator(state, project_uuid, &marker, &content).await;
-    let event_marker = format!("{marker}:event-agents");
-    let _ = wake_event_agents(state, project_uuid, "deploy_fail", &event_marker, &content).await;
-    r
+    handle_deploy_failure(state, project_uuid, dep_uuid, summary, hint, false).await
 }
 
+/// Déploiement réussi : causes résolues, puis vérification HTTP de l'URL publique (P1-08).
+pub(crate) async fn on_deploy_success(state: &AppState, project: &Project, dep_uuid: &str) {
+    crate::wake_causes::resolve_deploy_causes(&state.pool, &project.uuid).await;
+    let Some(url) = project
+        .production_url
+        .clone()
+        .map(|u| u.trim().to_string())
+        .filter(|u| u.starts_with("http://") || u.starts_with("https://"))
+    else {
+        return;
+    };
+    let state = state.clone();
+    let project_uuid = project.uuid.clone();
+    let dep_uuid = dep_uuid.to_string();
+    tokio::spawn(async move {
+        post_deploy_smoke(&state, &project_uuid, &dep_uuid, &url).await;
+    });
+}
+
+/// Smoke de l'URL publique (3 essais espacés : le conteneur peut mettre quelques secondes).
+async fn post_deploy_smoke(state: &AppState, project_uuid: &str, dep_uuid: &str, url: &str) {
+    let delay = std::env::var("DEVFORGE_POST_DEPLOY_SMOKE_DELAY_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(5);
+    let mut verdict = None;
+    let mut last = serde_json::Value::Null;
+    for attempt in 0..3u64 {
+        tokio::time::sleep(std::time::Duration::from_secs(if attempt == 0 { delay } else { delay * 2 })).await;
+        last = devforge_agent::smoke_url(url, None).await;
+        verdict = devforge_agent::post_deploy_verdict(&last);
+        if verdict.is_none() {
+            break;
+        }
+    }
+    let line = match last.get("status").and_then(|v| v.as_u64()) {
+        Some(st) => format!(
+            "\n[vérification] GET {url} → {st} ({} ms){}\n",
+            last.get("elapsed_ms").and_then(|v| v.as_u64()).unwrap_or(0),
+            last.get("title").and_then(|v| v.as_str()).map(|t| format!(" « {t} »")).unwrap_or_default()
+        ),
+        None => format!(
+            "\n[vérification] GET {url} → injoignable ({})\n",
+            last.get("error").and_then(|v| v.as_str()).unwrap_or("erreur réseau")
+        ),
+    };
+    let _ = sqlx::query("UPDATE deployments SET logs = COALESCE(logs, '') || $1 WHERE uuid = $2")
+        .bind(&line)
+        .bind(dep_uuid)
+        .execute(&state.pool)
+        .await;
+    if let Some(summary) = verdict {
+        tracing::warn!(project_uuid, dep_uuid, url, %summary, "vérification post-déploiement KO");
+        let _ = handle_deploy_failure(state, project_uuid, dep_uuid, &summary, "", false).await;
+    }
+}
 
 pub(crate) async fn wake_deploy_success(
     state: &AppState,
@@ -2321,7 +2452,7 @@ async fn wake_coordinator_health(
 }
 
 /// Auto-trigger repair after failed deployment (max once per deployment uuid).
-async fn auto_trigger_repair(state: &AppState, dep_uuid: &str) -> Result<(), String> {
+async fn auto_trigger_repair(state: &AppState, dep_uuid: &str, cause_hash: &str) -> Result<(), String> {
     // Check if repair already attempted for this deployment
     let already_attempted: Option<(i64,)> = sqlx::query_as(
         "SELECT COUNT(*) FROM agent_messages WHERE content LIKE $1 AND content LIKE $2",
@@ -2371,8 +2502,10 @@ async fn auto_trigger_repair(state: &AppState, dep_uuid: &str) -> Result<(), Str
         .as_deref()
         .unwrap_or("Échec du déploiement");
     let hint = dep.error_hint.as_deref().unwrap_or("");
-    let repair_prompt =
-        build_repair_prompt(&dep.uuid, summary, hint, dep.logs.as_deref().unwrap_or(""));
+    let repair_prompt = format!(
+        "{}\n\nCause #{cause_hash}",
+        build_repair_prompt(&dep.uuid, summary, hint, dep.logs.as_deref().unwrap_or(""))
+    );
 
     let now = now_str();
     let msg_uuid = new_uuid();
@@ -2612,6 +2745,7 @@ async fn execute_claimed_run(
     )
     .await
     .map_err(|e| e.to_string())?;
+    crate::wake_causes::record_run_action(&state.pool, &run.project_uuid, &run.content, &tools_json).await;
     schedule_preview_repair(
         state.clone(),
         run.project_uuid.clone(),
@@ -2730,6 +2864,7 @@ async fn load_agent_context(
         project_uuid: Some(project_uuid.to_string()),
         agent_uuid: Some(agent_uuid.to_string()),
         agent_role: None,
+        agent_kind: None,
         agent_name: None,
         project_brief: None,
         git_owner: None,
@@ -2737,8 +2872,8 @@ async fn load_agent_context(
         git_branch: None,
         history: vec![],
     };
-    if let Ok(Some((name, role))) = sqlx::query_as::<_, (String, String)>(
-        "SELECT name, role FROM project_agents WHERE uuid = $1",
+    if let Ok(Some((name, role, kind))) = sqlx::query_as::<_, (String, String, String)>(
+        "SELECT name, role, COALESCE(kind, '') FROM project_agents WHERE uuid = $1",
     )
     .bind(agent_uuid)
     .fetch_optional(&state.pool)
@@ -2746,6 +2881,7 @@ async fn load_agent_context(
     {
         ctx.agent_name = Some(name);
         ctx.agent_role = Some(role);
+        ctx.agent_kind = Some(kind).filter(|k| !k.is_empty());
     }
     ctx.history = crate::agent_runs::recent_history(&state.pool, agent_uuid).await;
     if let Ok(brief) = build_project_agent_brief(state, project_uuid).await {
@@ -2898,6 +3034,7 @@ async fn persist_resumed_deploy(
         if let Err(e) = state.proxy.ensure_traefik().await {
             tracing::error!(error = %e, project = %project.uuid, "reprise : Traefik");
         }
+        on_deploy_success(state, &project, deployment_uuid).await;
     } else {
         let state_clone = state.clone();
         let project_uuid = project.uuid.clone();
@@ -2996,6 +3133,7 @@ async fn agent_chat(
         project_uuid: body.project_uuid.clone().filter(|s| !s.is_empty()),
         agent_uuid: body.agent_uuid.clone().filter(|s| !s.is_empty()),
         agent_role: None,
+        agent_kind: None,
         agent_name: None,
         project_brief: None,
         git_owner: None,
@@ -3029,8 +3167,8 @@ async fn agent_chat(
     }
 
     if let Some(agent_uuid) = &ctx.agent_uuid {
-        if let Ok(Some((name, role))) = sqlx::query_as::<_, (String, String)>(
-            "SELECT name, role FROM project_agents WHERE uuid = $1",
+        if let Ok(Some((name, role, kind))) = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT name, role, COALESCE(kind, '') FROM project_agents WHERE uuid = $1",
         )
         .bind(agent_uuid)
         .fetch_optional(&state.pool)
@@ -3038,6 +3176,7 @@ async fn agent_chat(
         {
             ctx.agent_name = Some(name);
             ctx.agent_role = Some(role);
+            ctx.agent_kind = Some(kind).filter(|k| !k.is_empty());
         }
 
         ctx.history = crate::agent_runs::recent_history(&state.pool, agent_uuid).await;

@@ -125,3 +125,54 @@ impl LlmProvider for StubLlmProvider {
         })
     }
 }
+
+/// Fournisseur scripté : renvoie les tours dans l'ordre (tests de la boucle agent).
+/// Garde aussi les requêtes reçues pour vérifier ce qui a été envoyé au modèle.
+pub struct ScriptedLlmProvider {
+    turns: std::sync::Mutex<std::collections::VecDeque<AssistantTurn>>,
+    requests: std::sync::Mutex<Vec<ChatRequest>>,
+}
+
+impl ScriptedLlmProvider {
+    pub fn new(turns: Vec<AssistantTurn>) -> Self {
+        Self {
+            turns: std::sync::Mutex::new(turns.into()),
+            requests: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Tour texte seul.
+    pub fn text(content: &str) -> AssistantTurn {
+        AssistantTurn { content: content.into(), tool_calls: vec![], finish_reason: "stop".into() }
+    }
+
+    /// Tour avec un appel d'outil.
+    pub fn tool(id: &str, name: &str, arguments: serde_json::Value) -> AssistantTurn {
+        AssistantTurn {
+            content: String::new(),
+            tool_calls: vec![ToolCallRequest { id: id.into(), name: name.into(), arguments }],
+            finish_reason: "tool_calls".into(),
+        }
+    }
+
+    pub fn requests(&self) -> Vec<ChatRequest> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl LlmProvider for ScriptedLlmProvider {
+    fn name(&self) -> &str {
+        "scripted"
+    }
+
+    async fn chat(&self, req: ChatRequest) -> Result<AssistantTurn> {
+        self.requests.lock().unwrap().push(req);
+        Ok(self
+            .turns
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or_else(|| ScriptedLlmProvider::text("Fin du script.")))
+    }
+}
