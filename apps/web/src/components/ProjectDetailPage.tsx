@@ -16,6 +16,7 @@ import { ProjectSpecsModal } from './ProjectSpecsModal';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
 import { ProjectOidcPanel } from './ProjectOidcPanel';
+import { EnvBadge, ProjectBranchesPanel, isDevDeployment } from './ProjectBranchesPanel';
 import { ProjectGroupPanel, ProjectGroupSuggest } from './GroupPage';
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { ProjectRulesModal } from './workspace/ProjectRulesModal';
@@ -123,8 +124,11 @@ function isDeployInProgress(status: string): boolean {
 
 /** Prefers any in-progress deploy over a stale last-success (Overview + list). */
 function pickCurrentDeployment(deployments: Deployment[]): Deployment | null {
-  const active = deployments.find((d) => isDeployInProgress(d.status));
-  return active ?? deployments[0] ?? null;
+  // Statut du projet = prod ; la dev n'apparaît que si rien d'autre.
+  const prod = deployments.filter((d) => !isDevDeployment(d));
+  const pool = prod.length ? prod : deployments;
+  const active = pool.find((d) => isDeployInProgress(d.status));
+  return active ?? pool[0] ?? null;
 }
 
 function sortDeploymentsForDisplay(items: Deployment[]): Deployment[] {
@@ -1615,6 +1619,8 @@ function DeploymentsPanel({
   const hiddenCount = Math.max(0, ordered.length - DEPLOYMENTS_VISIBLE_DEFAULT);
   const selected = items.find((d) => d.uuid === selectedUuid) ?? null;
   const canStop = selected ? isDeployInProgress(selected.status) : false;
+  /** Pastilles Prod/Dev dès qu'un déploiement dev existe. */
+  const showEnv = items.some(isDevDeployment);
 
   useEffect(() => {
     if (!selected) {
@@ -1745,6 +1751,7 @@ function DeploymentsPanel({
   const selectedMeta = selected ? (
     <div class="min-w-0">
       <div class="flex flex-wrap items-center gap-2">
+        {showEnv && <EnvBadge deployment={selected} />}
         <Badge tone={deployTone(selected.status)}>{selected.status}</Badge>
         <span class="font-mono text-xs text-[var(--color-ink-muted)]">
           {selected.git_sha ? selected.git_sha.slice(0, 7) : '—'}
@@ -1834,6 +1841,7 @@ function DeploymentsPanel({
                         <span class={toneDot(tone)} aria-hidden />
                         <div class="min-w-0 flex-1">
                           <div class="flex min-w-0 items-center gap-2">
+                            {showEnv && <EnvBadge deployment={d} />}
                             <span class="font-mono text-xs font-medium text-white">{sha}</span>
                             <Badge tone={tone}>{d.status}</Badge>
                             <span class="ml-auto shrink-0 text-[11px] text-[var(--color-ink-faint)]">
@@ -1849,7 +1857,10 @@ function DeploymentsPanel({
                       {/* Bureau : tuile de la barre latérale */}
                       <div class="hidden min-w-0 flex-col gap-1 lg:flex">
                         <div class="flex items-center justify-between gap-2">
-                          <span class="font-mono text-xs font-medium text-white">{sha}</span>
+                          <span class="flex min-w-0 items-center gap-1.5">
+                            {showEnv && <EnvBadge deployment={d} />}
+                            <span class="font-mono text-xs font-medium text-white">{sha}</span>
+                          </span>
                           <span
                             class={
                               'h-2 w-2 shrink-0 rounded-full ' +
@@ -3219,17 +3230,6 @@ function ssoModeFromProject(project: Project): 'auto' | 'on' | 'off' {
   return 'auto';
 }
 
-function parseGithubOwnerRepo(url: string): { owner: string; repo: string } | null {
-  const cleaned = url
-    .trim()
-    .replace(/^https?:\/\/(www\.)?github\.com\//i, '')
-    .replace(/\.git$/i, '')
-    .replace(/^git@github\.com:/i, '');
-  const parts = cleaned.split('/').filter(Boolean);
-  if (parts.length < 2) return null;
-  return { owner: parts[0], repo: parts[1].replace(/\.git$/i, '') };
-}
-
 function runtimeOf(project: Project): ProjectRuntime {
   const empty: ProjectRuntime = { ports: [], sidecars: [] };
   const raw = project.runtime_json;
@@ -3296,6 +3296,7 @@ function groupedPublishedPorts(ports: PublishedPort[]): Array<{
 
 type SettingsSection =
   | 'git'
+  | 'branches'
   | 'group'
   | 'build'
   | 'ports'
@@ -3310,6 +3311,7 @@ type SettingsSection =
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   'git',
+  'branches',
   'group',
   'build',
   'ports',
@@ -3355,8 +3357,6 @@ function ProjectSettingsPanel({
   const [name, setName] = useState(project.name);
   const [branch, setBranch] = useState(project.git_branch || 'main');
   const [repo, setRepo] = useState(project.git_repository || '');
-  const [branches, setBranches] = useState<string[]>([]);
-  const [branchesLoading, setBranchesLoading] = useState(false);
   const [buildPack, setBuildPack] = useState(project.build_pack || 'nixpacks');
   const [port, setPort] = useState(Number(project.port ?? 3000));
   const [isStatic, setIsStatic] = useState(Boolean(project.is_static));
@@ -3420,7 +3420,6 @@ function ProjectSettingsPanel({
     setName(project.name);
     setBranch(project.git_branch || 'main');
     setRepo(project.git_repository || '');
-    setBranches([]);
     setBuildPack(project.build_pack || 'nixpacks');
     setPort(Number(project.port ?? 3000));
     setIsStatic(Boolean(project.is_static));
@@ -3453,34 +3452,9 @@ function ProjectSettingsPanel({
   }, [project.uuid]);
 
   useEffect(() => {
-    const parsed = parseGithubOwnerRepo(repo);
-    if (!parsed) {
-      setBranches([]);
-      setBranchesLoading(false);
-      return;
-    }
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      setBranchesLoading(true);
-      api
-        .githubBranches(parsed.owner, parsed.repo)
-        .then((r) => {
-          if (cancelled) return;
-          setBranches(r.data.map((b) => b.name));
-        })
-        .catch(() => {
-          if (cancelled) return;
-          setBranches([]);
-        })
-        .finally(() => {
-          if (!cancelled) setBranchesLoading(false);
-        });
-    }, 350);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [repo]);
+    setBranch(project.git_branch || 'main');
+  }, [project.git_branch]);
+
 
   useEffect(() => {
     let cancelled = false;
@@ -3687,6 +3661,7 @@ function ProjectSettingsPanel({
     runtime.sidecars.find((s) => `side:${s.name}` === runtimeView) ?? null;
   const sectionTitle: Record<SettingsSection, string> = {
     git: 'Git',
+    branches: 'Branches',
     group: 'Groupe',
     build: 'Build',
     ports: 'Ports',
@@ -3714,6 +3689,14 @@ function ProjectSettingsPanel({
         description: repo.trim()
           ? repo.trim().replace(/^https?:\/\/(www\.)?github\.com\//, '')
           : 'Pas de dépôt',
+        icon: 'github',
+      },
+      {
+        key: 'branches',
+        title: 'Branches',
+        description: project.dev_branch
+          ? `Prod ${project.git_branch || 'main'} · Dev ${project.dev_branch}`
+          : `Prod ${project.git_branch || 'main'} · Dev off`,
         icon: 'github',
       },
       {
@@ -3845,7 +3828,17 @@ function ProjectSettingsPanel({
             ? sectionTitle[section]
             : 'Paramètres'}
         </button>
+        {section === 'branches' && (
+          <ProjectBranchesPanel
+            projectUuid={project.uuid}
+            repository={project.git_repository}
+            onChanged={() => {
+              void api.project(project.uuid).then((p) => onSaved(p.data));
+            }}
+          />
+        )}
         {section !== 'login' &&
+          section !== 'branches' &&
           section !== 'danger' &&
           section !== 'group' &&
           section !== 'ports' &&
@@ -3872,29 +3865,17 @@ function ProjectSettingsPanel({
           {section === 'git' && (
           <>
           <Input label="Nom" value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
-          {branches.length > 0 ? (
-            <label class="flex flex-col gap-1.5 text-sm">
-              <span class="font-medium">Branche</span>
-              <select
-                class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
-                value={branch}
-                disabled={busy || branchesLoading}
-                onChange={(e) => setBranch((e.target as HTMLSelectElement).value)}
-              >
-                {(branches.includes(branch) ? branches : [branch, ...branches]).map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : (
-            <Input
-              label={branchesLoading ? 'Branche (chargement…)' : 'Branche'}
-              value={branch}
-              onInput={(e) => setBranch((e.target as HTMLInputElement).value)}
-            />
-          )}
+          <div class="flex flex-col gap-1.5 text-sm">
+            <span class="font-medium">Branche de production</span>
+            <button
+              type="button"
+              onClick={() => gotoSection('branches')}
+              class="flex h-10 items-center justify-between gap-2 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 text-left max-lg:h-11"
+            >
+              <span class="truncate font-mono text-[13px]">{branch}</span>
+              <span class="shrink-0 text-xs text-[var(--color-accent)]">Changer →</span>
+            </button>
+          </div>
           <div class="md:col-span-2">
             <Input
               label="Repository"

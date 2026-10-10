@@ -835,8 +835,8 @@ fun DeployRow(d: Deployment, onClick: () -> Unit) {
                     fontSize = 14.sp,
                 )
                 Text(
-                    listOfNotNull(label, d.gitSha?.take(7), relativeTime(d.createdAt).takeIf { it.isNotEmpty() }).joinToString(" · "),
-                    color = DfColors.InkFaint,
+                    listOfNotNull(d.envLabel, label, d.gitSha?.take(7), relativeTime(d.createdAt).takeIf { it.isNotEmpty() }).joinToString(" · "),
+                    color = if (d.isDev) DfColors.Warn else DfColors.InkFaint,
                     fontSize = 12.sp,
                 )
                 if (d.isFailed && !d.errorSummary.isNullOrBlank()) {

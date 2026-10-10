@@ -11,6 +11,8 @@ import app.jeser.devforge.ui.project.RuntimeLogsState
 import app.jeser.devforge.ui.project.LogsState
 import app.jeser.devforge.ui.components.LocalLoadRemoteIcons
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.CompositionLocalProvider
 import app.jeser.devforge.ui.theme.DevForgeTheme
 import app.jeser.devforge.ui.HomeRootPreview
@@ -133,6 +135,27 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
     @Test fun projectDetailsSheet() {
         compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Details) } }
         shot("project-details-sheet")
+    }
+
+    @Test fun branchesSection() {
+        compose.setContent {
+            Shot {
+                androidx.compose.material3.Surface(color = app.jeser.devforge.ui.theme.DfColors.Surface) {
+                    androidx.compose.foundation.layout.Column(
+                        androidx.compose.ui.Modifier.padding(20.dp),
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp),
+                    ) {
+                        app.jeser.devforge.ui.project.BranchesContent(SampleData.branchesDev)
+                        app.jeser.devforge.ui.project.BranchesContent(SampleData.branchesOff)
+                        app.jeser.devforge.ui.project.BranchPickerContent(
+                            "Branche de production", "Actuelle : main",
+                            listOf("main", "devforge-dev-test", "feat/onboarding", "staging"), "main", "devforge-dev-test", {},
+                        )
+                    }
+                }
+            }
+        }
+        shot("project-branches")
     }
 
     @Test fun projectUpToDate() {

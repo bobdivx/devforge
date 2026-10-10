@@ -1320,7 +1320,7 @@ async fn evacuate_stale_nodes(state: &AppState) {
 
 async fn project_deploy_in_flight(state: &AppState, project_id: i64) -> bool {
     let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT COUNT(*) FROM deployments WHERE project_id = $1 AND status IN ('running', 'queued', 'building')",
+        "SELECT COUNT(*) FROM deployments WHERE project_id = $1 AND environment = 'production' AND status IN ('running', 'queued', 'building')",
     )
     .bind(project_id)
     .fetch_optional(&state.pool)

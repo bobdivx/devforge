@@ -107,7 +107,29 @@ pub async fn all_callback_urls(pool: &sqlx::PgPool, project: &Project) -> Vec<St
     if !domain.is_empty() {
         urls.extend(preview_callback_urls(&project.uuid, &domain));
     }
+    urls.extend(dev_env_callback_urls(project));
     urls
+}
+
+/// Callbacks de l'environnement dev (`dev-…` / `dev.…`) quand il est activé.
+pub fn dev_env_callback_urls(project: &Project) -> Vec<String> {
+    if project.dev_branch.as_deref().unwrap_or("").trim().is_empty() {
+        return Vec::new();
+    }
+    let Some(origin) = crate::dev_env::dev_url_for(project) else {
+        return Vec::new();
+    };
+    [
+        "/api/auth/callback/pocket-id",
+        "/api/auth/callback/pocket-id/",
+        "/api/auth/callback/oidc",
+        "/api/auth/callback/oidc/",
+        "/oauth2/callback",
+        "/oauth2/callback/",
+    ]
+    .iter()
+    .map(|p| format!("{origin}{p}"))
+    .collect()
 }
 
 /// Crée ou met à jour le client OIDC Pocket ID du projet.
@@ -402,6 +424,7 @@ mod tests {
             volumes_json: "[]".into(),
             runtime_json: "{}".into(),
             domain_apex: "".into(),
+            dev_branch: None,
             created_at: "".into(),
             updated_at: "".into(),
         };

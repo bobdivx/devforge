@@ -144,6 +144,10 @@ pub struct Project {
     /// Zone publique de l'app. Vide = zone du groupe, sinon le domaine principal.
     #[serde(default)]
     pub domain_apex: String,
+    /// Branche de l'environnement dev (`dev-…` / `dev.…`). NULL = désactivé.
+    #[serde(default)]
+    #[sqlx(default)]
+    pub dev_branch: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -160,6 +164,10 @@ pub struct Deployment {
     pub error_summary: Option<String>,
     pub error_hint: Option<String>,
     pub live_revision_sha: Option<String>,
+    /// `production` ou `dev`. Vide (anciennes requêtes) = production.
+    #[serde(default)]
+    #[sqlx(default)]
+    pub environment: String,
     pub finished_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -291,8 +299,8 @@ impl ProjectStore for SqliteProjectStore {
         let Some(p) = project else {
             return Ok(json!({"ok": false, "error": format!("projet introuvable: {project_uuid}")}));
         };
-        let deps: Vec<(String, String, Option<String>, Option<String>, String)> = sqlx::query_as(
-            r#"SELECT uuid, status, git_sha, git_message, created_at
+        let deps: Vec<(String, String, Option<String>, Option<String>, String, String)> = sqlx::query_as(
+            r#"SELECT uuid, status, git_sha, git_message, created_at, environment
                FROM deployments
                WHERE project_id = $1
                ORDER BY id DESC LIMIT 15"#
@@ -301,13 +309,14 @@ impl ProjectStore for SqliteProjectStore {
         .fetch_all(&self.pool)
         .await
         .unwrap_or_default();
-        let deployments: Vec<Value> = deps.into_iter().map(|(uuid, status, sha, msg, created)| {
+        let deployments: Vec<Value> = deps.into_iter().map(|(uuid, status, sha, msg, created, env)| {
             json!({
                 "uuid": uuid,
                 "status": status,
                 "git_sha": sha,
                 "git_message": msg,
                 "created_at": created,
+                "environment": env,
             })
         }).collect();
         Ok(json!({"ok": true, "project_uuid": project_uuid, "deployments": deployments, "count": deployments.len()}))

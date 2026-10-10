@@ -151,7 +151,7 @@ async fn list_projects(
 
 async fn project_list_card(state: &AppState, project: &Project, github_sync: bool) -> Value {
     let latest: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT status, git_sha, git_message FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1",
+        "SELECT status, git_sha, git_message FROM deployments WHERE project_id = $1 AND environment = 'production' ORDER BY created_at DESC LIMIT 1",
     )
     .bind(project.id)
     .fetch_optional(&state.pool)
@@ -671,7 +671,7 @@ async fn get_project(
                     WHEN status IN ('queued', 'running', 'building', 'pending', 'deploying') THEN logs
                     ELSE NULL
                   END AS logs,
-                  error_summary, error_hint, live_revision_sha,
+                  error_summary, error_hint, live_revision_sha, environment,
                   finished_at, created_at, updated_at
            FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 10"#,
     )
@@ -690,6 +690,13 @@ async fn get_project(
         if let Some(deploy) = card.get("deploy") {
             obj.insert("deploy".into(), deploy.clone());
         }
+        obj.insert(
+            "dev_url".into(),
+            json!(crate::dev_env::dev_url_for(&project).filter(|_| project
+                .dev_branch
+                .as_deref()
+                .is_some_and(|b| !b.trim().is_empty()))),
+        );
         let membership = crate::group_routes::membership(&state.pool, &project.uuid).await;
         crate::group_routes::write_group_fields(obj, membership.as_ref());
     }
@@ -954,6 +961,9 @@ async fn delete_project(
         timeout: None,
     };
     let _ = state.deploy.stop(&ctx).await;
+    if project.dev_branch.as_deref().is_some_and(|b| !b.trim().is_empty()) {
+        let _ = crate::dev_env::teardown(&state, &project).await;
+    }
 
     sqlx::query("DELETE FROM project_env_vars WHERE project_uuid = $1")
         .bind(&uuid)
@@ -1147,7 +1157,7 @@ async fn list_deployments(
                     WHEN status IN ('queued', 'running', 'building', 'pending', 'deploying') THEN logs
                     ELSE NULL
                   END AS logs,
-                  error_summary, error_hint, live_revision_sha,
+                  error_summary, error_hint, live_revision_sha, environment,
                   finished_at, created_at, updated_at
            FROM deployments WHERE project_id = $1
            ORDER BY CASE
@@ -1294,7 +1304,7 @@ pub(crate) async fn finish_manual_deploy(
 ) {
     // Charger le SHA de la révision actuellement en production avant le deploy
     let live_revision_sha: Option<String> = sqlx::query_as(
-        "SELECT git_sha FROM deployments WHERE project_id = $1 AND status = 'success' ORDER BY created_at DESC LIMIT 1",
+        "SELECT git_sha FROM deployments WHERE project_id = $1 AND status = 'success' AND environment = 'production' ORDER BY created_at DESC LIMIT 1",
     )
     .bind(project.id)
     .fetch_optional(&state.pool)
@@ -1801,10 +1811,13 @@ async fn cancel_deployment(
     }
 
     let server = project.server_id.as_deref().unwrap_or("default");
-    state
-        .deploy
-        .abort_in_flight_swap(&project.uuid, server)
-        .await;
+    // Le conteneur temporaire à nettoyer dépend de l'environnement (prod ≠ dev).
+    let instance = if crate::dev_env::is_dev(&dep.environment) {
+        crate::dev_env::dev_instance_id(&project.uuid)
+    } else {
+        project.uuid.clone()
+    };
+    state.deploy.abort_in_flight_swap(&instance, server).await;
 
     crate::deploy_queue::record_event(
         &state.pool,
@@ -1953,7 +1966,7 @@ async fn build_project_agent_brief(
 
     let deps: Vec<(String, String, Option<String>, Option<String>, String)> = sqlx::query_as(
         r#"SELECT uuid, status, git_sha, git_message, created_at
-           FROM deployments WHERE project_id = $1 ORDER BY id DESC LIMIT 5"#,
+           FROM deployments WHERE project_id = $1 AND environment = 'production' ORDER BY id DESC LIMIT 5"#,
     )
     .bind(p.id)
     .fetch_all(&state.pool)
@@ -2822,6 +2835,17 @@ pub fn resume_deploy_queue(state: AppState) {
                     continue;
                 }
             };
+            let env: Option<(String,)> =
+                sqlx::query_as("SELECT environment FROM deployments WHERE uuid = $1")
+                    .bind(&uuid)
+                    .fetch_optional(&state.pool)
+                    .await
+                    .ok()
+                    .flatten();
+            if env.is_some_and(|(e,)| crate::dev_env::is_dev(&e)) {
+                crate::dev_env::finish_dev_deploy(&state, &project, &uuid).await;
+                continue;
+            }
             let outcome = run_real_deploy(&state, &project, &uuid).await;
             persist_resumed_deploy(&state, &project, &uuid, &outcome).await;
         }
@@ -3802,7 +3826,7 @@ async fn site_reach(state: &AppState, project: &Project) -> &'static str {
 /// Pas de probe HTTP/Docker — pour list/get project instantanés.
 pub(crate) async fn resolve_project_status_db(state: &AppState, project: &Project) -> Result<String, ApiError> {
     let latest: Option<(String,)> = sqlx::query_as(
-        "SELECT status FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1",
+        "SELECT status FROM deployments WHERE project_id = $1 AND environment = 'production' ORDER BY created_at DESC LIMIT 1",
     )
     .bind(project.id)
     .fetch_optional(&state.pool)
@@ -3841,7 +3865,7 @@ pub(crate) async fn resolve_project_status_db(state: &AppState, project: &Projec
 /// Statut avec probe live (HTTP public ou Docker). Lent — réservé à ?live=1.
 pub(crate) async fn resolve_project_status_live(state: &AppState, project: &Project) -> Result<String, ApiError> {
     let latest: Option<(String,)> = sqlx::query_as(
-        "SELECT status FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1",
+        "SELECT status FROM deployments WHERE project_id = $1 AND environment = 'production' ORDER BY created_at DESC LIMIT 1",
     )
     .bind(project.id)
     .fetch_optional(&state.pool)

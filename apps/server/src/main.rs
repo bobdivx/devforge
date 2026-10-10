@@ -16,6 +16,7 @@ mod cron_routes;
 mod db;
 mod deploy_queue;
 mod detect_svc;
+mod dev_env;
 mod dns;
 mod dns_failover;
 mod domain_catalog;
@@ -332,6 +333,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(sso_routes::router())
         .merge(acme_routes::router())
         .merge(project_oidc_routes::router())
+        .merge(dev_env::router())
         .merge(project_pg_routes::router())
         .merge(llm_routes::router())
         .merge(mcp_routes::router())

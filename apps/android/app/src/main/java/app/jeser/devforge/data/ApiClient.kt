@@ -195,6 +195,40 @@ class ApiClient(
         ).data
     }
 
+    /** Branche de prod + environnement dev (`dev-…` / `dev.…`). */
+    suspend fun branches(uuid: String): ProjectBranches =
+        get("/projects/${enc(uuid)}/branches", DataEnvelope.serializer(ProjectBranches.serializer())).data
+
+    /** Appelée après confirmation ; `redeploy` = relancer la prod tout de suite. */
+    suspend fun setProductionBranch(uuid: String, branch: String, redeploy: Boolean): BranchUpdate = send(
+        "PUT",
+        "/projects/${enc(uuid)}/branches/production",
+        buildJsonObject { put("branch", branch); put("redeploy", redeploy) },
+        BranchUpdate.serializer(),
+    )
+
+    /** Active / change la dev ; `deploy` = construire la dev tout de suite. */
+    suspend fun setDevBranch(uuid: String, branch: String, deploy: Boolean): BranchUpdate = send(
+        "PUT",
+        "/projects/${enc(uuid)}/branches/dev",
+        buildJsonObject { put("branch", branch); put("redeploy", deploy) },
+        BranchUpdate.serializer(),
+    )
+
+    /** Supprime le conteneur et la route dev. La prod n'est pas touchée. */
+    suspend fun disableDevBranch(uuid: String): BranchUpdate = send(
+        "DELETE",
+        "/projects/${enc(uuid)}/branches/dev",
+        buildJsonObject { },
+        BranchUpdate.serializer(),
+    )
+
+    suspend fun githubBranches(owner: String, repo: String): List<String> =
+        get(
+            "/github/${enc(owner)}/${enc(repo)}/branches",
+            DataEnvelope.serializer(ListSerializer(GithubBranch.serializer())),
+        ).data.map { it.name }
+
     suspend fun runtimeLogs(uuid: String, tail: Int = 200): RuntimeLogs =
         get("/projects/${enc(uuid)}/runtime-logs?tail=$tail", DataEnvelope.serializer(RuntimeLogs.serializer())).data
 

@@ -54,6 +54,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         ("volumes_json", "TEXT NOT NULL DEFAULT '[]'"),
         ("runtime_json", "TEXT NOT NULL DEFAULT '{}'"),
         ("domain_apex", "TEXT NOT NULL DEFAULT ''"),
+        // Branche de l'environnement dev (NULL = environnement dev désactivé).
+        ("dev_branch", "TEXT"),
     ] {
         let sql = format!("ALTER TABLE projects ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;
@@ -137,6 +139,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         ("error_summary", "TEXT"),
         ("error_hint", "TEXT"),
         ("live_revision_sha", "TEXT"),
+        // `production` (défaut) ou `dev` (environnement dev séparé).
+        ("environment", "TEXT NOT NULL DEFAULT 'production'"),
     ] {
         let sql = format!("ALTER TABLE deployments ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;

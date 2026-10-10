@@ -91,7 +91,8 @@ data class ProjectUiState(
     /** Message + sauvegarde à proposer en « Annuler » (snackbar). */
     val undo: DraftUndo? = null,
 ) {
-    val latest: Deployment? get() = deployments.firstOrNull()
+    /** Dernière mise en ligne de la prod (la dev a sa propre section Branches). */
+    val latest: Deployment? get() = deployments.firstOrNull { !it.isDev } ?: deployments.firstOrNull()
     val lastFailed: Boolean get() = latest?.isFailed == true
     /** Action de mise en ligne adaptée à l'état réel (publier, réessayer, reconstruire). */
     val deployPlan: DeployPlan get() = deployPlan(!project?.gitRepository.isNullOrBlank(), latest, git, deploying)
