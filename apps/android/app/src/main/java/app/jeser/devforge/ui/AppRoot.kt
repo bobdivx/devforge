@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.LocalFireDepartment
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,7 +29,6 @@ import app.jeser.devforge.notify.PrefsNotifSettings
 import app.jeser.devforge.ui.apps.AppsScreen
 import app.jeser.devforge.ui.apps.AppsUiState
 import app.jeser.devforge.ui.apps.AppsViewModel
-import app.jeser.devforge.ui.hub.AlertsScreen
 import app.jeser.devforge.ui.hub.BraiseScreen
 import app.jeser.devforge.ui.hub.HubUiState
 import app.jeser.devforge.ui.hub.HubViewModel
@@ -42,12 +40,12 @@ import app.jeser.devforge.ui.project.ProjectViewModel
 import app.jeser.devforge.ui.theme.DfColors
 
 /** Onglets de la navigation principale. */
-enum class HomeTab(val label: String) { Apps("Apps"), Braise("Braise"), Alerts("Alertes"), Settings("Réglages") }
+/** Apps · Braise · Réglages, comme la barre du bas du web. Les alertes en cours sont la tuile « À traiter » des Apps. */
+enum class HomeTab(val label: String) { Apps("Apps"), Braise("Braise"), Settings("Réglages") }
 
 private fun HomeTab.icon(): ImageVector = when (this) {
     HomeTab.Apps -> Icons.Filled.GridView
     HomeTab.Braise -> Icons.Filled.LocalFireDepartment
-    HomeTab.Alerts -> Icons.Filled.Notifications
     HomeTab.Settings -> Icons.Filled.Settings
 }
 
@@ -81,7 +79,6 @@ fun HomeRoot(
         when (tab) {
             HomeTab.Apps -> Unit
             HomeTab.Braise -> hubVm.refreshConversations()
-            HomeTab.Alerts -> hubVm.refreshAlerts()
             HomeTab.Settings -> hubVm.refreshSettings()
         }
     }
@@ -146,7 +143,6 @@ fun HomeShell(
 ) {
     val badges = mapOf(
         HomeTab.Braise to hub.waiting.size,
-        HomeTab.Alerts to apps.inbox.count { it.kind != "spec_waiting" },
         HomeTab.Settings to if (hub.updateAvailable) 1 else 0,
     )
     val content: @Composable (Modifier) -> Unit = { m ->
@@ -157,7 +153,6 @@ fun HomeShell(
                     modifier = Modifier.fillMaxSize(), onNoticeShown = onNoticeShown, initialInboxOpen = initialInboxOpen,
                 )
                 HomeTab.Braise -> BraiseScreen(hub, onRefresh = onRefreshBraise, onOpen = onOpen, onOpenDraft = onOpenDraft)
-                HomeTab.Alerts -> AlertsScreen(hub, onRefresh = onRefreshAlerts, onOpen = onOpen)
                 HomeTab.Settings -> SettingsScreen(
                     hub, apps.me, onToggle = onToggleNotif, onOpenSystemNotif = onOpenSystemNotif,
                     onUpdate = onUpdate, onOpenWeb = onOpenWeb, onSignOut = onSignOut,
@@ -210,7 +205,7 @@ fun HomeShell(
 private fun TabIcon(tab: HomeTab, badge: Int) {
     BadgedBox(badge = {
         if (badge > 0) {
-            Badge(containerColor = if (tab == HomeTab.Alerts) DfColors.Danger else DfColors.Accent, contentColor = DfColors.OnAccent) {
+            Badge(containerColor = DfColors.Accent, contentColor = DfColors.OnAccent) {
                 Text(if (badge > 9) "9+" else badge.toString())
             }
         }

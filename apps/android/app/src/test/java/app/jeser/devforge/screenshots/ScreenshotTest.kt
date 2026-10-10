@@ -18,6 +18,10 @@ import app.jeser.devforge.ui.HomeTab
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import org.junit.Assert.assertTrue
@@ -84,26 +88,51 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
         shot("apps-inbox-sheet")
     }
 
+    /**
+     * Page app : statut unique + barre d'actions + tuiles (téléphone, tablette portrait) ;
+     * grand écran paysage : la discussion reste visible à droite et occupe presque toute la hauteur.
+     */
+    private fun assertProjectLayout(what: String) {
+        val root = compose.onRoot().getBoundsInRoot()
+        val h = (root.bottom - root.top).value
+        if (device.endsWith("land")) {
+            val chatTop = compose.onNodeWithTag("chat").getBoundsInRoot().top
+            assertTrue("en-tête trop haut ($what) : $chatTop sur $h dp", chatTop.value <= h * 0.30f)
+        } else {
+            compose.onNodeWithTag("status").assertExists()
+            compose.onNodeWithTag("tiles").assertExists()
+            val tilesBottom = compose.onNodeWithTag("tiles").getBoundsInRoot().bottom
+            assertTrue("tuiles hors écran ($what) : $tilesBottom sur $h dp", tilesBottom.value <= h)
+        }
+        // Cibles tactiles de la barre d'actions ≥ 48 dp.
+        val bar = compose.onNodeWithTag("actions").getBoundsInRoot()
+        assertTrue("barre d'actions trop basse ($what) : ${bar.bottom - bar.top}", (bar.bottom - bar.top).value >= 48f)
+    }
+
     @Test fun project() {
         compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {})) } }
         shot("project")
-        // La discussion garde l'essentiel de l'écran : en-tête (barre + bande d'état) ≤ 30 % de la hauteur.
-        if (!device.endsWith("land")) {
-            val root = compose.onRoot().getBoundsInRoot()
-            val chatTop = compose.onNodeWithTag("chat").getBoundsInRoot().top
-            val h = (root.bottom - root.top).value
-            assertTrue("en-tête trop haut : $chatTop sur $h dp", chatTop.value <= h * 0.30f)
-        }
+        assertProjectLayout("app")
+    }
+
+    /** Braise en feuille : la zone de saisie reste entière à l'écran (pas de chat coupé). */
+    @Test fun projectChatSheet() {
+        compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Chat) } }
+        shot("project-chat-sheet")
+        // La feuille a sa propre fenêtre (2e racine) : on compare à celle-ci.
+        val root = compose.onAllNodes(isRoot()).onLast().getBoundsInRoot()
+        val input = compose.onAllNodesWithTag("chat-input").onFirst().getBoundsInRoot()
+        assertTrue("saisie coupée : ${input.bottom} > ${root.bottom}", input.bottom <= root.bottom)
+    }
+
+    @Test fun projectDeploysSheet() {
+        compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Deploys) } }
+        shot("project-deploys-sheet")
     }
 
     @Test fun projectDetailsSheet() {
         compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Details) } }
         shot("project-details-sheet")
-    }
-
-    @Test fun projectMoreSheet() {
-        compose.setContent { Shot { ProjectScreen(SampleData.project, ProjectActions(onBack = {}), initialSheet = ProjectSheet.More) } }
-        shot("project-more-sheet")
     }
 
     @Test fun projectUpToDate() {
@@ -121,20 +150,10 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
         shot("publish-confirm")
     }
 
-    @Test fun moreSheetUpToDate() {
-        compose.setContent { Shot { ProjectScreen(SampleData.projectUpToDate, ProjectActions(onBack = {}), initialSheet = ProjectSheet.More) } }
-        shot("project-more-sheet-up-to-date")
-    }
-
     @Test fun projectDraft() {
         compose.setContent { Shot { ProjectScreen(SampleData.projectDraft, ProjectActions(onBack = {})) } }
         shot("project-draft")
-        if (!device.endsWith("land")) {
-            val root = compose.onRoot().getBoundsInRoot()
-            val chatTop = compose.onNodeWithTag("chat").getBoundsInRoot().top
-            val h = (root.bottom - root.top).value
-            assertTrue("en-tête trop haut avec le brouillon : $chatTop sur $h dp", chatTop.value <= h * 0.30f)
-        }
+        assertProjectLayout("brouillon")
     }
 
     @Test fun draftSheet() {
@@ -162,11 +181,6 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
     @Test fun tabBraise() {
         compose.setContent { Shot { HomeRootPreview(SampleData.apps, tab = HomeTab.Braise, hub = SampleData.hub) } }
         shot("tab-braise")
-    }
-
-    @Test fun tabAlerts() {
-        compose.setContent { Shot { HomeRootPreview(SampleData.apps, tab = HomeTab.Alerts, hub = SampleData.hub) } }
-        shot("tab-alerts")
     }
 
     @Test fun tabSettings() {

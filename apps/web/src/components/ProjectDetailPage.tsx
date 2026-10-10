@@ -8,7 +8,6 @@ import { projectNavMore, projectNavPrimary } from '../lib/nav';
 import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { AppIcon, statusDotClass } from './AppIcon';
 import { AppShell } from './AppShell';
-import { ModelSentence } from './ModelSentence';
 import { ProjectAgentsHub } from './ProjectAgentsHub';
 import { ProjectHome } from './ProjectHome';
 import { StatusBadge } from './StatusBadge';
@@ -23,11 +22,12 @@ import { ProjectRulesModal } from './workspace/ProjectRulesModal';
 import { NodeSelect } from './NodeSelect';
 import {
   ChevronDown,
+  Check,
   ChevronRight,
   Copy,
   ExternalLink,
   FileCode,
-  HeartPulse,
+  Globe,
   Rocket,
   RotateCw,
   Square,
@@ -341,20 +341,16 @@ export function ProjectDetailPage(props: Props) {
           ? 'Agents autonomes réveillés par cron ou événement — le chat reste sur le Coordinateur / Workspace.'
           : undefined
       }
-      actions={
-        <>
-          <Button size="sm" class="max-lg:h-11" onClick={() => setFeatureOpen(true)}>
-            Nouvelle fonctionnalité
-          </Button>
-          <StatusBadge compact class="lg:hidden" />
-        </>
-      }
+      actions={<StatusBadge compact class="lg:hidden" />}
       belowTitle={
-        <ProjectActivityStrip
-          uuid={uuid}
-          deployments={deployments}
-          project={project}
-        />
+        // Le tableau de bord porte déjà le statut : pas de pastille en double.
+        tab === 'overview' ? undefined : (
+          <ProjectActivityStrip
+            uuid={uuid}
+            deployments={deployments}
+            project={project}
+          />
+        )
       }
     >
       {error && !project && !loading ? (
@@ -376,6 +372,7 @@ export function ProjectDetailPage(props: Props) {
           onDeployments={(d) => setDeployments(d)}
           onProject={setProject}
           onOpenRules={() => setRulesModalOpen(true)}
+          workspaceEnabled={workspaceBeta}
         />
       )}
       {tab === 'workspace' && !workspaceBeta && (
@@ -723,6 +720,60 @@ type HealthItem = {
   href?: string;
 };
 
+/** Tuiles rangées dans « Plus » (modal) : utiles mais rares. */
+const SECONDARY_TILE_KEYS = new Set(['git', 'actions', 'gpu', 'node']);
+
+function deployWord(status: string): string {
+  if (isDeployInProgress(status)) return 'En cours';
+  const tone = deployTone(status);
+  if (tone === 'ok') return 'Réussi';
+  if (status === 'cancelled' || status === 'canceled') return 'Annulé';
+  if (tone === 'danger') return 'Échec';
+  return status;
+}
+
+/**
+ * Bouton de la barre d'actions : cible ≥ 44 px sous lg, 40 px sur desktop,
+ * icône + libellé court dès sm (icône seule sur téléphone, sauf l'action principale).
+ */
+function ActionButton({
+  label,
+  icon,
+  onClick,
+  disabled,
+  primary,
+  danger,
+  title,
+}: {
+  label: string;
+  icon: ComponentChildren;
+  onClick: () => void;
+  disabled?: boolean;
+  primary?: boolean;
+  danger?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      class={cn(
+        'inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-full px-3 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-40 lg:h-10 lg:min-w-10',
+        primary
+          ? 'bg-[var(--color-accent)] px-4 text-zinc-950 hover:brightness-110'
+          : 'border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] hover:bg-white/[0.07] hover:text-[var(--color-ink)]',
+        danger && 'hover:border-[var(--color-danger)]/40 hover:text-[var(--color-danger)]',
+      )}
+      title={title ?? label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {icon}
+      <span class={cn(primary ? 'inline' : 'hidden sm:inline')}>{label}</span>
+    </button>
+  );
+}
+
 function ProjectOverview({
   uuid,
   project,
@@ -731,6 +782,7 @@ function ProjectOverview({
   onDeployments,
   onProject,
   onOpenRules,
+  workspaceEnabled = true,
 }: {
   uuid: string;
   project: Project;
@@ -739,6 +791,7 @@ function ProjectOverview({
   onDeployments: (d: Deployment[]) => void;
   onProject: (project: Project) => void;
   onOpenRules: () => void;
+  workspaceEnabled?: boolean;
 }) {
   const toast = useToast();
   const [envCount, setEnvCount] = useState<number | null>(null);
@@ -753,7 +806,6 @@ function ProjectOverview({
   const [deployBusy, setDeployBusy] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyShowAll, setHistoryShowAll] = useState(false);
-  const [autresOpen, setAutresOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [nodes, setNodes] = useState<ClusterNode[]>([]);
 
@@ -819,13 +871,14 @@ function ProjectOverview({
 
   const health: Array<HealthItem & { icon: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu' | 'settings' }> = [
     {
+      // Une seule entrée Déploiements : statut du déploiement courant (en cours, échec, OK).
       key: 'deploy',
       icon: 'deploy',
-      label: 'Déploiement',
+      label: 'Déploiements',
       detail: latest
-        ? `${latest.status}${latest.git_sha ? ` · ${latest.git_sha.slice(0, 7)}` : ''} · ${formatWhen(latest.created_at)}`
+        ? `${deployWord(latest.status)} · ${formatWhen(latest.created_at)}`
         : 'Aucun déploiement',
-      tone: latest ? deployTone(latest.status) : 'warn',
+      tone: latest ? deployTone(latest.status) : 'neutral',
       href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`,
     },
     {
@@ -849,38 +902,6 @@ function ProjectOverview({
         : 'Repo GitHub requis',
       tone: project.git_repository ? 'ok' : 'neutral',
       href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=actions`,
-    },
-    {
-      key: 'errors',
-      icon: 'pulse',
-      label: latestFailed
-        ? 'Échec actif'
-        : project.status === 'unrouted'
-          ? 'Route absente'
-          : project.status === 'unhealthy'
-            ? 'Injoignable'
-            : 'Santé',
-      detail: latestFailed
-        ? `${latestFailed.git_message || latestFailed.status} · ${formatWhen(latestFailed.created_at)}`
-        : project.status === 'unrouted'
-          ? 'Traefik répond à la place du site : la route Host n’est pas branchée'
-          : project.status === 'unhealthy'
-            ? `Pas de réponse sur le port ${project.port || 3000}${latest ? ` · Deploy ${latest.status}` : ''}`
-            : latest && isDeployInProgress(latest.status)
-              ? `Déploiement ${latest.status}`
-              : latest
-                ? 'Dernier déploiement OK'
-                : 'En attente du premier deploy',
-      tone: latestFailed || project.status === 'unhealthy' || project.status === 'unrouted'
-        ? 'danger'
-        : latest && isDeployInProgress(latest.status)
-          ? 'warn'
-          : latest
-            ? 'ok'
-            : 'neutral',
-      href: latestFailed
-        ? `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`
-        : undefined,
     },
     {
       key: 'db',
@@ -943,22 +964,10 @@ function ProjectOverview({
       href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=settings&section=gpu`,
     },
     {
-      key: 'domain',
-      icon: 'globe',
-      label: 'URL',
-      detail: project.production_url
-        ? project.production_url.replace(/^https?:\/\//, '')
-        : domainCount
-          ? `${domainCount} domaine(s)`
-          : 'Pas d’URL',
-      tone: project.production_url || (domainCount ?? 0) > 0 ? 'ok' : 'neutral',
-      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=domains`,
-    },
-    {
       key: 'settings',
       icon: 'settings',
       label: 'Paramètres',
-      detail: 'Nœud, GPU, volumes, danger zone',
+      detail: 'Domaines, nœud, GPU',
       tone: 'neutral',
       href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=settings`,
     },
@@ -1024,9 +1033,41 @@ function ProjectOverview({
   }
 
   const visibleHealth = isAdmin ? health : health.filter((h) => h.key !== 'node');
-  const primaryKeys = new Set(['deploy', 'errors', 'domain', 'settings', 'env', 'db']);
-  const primaryTiles = visibleHealth.filter((h) => primaryKeys.has(h.key));
-  const secondaryTiles = visibleHealth.filter((h) => !primaryKeys.has(h.key));
+  const byKey = (k: string) => visibleHealth.find((h) => h.key === k);
+  const secondaryTiles = visibleHealth.filter((h) => SECONDARY_TILE_KEYS.has(h.key));
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'restart' | 'stop' | null>(null);
+
+  // Statut unique de l'en-tête : déploiement courant d'abord, sinon santé de l'app.
+  const inProgress = !!latest && isDeployInProgress(latest.status);
+  const headline: { label: string; detail: string; tone: HealthItem['tone'] } = inProgress
+    ? {
+        label: 'Déploiement en cours',
+        detail: latest!.git_sha ? `Version ${latest!.git_sha.slice(0, 7)}` : 'Clone et build…',
+        tone: 'warn',
+      }
+    : latestFailed
+      ? {
+          label: 'Échec du déploiement',
+          detail:
+            project.status === 'live' || project.status === 'running'
+              ? `L’ancienne version reste en ligne · ${formatWhen(latestFailed.created_at)}`
+              : formatWhen(latestFailed.created_at),
+          tone: 'danger',
+        }
+      : {
+          label: statusMeta.label,
+          detail:
+            project.status === 'unrouted'
+              ? 'La route du domaine n’est pas branchée'
+              : project.status === 'unhealthy'
+                ? `Pas de réponse sur le port ${project.port || 3000}`
+                : latest
+                  ? `Déployé ${formatWhen(latest.created_at)}${latest.git_sha ? ` · ${latest.git_sha.slice(0, 7)}` : ''}`
+                  : 'Pas encore déployé',
+          tone: statusMeta.tone,
+        };
+  const urlHost = project.production_url?.replace(/^https?:\/\//, '').replace(/\/$/, '') ?? '';
 
   function tileBadge(tone: HealthItem['tone']) {
     if (tone === 'neutral') return null;
@@ -1035,114 +1076,168 @@ function ProjectOverview({
         class={cn(
           'absolute -right-1 -top-1 h-3 w-3 rounded-full ring-2 ring-[#1c1c1e]',
           tone === 'ok' && 'bg-[var(--color-ok)]',
-          tone === 'warn' && 'bg-[var(--color-warn)]',
+          tone === 'warn' && 'animate-pulse bg-[var(--color-warn)]',
           tone === 'danger' && 'bg-[var(--color-danger)]',
         )}
       />
     );
   }
 
+  const base = `/app/projects/view?uuid=${encodeURIComponent(uuid)}`;
+  const deployItem = byKey('deploy');
+  const tiles: Array<{ key: string; title: string; description: string; href?: string; onClick?: () => void; icon: ComponentChildren; badge?: ComponentChildren }> = [
+    {
+      key: 'braise',
+      title: 'Braise',
+      description: 'Discuter et faire évoluer l’app',
+      href: `${base}&tab=home`,
+      icon: <HealthIcon kind="chat" tone="ok" />,
+    },
+    ...(workspaceEnabled
+      ? [
+          {
+            key: 'workspace',
+            title: 'Workspace',
+            description: 'Brouillons, code et aperçu',
+            href: `${base}&tab=workspace`,
+            icon: <HealthIcon kind="git" tone="neutral" />,
+          },
+        ]
+      : []),
+    ...(deployItem
+      ? [
+          {
+            key: 'deploy',
+            title: deployItem.label,
+            description: deployItem.detail,
+            href: deployItem.href,
+            icon: <HealthIcon kind="deploy" tone={deployItem.tone} />,
+            badge: tileBadge(deployItem.tone),
+          },
+        ]
+      : []),
+    {
+      key: 'agents',
+      title: 'Agents',
+      description: 'Routines autonomes',
+      href: `${base}&tab=agents`,
+      icon: <HealthIcon kind="actions" tone="neutral" />,
+    },
+    ...(['db', 'env', 'settings'] as const)
+      .map((k) => byKey(k))
+      .filter((h): h is NonNullable<typeof h> => !!h)
+      .map((h) => ({
+        key: h.key,
+        title: h.label,
+        description: h.detail,
+        href: h.href,
+        icon: <HealthIcon kind={h.icon} tone={h.tone} />,
+        badge: tileBadge(h.tone),
+      })),
+    ...(secondaryTiles.length
+      ? [
+          {
+            key: 'more',
+            title: 'Plus',
+            description: secondaryTiles.map((h) => h.label).join(' · '),
+            onClick: () => setMoreOpen(true),
+            icon: <HealthIcon kind="more" tone="neutral" />,
+          },
+        ]
+      : []),
+  ];
+
   return (
     <FadeIn>
       <div class="space-y-4">
-        {/* En-tête compact avec statut + contrôles URL */}
-        <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]/70 px-4 py-3 backdrop-blur-sm sm:px-5">
-          <div class="flex min-w-0 items-center gap-3">
-            <StatusGlyph
-              project={project}
-              tone={statusMeta.tone}
-              busy={deployBusy || !!lifeBusy}
-              label={statusMeta.label}
-            />
-            <div class="min-w-0">
-              <h2 class="text-lg font-medium">{statusMeta.label}</h2>
-              {project.production_url && (
-                <a
-                  href={project.production_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  class="df-hit mt-0.5 block text-sm text-[var(--color-accent)] hover:underline"
+        {/* En-tête : un seul statut, URL en pastille (ouvrir + copier), barre d'actions. */}
+        <section
+          class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]/70 p-4 backdrop-blur-sm sm:p-5"
+          aria-label="Statut et actions"
+        >
+          <div class="flex min-w-0 flex-col gap-4">
+            <div class="flex min-w-0 items-center gap-3.5">
+              <StatusGlyph
+                project={project}
+                tone={headline.tone}
+                busy={deployBusy || !!lifeBusy}
+                label={headline.label}
+              />
+              <div class="min-w-0">
+                <h2
+                  class={cn(
+                    'truncate text-base font-semibold leading-tight sm:text-lg',
+                    headline.tone === 'ok' && 'text-[var(--color-ok)]',
+                    headline.tone === 'warn' && 'text-[var(--color-warn)]',
+                    headline.tone === 'danger' && 'text-[var(--color-danger)]',
+                  )}
+                  data-df-status
                 >
-                  <span class="block truncate">{project.production_url.replace(/^https?:\/\//, '')}</span>
-                </a>
+                  {headline.label}
+                </h2>
+                <p class="mt-0.5 truncate text-xs text-[var(--color-ink-muted)] sm:text-sm">
+                  {headline.detail}
+                </p>
+              </div>
+            </div>
+
+            <div class="flex min-w-0 flex-wrap items-center justify-between gap-2">
+              {urlHost && (
+                <div class="flex h-11 min-w-0 max-w-full basis-full items-center overflow-hidden rounded-full border border-[var(--color-line)] bg-white/[0.03] sm:max-w-[22rem] sm:basis-auto lg:h-10">
+                  <a
+                    href={project.production_url!}
+                    target="_blank"
+                    rel="noreferrer"
+                    class="flex h-full min-w-0 flex-1 items-center gap-2 pl-3.5 pr-2 text-sm text-[var(--color-ink)] transition-colors hover:bg-white/5"
+                    title={`Ouvrir ${urlHost}`}
+                  >
+                    <Globe size={16} class="shrink-0 text-[var(--color-ink-muted)]" aria-hidden />
+                    <span class="min-w-0 truncate">{urlHost}</span>
+                    <ExternalLink size={14} class="shrink-0 opacity-60" aria-hidden />
+                  </a>
+                  <button
+                    type="button"
+                    class="flex h-full w-11 shrink-0 items-center justify-center border-l border-[var(--color-line)] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] lg:w-10"
+                    title={copied ? 'Copié' : 'Copier l’URL'}
+                    aria-label="Copier l’URL"
+                    onClick={copyUrl}
+                  >
+                    {copied ? <Check size={16} aria-hidden /> : <Copy size={16} aria-hidden />}
+                  </button>
+                </div>
               )}
-              {/* Touch : espacement élargi pour que chaque zone de toucher de 44 px reste à son bouton. */}
-              <div class="mt-2 flex flex-wrap items-center gap-1 max-lg:mt-5 max-lg:gap-3">
-                {project.production_url && (
-                  <>
-                    <button
-                      type="button"
-                      class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
-                      title="Ouvrir l’app"
-                      aria-label="Ouvrir l’app"
-                      onClick={() => window.open(project.production_url!, '_blank', 'noopener,noreferrer')}
-                    >
-                      <ExternalLink size={14} aria-hidden />
-                    </button>
-                    <button
-                      type="button"
-                      class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
-                      title={copied ? 'Copié' : 'Copier l’URL'}
-                      aria-label="Copier l’URL"
-                      onClick={copyUrl}
-                    >
-                      <Copy size={14} aria-hidden />
-                    </button>
-                  </>
-                )}
-                <button
-                  type="button"
-                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
-                  title="Déployer"
-                  aria-label="Déployer"
+              <div class="flex items-center gap-2" role="toolbar" aria-label="Actions de l’app">
+                <ActionButton
+                  primary
+                  label="Déployer"
+                  icon={deployBusy ? <Spinner /> : <Rocket size={18} aria-hidden />}
                   disabled={deployBusy || !!lifeBusy || !project.git_repository}
+                  title={project.git_repository ? 'Déployer la dernière version' : 'Repo GitHub requis'}
                   onClick={deployNow}
-                >
-                  {deployBusy ? <Spinner /> : <Rocket size={14} aria-hidden />}
-                </button>
-                <button
-                  type="button"
-                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
-                  title="Redémarrer"
-                  aria-label="Redémarrer"
+                />
+                <ActionButton
+                  label="Redémarrer"
+                  icon={lifeBusy === 'restart' ? <Spinner /> : <RotateCw size={18} aria-hidden />}
                   disabled={!!lifeBusy || deployBusy}
-                  onClick={() => runLifecycle('restart')}
-                >
-                  {lifeBusy === 'restart' ? <Spinner /> : <RotateCw size={14} aria-hidden />}
-                </button>
-                <button
-                  type="button"
-                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
-                  title="Arrêter"
-                  aria-label="Arrêter"
+                  onClick={() => setConfirmAction('restart')}
+                />
+                <ActionButton
+                  label="Arrêter"
+                  danger
+                  icon={lifeBusy === 'stop' ? <Spinner /> : <Square size={18} aria-hidden />}
                   disabled={!!lifeBusy || deployBusy}
-                  onClick={() => runLifecycle('stop')}
-                >
-                  {lifeBusy === 'stop' ? <Spinner /> : <Square size={14} aria-hidden />}
-                </button>
-                <a
-                  href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`}
-                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
-                  title="Santé / déploiements"
-                  aria-label="Santé / déploiements"
-                >
-                  <HeartPulse size={14} aria-hidden />
-                </a>
-                <button
-                  type="button"
-                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
-                  title="Règles & Directives Agent (AGENTS.md)"
-                  aria-label="Règles & Directives Agent"
+                  onClick={() => setConfirmAction('stop')}
+                />
+                <ActionButton
+                  label="Directives"
+                  icon={<FileCode size={18} aria-hidden />}
+                  title="Règles & directives agent (AGENTS.md)"
                   onClick={onOpenRules}
-                >
-                  <FileCode size={14} aria-hidden />
-                </button>
+                />
               </div>
             </div>
           </div>
-        </div>
-
-        <ModelSentence />
+        </section>
 
         <ProjectGroupSuggest project={project} onJoined={onProject} />
 
@@ -1154,51 +1249,35 @@ function ProjectOverview({
           />
         )}
 
-        {/* Tuiles d'action principales */}
         <HubGrid cols={4}>
-          <HubTile
-            index={0}
-            title="Chat"
-            description="Parler à l'agent"
-            href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=workspace`}
-            icon={<HealthIcon kind="pulse" tone="ok" />}
-            iconClass="!bg-transparent"
-          />
-          <HubTile
-            index={1}
-            title="Agents"
-            description="Agents autonomes"
-            href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=agents`}
-            icon={<HealthIcon kind="settings" tone="ok" />}
-            iconClass="!bg-transparent"
-          />
-          <HubTile
-            index={2}
-            title="Nouveau brouillon"
-            description="Créer une fonctionnalité"
-            icon={<HealthIcon kind="git" tone="ok" />}
-            iconClass="!bg-transparent"
-            onClick={() => {
-              // Trigger the feature modal via parent if available, else navigate
-              window.location.href = `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=workspace&spec=1`;
-            }}
-          />
-          <HubTile
-            index={3}
-            title="Déploiements"
-            description={`${deployments.length} déploiement${deployments.length > 1 ? 's' : ''}`}
-            href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`}
-            icon={<HealthIcon kind="deploy" tone="neutral" />}
-            iconClass="!bg-transparent"
-          />
+          {tiles.map((t, i) => (
+            <HubTile
+              key={t.key}
+              index={i}
+              title={t.title}
+              description={t.description}
+              href={t.href}
+              onClick={t.onClick}
+              icon={t.icon}
+              iconClass="!bg-transparent"
+              badge={t.badge}
+            />
+          ))}
         </HubGrid>
+      </div>
 
-        {/* Tuiles d'état */}
-        <HubGrid cols={4}>
-          {primaryTiles.map((h, i) => (
+      <Modal
+        open={moreOpen}
+        onClose={() => setMoreOpen(false)}
+        title="Plus"
+        description="Réglages moins fréquents"
+        size="lg"
+      >
+        <HubGrid cols={3}>
+          {secondaryTiles.map((h, i) => (
             <HubTile
               key={h.key}
-              index={i + 4}
+              index={i}
               title={h.label}
               description={h.detail}
               href={h.href}
@@ -1208,41 +1287,38 @@ function ProjectOverview({
             />
           ))}
         </HubGrid>
+      </Modal>
 
-        {secondaryTiles.length > 0 && (
-          <div>
-            <button
-              type="button"
-              class="df-hit mb-3 inline-flex items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
-              aria-expanded={autresOpen}
-              onClick={() => setAutresOpen((v) => !v)}
+      <Modal
+        open={confirmAction !== null}
+        onClose={() => setConfirmAction(null)}
+        title={confirmAction === 'stop' ? `Arrêter ${project.name} ?` : `Redémarrer ${project.name} ?`}
+        description={
+          confirmAction === 'stop'
+            ? 'L’app ne répondra plus jusqu’au prochain démarrage ou déploiement.'
+            : 'L’app sera indisponible quelques secondes.'
+        }
+        size="sm"
+        footer={
+          <div class="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="ghost" onClick={() => setConfirmAction(null)}>
+              Annuler
+            </Button>
+            <Button
+              variant={confirmAction === 'stop' ? 'danger' : 'primary'}
+              onClick={() => {
+                const a = confirmAction;
+                setConfirmAction(null);
+                if (a) void runLifecycle(a);
+              }}
             >
-              Autres
-              <ChevronDown
-                size={12}
-                class={cn('opacity-70 transition-transform', autresOpen && 'rotate-180')}
-                aria-hidden
-              />
-            </button>
-            {autresOpen && (
-              <HubGrid cols={4}>
-                {secondaryTiles.map((h, i) => (
-                  <HubTile
-                    key={h.key}
-                    index={i}
-                    title={h.label}
-                    description={h.detail}
-                    href={h.href}
-                    icon={<HealthIcon kind={h.icon} tone={h.tone} />}
-                    iconClass="!bg-transparent"
-                    badge={tileBadge(h.tone)}
-                  />
-                ))}
-              </HubGrid>
-            )}
+              {confirmAction === 'stop' ? 'Arrêter' : 'Redémarrer'}
+            </Button>
           </div>
-        )}
-      </div>
+        }
+      >
+        <p class="text-sm text-[var(--color-ink-muted)]">Tu peux relancer à tout moment depuis cette page.</p>
+      </Modal>
 
       <Modal
         open={historyOpen}
@@ -1406,7 +1482,7 @@ function HealthIcon({
   kind,
   tone,
 }: {
-  kind: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu' | 'settings';
+  kind: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu' | 'settings' | 'chat' | 'more';
   tone: 'ok' | 'warn' | 'danger' | 'neutral';
 }) {
   const color =
@@ -1419,6 +1495,14 @@ function HealthIcon({
           : 'text-[var(--color-ink-muted)] bg-white/5';
   const paths: Record<string, ComponentChildren> = {
     deploy: <path d="M12 2v14M7 11l5 5 5-5M5 20h14" />,
+    chat: <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z" />,
+    more: (
+      <>
+        <circle cx="5" cy="12" r="1.5" />
+        <circle cx="12" cy="12" r="1.5" />
+        <circle cx="19" cy="12" r="1.5" />
+      </>
+    ),
     pulse:
       tone === 'danger' ? (
         <path d="M12 8v4M12 16h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />

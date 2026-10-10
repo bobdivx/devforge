@@ -83,7 +83,7 @@ private fun containerLabel(c: ContainerState): Pair<String, Color> = when (c.kin
 @Composable
 fun DeploysSheet(state: ProjectUiState, onDismiss: () -> Unit, onOpen: (app.jeser.devforge.data.Deployment) -> Unit) {
     val uri = LocalUriHandler.current
-    InfoSheet("Mises en ligne", onDismiss) {
+    InfoSheet("Déploiements", onDismiss) {
         syncLabel(state.git)?.let { label ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(label, color = DfColors.InkMuted, modifier = Modifier.weight(1f))
@@ -141,7 +141,7 @@ fun DetailsSheet(
     val c = state.containerState
     val uri = LocalUriHandler.current
     val clip = LocalClipboardManager.current
-    InfoSheet(state.project?.name.orEmpty(), onDismiss) {
+    InfoSheet("Paramètres · ${state.project?.name.orEmpty()}", onDismiss) {
         SectionLabel("État")
         InfoRow("Statut", s.status.label, s.status.color(), s.since)
         val (cl, cc) = containerLabel(c)
@@ -268,62 +268,6 @@ private fun SheetAction(
                 Text(sub, color = DfColors.InkMuted.copy(alpha = alpha), fontSize = 13.sp)
             }
         }
-    }
-}
-
-/** « Plus » : actions moins fréquentes. Redémarrer, Arrêter et Reconstruire passent toujours par une confirmation. */
-@Composable
-fun MoreSheet(state: ProjectUiState, actions: ProjectActions, onDismiss: () -> Unit, onSheet: (ProjectSheet) -> Unit) {
-    val running = state.containerState.running
-    InfoSheet("Plus d'actions", onDismiss) {
-        SheetAction(
-            Icons.Filled.Visibility, "Aperçu du brouillon", "Ouvre la version en cours, en local. Rien n'est publié.",
-            onClick = { actions.onOpenPreview(); onDismiss() }, busy = state.previewStarting, tint = DfColors.Accent,
-        )
-        SheetAction(
-            Icons.Filled.RestartAlt, "Redémarrer", "Relance le conteneur, sans reconstruire. Confirmation demandée.",
-            onClick = { onSheet(ProjectSheet.Restart) },
-            enabled = state.canControl && running, busy = state.lifecycleBusy == "restart",
-        )
-        if (running || state.lifecycleBusy == "stop") {
-            SheetAction(
-                Icons.Filled.Stop, "Arrêter", "Le site ne répond plus jusqu'au redémarrage. Confirmation demandée.",
-                onClick = { onSheet(ProjectSheet.Stop) },
-                enabled = state.canControl, busy = state.lifecycleBusy == "stop", tint = DfColors.Danger,
-            )
-        } else {
-            SheetAction(
-                Icons.Filled.PlayArrow, "Démarrer", "Relance l'app arrêtée.",
-                onClick = { actions.onLifecycle("start"); onDismiss() },
-                enabled = state.canControl && state.containerState.kind != ContainerState.Kind.Missing,
-                busy = state.lifecycleBusy == "start", tint = DfColors.Ok,
-            )
-        }
-        val plan = state.deployPlan
-        if (plan.kind == app.jeser.devforge.data.DeployPlan.Kind.Rebuild) {
-            SheetAction(
-                Icons.Filled.Refresh, "Reconstruire", plan.rebuildExplanation + " Confirmation demandée.",
-                onClick = { onSheet(ProjectSheet.Deploy) }, enabled = state.canDeploy,
-            )
-        }
-        val draft = state.draft
-        if (draft != null && draft.available && (draft.dirty || draft.backups.isNotEmpty())) {
-            SheetAction(
-                Icons.Filled.Description,
-                if (draft.dirty) "Brouillon · ${filesLabel(draft.count)}" else "Brouillons supprimés",
-                if (draft.dirty) "Voir les fichiers, valider sur GitHub ou supprimer." else "Restaurer une sauvegarde (gardée 7 jours).",
-                onClick = { actions.onOpenDraft(); onSheet(ProjectSheet.Draft) },
-                tint = DfColors.Warn,
-            )
-        }
-        SheetAction(
-            Icons.Filled.Info, "Détails de l'app", "État, dernière mise en ligne, domaine, GitHub, équipe.",
-            onClick = { onSheet(ProjectSheet.Details) },
-        )
-        SheetAction(
-            Icons.Filled.History, "Historique des mises en ligne", "Toutes les publications et leurs logs.",
-            onClick = { onSheet(ProjectSheet.Deploys) },
-        )
     }
 }
 

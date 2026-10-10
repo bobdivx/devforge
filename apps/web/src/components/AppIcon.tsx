@@ -71,7 +71,7 @@ function faceRank(project: Project): number {
   return FACE_ROLES.length + 1;
 }
 
-/** Sources d’icône app : fichiers du site → services → avatar GitHub. */
+/** Sources d’icône app : fichiers du site → avatar GitHub → initiales (local). */
 export function appIconCandidates(project: Project): string[] {
   const host = hostnameFromUrl(project.production_url);
   const owner = githubOwner(project.git_repository);
@@ -83,9 +83,8 @@ export function appIconCandidates(project: Project): string[] {
     out.push(`${origin}/apple-touch-icon-precomposed.png`);
     out.push(`${origin}/favicon.svg`);
     out.push(`${origin}/favicon.ico`);
-    out.push(`https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(host)}`);
-    out.push(`https://icons.duckduckgo.com/ip3/${encodeURIComponent(host)}.ico`);
-    out.push(`https://logo.clearbit.com/${encodeURIComponent(host)}`);
+    // Pas de service tiers (favicons Google, etc.) : ils renvoient un globe générique
+    // flou ou un 404 pour les apps sans favicon. Repli local : initiales colorées.
   }
   if (owner) {
     out.push(`https://github.com/${encodeURIComponent(owner)}.png?size=128`);
@@ -177,6 +176,11 @@ export function AppIcon({
           decoding="async"
           referrerpolicy="no-referrer"
           onError={() => setIdx((i) => i + 1)}
+          onLoad={(e) => {
+            // Favicon minuscule (16 px) étiré = icône floue : on passe au suivant.
+            const img = e.currentTarget as HTMLImageElement;
+            if (img.naturalWidth > 0 && img.naturalWidth < 32) setIdx((i) => i + 1);
+          }}
         />
       ) : (
         <span class="font-semibold tracking-tight">{initials(project.name)}</span>
