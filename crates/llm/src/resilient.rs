@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::errors::{classify, LlmErrorKind};
-use crate::{err, AssistantTurn, ChatRequest, LlmProvider, Result};
+use crate::{err, AssistantTurn, ChatRequest, DeltaSink, LlmProvider, Result};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct ChainEntry {
     pub label: String,
@@ -97,16 +98,54 @@ impl ResilientLlmProvider {
                         delay_ms = delay.as_millis() as u64,
                         "LLM KO transitoire — nouvel essai"
                     );
-                    notify(match kind {
-                        LlmErrorKind::RateLimited { .. } => "Modèle saturé, nouvel essai…".to_string(),
-                        LlmErrorKind::Timeout => "Le modèle tarde, nouvel essai…".to_string(),
-                        _ => "Modèle indisponible, nouvel essai…".to_string(),
-                    });
+                    notify(retry_label(&kind));
                     tokio::time::sleep(delay).await;
                     attempt += 1;
                 }
             }
         }
+    }
+
+    /// Streaming avec nouveaux essais **tant qu'aucun texte n'a été émis** (sinon : doublons).
+    async fn stream_with_retries(
+        &self,
+        entry: &ChainEntry,
+        req: &ChatRequest,
+        sink: &DeltaSink<'_>,
+        emitted: &AtomicBool,
+    ) -> Result<AssistantTurn> {
+        let mut attempt: u32 = 0;
+        loop {
+            match entry.provider.chat_stream(req.clone(), sink).await {
+                Ok(turn) => return Ok(turn),
+                Err(e) => {
+                    let kind = classify(&e);
+                    if emitted.load(Ordering::SeqCst) || attempt >= kind.max_retries() {
+                        return Err(e);
+                    }
+                    let delay = self.policy.delay(&kind, attempt);
+                    tracing::warn!(
+                        provider = %entry.label,
+                        error = %e,
+                        ?kind,
+                        attempt = attempt + 1,
+                        delay_ms = delay.as_millis() as u64,
+                        "LLM (stream) KO transitoire — nouvel essai"
+                    );
+                    notify(retry_label(&kind));
+                    tokio::time::sleep(delay).await;
+                    attempt += 1;
+                }
+            }
+        }
+    }
+}
+
+fn retry_label(kind: &LlmErrorKind) -> String {
+    match kind {
+        LlmErrorKind::RateLimited { .. } => "Modèle saturé, nouvel essai…".to_string(),
+        LlmErrorKind::Timeout => "Le modèle tarde, nouvel essai…".to_string(),
+        _ => "Modèle indisponible, nouvel essai…".to_string(),
     }
 }
 
@@ -151,15 +190,56 @@ impl LlmProvider for ResilientLlmProvider {
                 }
             }
         }
-        Err(err(format!(
-            "tous les providers ont échoué — {}",
-            if errors.is_empty() {
-                "chaîne vide".into()
-            } else {
-                errors.join(" | ")
-            }
-        )))
+        Err(all_failed(&errors))
     }
+
+    async fn chat_stream(&self, req: ChatRequest, on_delta: &DeltaSink<'_>) -> Result<AssistantTurn> {
+        if self.chain.is_empty() {
+            return Err(err("aucun provider LLM dans la chaîne"));
+        }
+        let emitted = AtomicBool::new(false);
+        let sink = |d: &str| {
+            emitted.store(true, Ordering::SeqCst);
+            on_delta(d);
+        };
+        let mut errors: Vec<String> = Vec::new();
+        for (i, entry) in self.chain.iter().enumerate() {
+            match self.stream_with_retries(entry, &req, &sink, &emitted).await {
+                Ok(turn) => {
+                    let empty = turn.content.trim().is_empty() && turn.tool_calls.is_empty();
+                    if empty && i + 1 < self.chain.len() && !emitted.load(Ordering::SeqCst) {
+                        tracing::warn!(provider = %entry.label, "réponse vide — fallback suivant");
+                        errors.push(format!("{}: réponse vide", entry.label));
+                        continue;
+                    }
+                    if i > 0 {
+                        tracing::info!(provider = %entry.label, rank = i, "LLM fallback utilisé");
+                    }
+                    return Ok(turn);
+                }
+                Err(e) => {
+                    // Du texte est déjà parti vers l'utilisateur : pas de bascule (texte dupliqué).
+                    if emitted.load(Ordering::SeqCst) {
+                        tracing::warn!(provider = %entry.label, error = %e, "LLM KO après le premier morceau — pas de fallback");
+                        return Err(e);
+                    }
+                    tracing::warn!(provider = %entry.label, error = %e, "LLM KO — fallback suivant");
+                    if i + 1 < self.chain.len() {
+                        notify("Bascule sur le modèle de secours…".to_string());
+                    }
+                    errors.push(format!("{}: {e}", entry.label));
+                }
+            }
+        }
+        Err(all_failed(&errors))
+    }
+}
+
+fn all_failed(errors: &[String]) -> devforge_shared::DevForgeError {
+    err(format!(
+        "tous les providers ont échoué — {}",
+        if errors.is_empty() { "chaîne vide".into() } else { errors.join(" | ") }
+    ))
 }
 
 #[cfg(test)]
@@ -196,6 +276,77 @@ mod tests {
                 None => Err(err("LLM 500 Internal Server Error: fin du script")),
             }
         }
+    }
+
+    /// Fournisseur en streaming : émet `parts` puis renvoie `end` (Ok contenu complet / Err).
+    struct Streamer {
+        parts: Vec<&'static str>,
+        end: std::result::Result<(), &'static str>,
+        calls: Mutex<u32>,
+    }
+
+    #[async_trait]
+    impl LlmProvider for Streamer {
+        fn name(&self) -> &str {
+            "streamer"
+        }
+        async fn chat(&self, _req: ChatRequest) -> Result<AssistantTurn> {
+            Err(err("non utilisé"))
+        }
+        async fn chat_stream(&self, _req: ChatRequest, on_delta: &DeltaSink<'_>) -> Result<AssistantTurn> {
+            *self.calls.lock().unwrap() += 1;
+            for p in &self.parts {
+                on_delta(p);
+            }
+            match self.end {
+                Ok(()) => Ok(AssistantTurn { content: self.parts.concat(), tool_calls: vec![], finish_reason: "stop".into() }),
+                Err(m) => Err(err(m)),
+            }
+        }
+    }
+
+    fn collect() -> (Arc<Mutex<Vec<String>>>, impl Fn(&str) + Send + Sync) {
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let s2 = seen.clone();
+        (seen, move |d: &str| s2.lock().unwrap().push(d.to_string()))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stream_error_before_first_delta_falls_back_without_duplicates() {
+        let a = Arc::new(Streamer { parts: vec![], end: Err("LLM 401 Unauthorized: x"), calls: Mutex::new(0) });
+        let b = Arc::new(Streamer { parts: vec!["Bon", "jour"], end: Ok(()), calls: Mutex::new(0) });
+        let p = ResilientLlmProvider::new(vec![
+            ChainEntry { label: "a".into(), provider: a.clone() },
+            ChainEntry { label: "b".into(), provider: b.clone() },
+        ]);
+        let (seen, sink) = collect();
+        let turn = p.chat_stream(req(), &sink).await.unwrap();
+        assert_eq!(turn.content, "Bonjour");
+        assert_eq!(seen.lock().unwrap().concat(), "Bonjour");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stream_error_after_first_delta_is_returned_no_retry_no_fallback() {
+        let a = Arc::new(Streamer { parts: vec!["Début"], end: Err("LLM 503 Service Unavailable: x"), calls: Mutex::new(0) });
+        let b = Arc::new(Streamer { parts: vec!["secours"], end: Ok(()), calls: Mutex::new(0) });
+        let p = ResilientLlmProvider::new(vec![
+            ChainEntry { label: "a".into(), provider: a.clone() },
+            ChainEntry { label: "b".into(), provider: b.clone() },
+        ]);
+        let (seen, sink) = collect();
+        assert!(p.chat_stream(req(), &sink).await.is_err());
+        assert_eq!(*a.calls.lock().unwrap(), 1, "pas de nouvel essai après un morceau");
+        assert_eq!(*b.calls.lock().unwrap(), 0, "pas de bascule après un morceau");
+        assert_eq!(seen.lock().unwrap().concat(), "Début");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn default_chat_stream_emits_one_delta() {
+        let a = Scripted::new(vec![Ok("tout d'un bloc")]);
+        let (seen, sink) = collect();
+        let turn = a.chat_stream(req(), &sink).await.unwrap();
+        assert_eq!(turn.content, "tout d'un bloc");
+        assert_eq!(*seen.lock().unwrap(), vec!["tout d'un bloc".to_string()]);
     }
 
     fn req() -> ChatRequest {

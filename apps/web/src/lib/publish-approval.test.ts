@@ -69,3 +69,24 @@ describe('approveThenSend', () => {
     expect(send).not.toHaveBeenCalled();
   });
 });
+
+describe('plafond de pushes', () => {
+  it('carte dédiée avec un bouton clair', async () => {
+    const { needsUserActionFrom, userActionCopy, PUSH_LIMIT_KIND } = await import('./publish-approval');
+    const card = needsUserActionFrom([
+      {
+        name: 'sync_workdir_to_github',
+        result: {
+          ok: false,
+          needs_user_action: true,
+          kind: 'push_limit',
+          code: 'push_limit_reached',
+          message_fr: 'J’ai déjà poussé 3 fois sur GitHub pendant ce travail.',
+        },
+      },
+    ]);
+    expect(card?.kind).toBe(PUSH_LIMIT_KIND);
+    expect(card?.message_fr).toContain('3 fois');
+    expect(userActionCopy(PUSH_LIMIT_KIND).button).toBe('Autoriser à continuer');
+  });
+});

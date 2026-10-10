@@ -11,6 +11,7 @@ mod errors;
 mod health;
 mod openai;
 mod resilient;
+mod sse;
 mod stub;
 
 pub use catalog::{
@@ -21,6 +22,7 @@ pub use errors::{classify, classify_message, humanize_llm_error, LlmErrorKind};
 pub use health::{probe, ProbeRequest, ProbeResult};
 pub use openai::OpenAiCompatibleProvider;
 pub use resilient::{with_retry_notifier, ChainEntry, ResilientLlmProvider, RetryNotifier, RetryPolicy};
+pub use sse::OpenAiStreamAccumulator;
 pub use stub::{ScriptedLlmProvider, StubLlmProvider};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,10 +119,21 @@ pub struct ChatRequest {
     pub temperature: f32,
 }
 
+/// Rappel appelé pour chaque morceau de texte reçu en streaming.
+pub type DeltaSink<'a> = dyn Fn(&str) + Send + Sync + 'a;
+
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     fn name(&self) -> &str;
     async fn chat(&self, req: ChatRequest) -> Result<AssistantTurn>;
+    /// Streaming (P2-02). Par défaut : appelle `chat()` et émet tout le texte en un seul morceau.
+    async fn chat_stream(&self, req: ChatRequest, on_delta: &DeltaSink<'_>) -> Result<AssistantTurn> {
+        let t = self.chat(req).await?;
+        if !t.content.is_empty() {
+            on_delta(&t.content);
+        }
+        Ok(t)
+    }
 }
 
 /// Build provider from env.

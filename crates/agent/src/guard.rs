@@ -314,3 +314,70 @@ mod tests {
     }
 
 }
+
+// ---------------------------------------------------------------------------
+// Plafond de pushes GitHub par run (complément P1) : même avec un accord de publication,
+// un run ne peut pas pousser plus de N fois (cas des ~100 commits « package-lock.json »).
+// ---------------------------------------------------------------------------
+
+/// Pushes GitHub autorisés par run d'agent (`DEVFORGE_MAX_PUSHES_PER_RUN`, défaut 3).
+pub const MAX_PUSHES_PER_RUN: usize = 3;
+pub const PUSH_LIMIT_KIND: &str = "push_limit";
+
+pub fn max_pushes_per_run() -> usize {
+    std::env::var("DEVFORGE_MAX_PUSHES_PER_RUN")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(MAX_PUSHES_PER_RUN)
+}
+
+/// Appel qui crée un commit / une branche / une PR sur GitHub.
+pub fn is_github_push(tool: &str, args: &Value) -> bool {
+    match tool {
+        "create_github_fix" | "sync_workdir_to_github" | "publish_to_github" => true,
+        "write_project_file" => is_remote_write(tool, args),
+        "mcp_call_tool" => is_remote_write(tool, args),
+        _ => false,
+    }
+}
+
+/// Refus quand le plafond est atteint : le run s'arrête et demande à l'utilisateur.
+pub fn push_limit_blocked(tool: &str, args: &Value, max: usize) -> Value {
+    let what = remote_write_summary(tool, args);
+    json!({
+        "ok": false,
+        "needs_user_action": true,
+        "kind": PUSH_LIMIT_KIND,
+        "code": "push_limit_reached",
+        "message_fr": format!(
+            "J'ai déjà poussé {max} fois sur GitHub pendant ce travail. Je m'arrête avant de continuer ({what}) : vérifie les derniers commits, puis dis-moi si je continue."
+        ),
+        "resume_hint": "« Continuer » relance l'agent avec un nouveau quota de pushes.",
+        "error": format!("Plafond de {max} pushes GitHub par run atteint."),
+    })
+}
+
+#[cfg(test)]
+mod push_cap_tests {
+    use super::*;
+
+    #[test]
+    fn push_tools_are_detected() {
+        assert!(is_github_push("sync_workdir_to_github", &json!({})));
+        assert!(is_github_push("create_github_fix", &json!({})));
+        assert!(is_github_push("write_project_file", &json!({"mode": "github"})));
+        assert!(!is_github_push("write_project_file", &json!({"mode": "local"})));
+        assert!(is_github_push("mcp_call_tool", &json!({"tool": "github_push_files"})));
+        assert!(!is_github_push("trigger_deploy", &json!({})));
+        assert!(!is_github_push("upsert_env_var", &json!({})));
+    }
+
+    #[test]
+    fn refusal_is_a_user_action_card() {
+        let v = push_limit_blocked("sync_workdir_to_github", &json!({"commit_message": "fix: lock"}), 3);
+        assert_eq!(v["needs_user_action"], true);
+        assert_eq!(v["kind"], PUSH_LIMIT_KIND);
+        assert!(v["message_fr"].as_str().unwrap().contains("3 fois"));
+    }
+}

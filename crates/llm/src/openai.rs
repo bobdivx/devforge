@@ -3,8 +3,8 @@ use devforge_shared::Result;
 use serde_json::json;
 
 use crate::{
-    err, tools_to_openai, AssistantTurn, ChatMessage, ChatRequest, LlmProvider, Role,
-    ToolCallRequest,
+    err, tools_to_openai, AssistantTurn, ChatMessage, ChatRequest, DeltaSink, LlmProvider,
+    OpenAiStreamAccumulator, Role, ToolCallRequest,
 };
 
 /// Message d'erreur reqwest avec ses causes (« Connection refused », DNS…) : le
@@ -329,13 +329,8 @@ impl OpenAiCompatibleProvider {
     }
 }
 
-#[async_trait]
-impl LlmProvider for OpenAiCompatibleProvider {
-    fn name(&self) -> &str {
-        "openai-compatible"
-    }
-
-    async fn chat(&self, req: ChatRequest) -> Result<AssistantTurn> {
+impl OpenAiCompatibleProvider {
+    fn request(&self, req: &ChatRequest, stream: bool) -> reqwest::RequestBuilder {
         let mut body = json!({
             "model": self.model,
             "messages": Self::map_messages(&req.messages),
@@ -345,112 +340,171 @@ impl LlmProvider for OpenAiCompatibleProvider {
             body["tools"] = tools_to_openai(&req.tools);
             body["tool_choice"] = json!("auto");
         }
-
+        if stream {
+            body["stream"] = json!(true);
+        }
         let mut builder = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
             .header("Content-Type", "application/json")
             .json(&body);
+        if stream {
+            builder = builder.header("Accept", "text/event-stream");
+        }
         if !self.api_key.is_empty() {
             builder = builder.bearer_auth(&self.api_key);
             if self.base_url.contains("generativelanguage.googleapis.com") {
                 builder = builder.header("x-goog-api-key", &self.api_key);
             }
         }
+        builder
+    }
 
-        // Modèles de raisonnement xAI : réponses plus longues à venir (agents en tâche de fond).
-        let timeout_secs = if self.base_url.contains("api.x.ai") { 240 } else { 90 };
-        let res = builder
-            .timeout(std::time::Duration::from_secs(timeout_secs))
-            .send()
-            .await
-            .map_err(|e| err(format!("LLM HTTP: {}", error_chain(&e))))?;
-        let status = res.status();
-        let retry_after = res
-            .headers()
+    /// Modèles de raisonnement xAI : réponses plus longues à venir (agents en tâche de fond).
+    fn timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(if self.base_url.contains("api.x.ai") { 240 } else { 90 })
+    }
+
+    fn http_error(status: reqwest::StatusCode, retry_after: Option<f64>, text: &str) -> devforge_shared::DevForgeError {
+        let ra = retry_after.map(|s| format!(" (retry-after={s}s)")).unwrap_or_default();
+        err(format!("LLM {status}{ra}: {}", text.chars().take(800).collect::<String>()))
+    }
+
+    fn retry_after(res: &reqwest::Response) -> Option<f64> {
+        res.headers()
             .get(reqwest::header::RETRY_AFTER)
             .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.trim().parse::<f64>().ok());
-        let text = res
-            .text()
-            .await
-            .map_err(|e| err(format!("LLM body: {e}")))?;
-        if !status.is_success() {
-            let ra = retry_after.map(|s| format!(" (retry-after={s}s)")).unwrap_or_default();
-            return Err(err(format!("LLM {status}{ra}: {}", text.chars().take(800).collect::<String>())));
-        }
-        let data: serde_json::Value =
-            serde_json::from_str(&text).map_err(|e| err(format!("LLM JSON: {e}")))?;
+            .and_then(|v| v.trim().parse::<f64>().ok())
+    }
 
-        let choice = data
-            .pointer("/choices/0")
-            .cloned()
-            .unwrap_or(json!({}));
+    /// Réponse complète (`choices[0].message`) → tour.
+    fn turn_from_completion(data: &serde_json::Value) -> AssistantTurn {
+        let choice = data.pointer("/choices/0").cloned().unwrap_or(json!({}));
         let message = choice.get("message").cloned().unwrap_or(json!({}));
-        let content = message
-            .get("content")
-            .and_then(|c| c.as_str())
-            .unwrap_or("")
-            .to_string();
-        let finish = choice
-            .get("finish_reason")
-            .and_then(|f| f.as_str())
-            .unwrap_or("stop")
-            .to_string();
-
+        let content = message.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string();
+        let finish = choice.get("finish_reason").and_then(|f| f.as_str()).unwrap_or("stop").to_string();
         let mut tool_calls = Vec::new();
         if let Some(arr) = message.get("tool_calls").and_then(|t| t.as_array()) {
             for (i, tc) in arr.iter().enumerate() {
-                let id = tc
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(&format!("call_{i}"))
-                    .to_string();
-                let name = tc
-                    .pointer("/function/name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let args_raw = tc
-                    .pointer("/function/arguments")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("{}");
+                let id = tc.get("id").and_then(|v| v.as_str()).map(str::to_string).unwrap_or_else(|| format!("call_{i}"));
+                let name = tc.pointer("/function/name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let args_raw = tc.pointer("/function/arguments").and_then(|v| v.as_str()).unwrap_or("{}");
                 let arguments = serde_json::from_str(args_raw).unwrap_or_else(|_| json!({}));
                 if !name.is_empty() {
-                    tool_calls.push(ToolCallRequest {
-                        id,
-                        name,
-                        arguments,
-                    });
+                    tool_calls.push(ToolCallRequest { id, name, arguments });
                 }
             }
         }
+        AssistantTurn { content, tool_calls, finish_reason: finish }
+    }
 
-        let turn = AssistantTurn {
-            content: content.clone(),
-            tool_calls: tool_calls.clone(),
-            finish_reason: finish.clone(),
-        };
-
-        // Fallback : certains LLM (ex: Ollama qwen2.5-coder) retournent les tool calls
-        // comme JSON brut dans content au lieu de tool_calls structurés.
-        if tool_calls.is_empty() && !content.trim().is_empty() {
-            if let Some(parsed_calls) = parse_tool_calls_from_text(&content) {
+    /// Fallback : certains LLM (ex: Ollama qwen2.5-coder) retournent les tool calls
+    /// comme JSON brut dans content au lieu de tool_calls structurés.
+    fn with_text_tool_calls(turn: AssistantTurn) -> AssistantTurn {
+        if turn.tool_calls.is_empty() && !turn.content.trim().is_empty() {
+            if let Some(parsed_calls) = parse_tool_calls_from_text(&turn.content) {
                 if !parsed_calls.is_empty() {
                     tracing::info!(
                         count = parsed_calls.len(),
                         "tool calls parsés depuis le texte de réponse (LLM qui ne supporte pas tool_calls structurés)"
                     );
-                    return Ok(AssistantTurn {
+                    return AssistantTurn {
                         content: String::new(),
                         tool_calls: parsed_calls,
-                        finish_reason: finish,
-                    });
+                        finish_reason: turn.finish_reason,
+                    };
                 }
             }
         }
+        turn
+    }
+}
 
-        Ok(turn)
+#[async_trait]
+impl LlmProvider for OpenAiCompatibleProvider {
+    fn name(&self) -> &str {
+        "openai-compatible"
+    }
+
+    async fn chat(&self, req: ChatRequest) -> Result<AssistantTurn> {
+        let res = self
+            .request(&req, false)
+            .timeout(self.timeout())
+            .send()
+            .await
+            .map_err(|e| err(format!("LLM HTTP: {}", error_chain(&e))))?;
+        let status = res.status();
+        let retry_after = Self::retry_after(&res);
+        let text = res
+            .text()
+            .await
+            .map_err(|e| err(format!("LLM body: {e}")))?;
+        if !status.is_success() {
+            return Err(Self::http_error(status, retry_after, &text));
+        }
+        let data: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| err(format!("LLM JSON: {e}")))?;
+        Ok(Self::with_text_tool_calls(Self::turn_from_completion(&data)))
+    }
+
+    /// `stream: true` (SSE). Le délai s'applique à chaque paquet (pas au total) : une longue
+    /// réponse qui arrive régulièrement n'est jamais coupée.
+    async fn chat_stream(&self, req: ChatRequest, on_delta: &DeltaSink<'_>) -> Result<AssistantTurn> {
+        let timeout = self.timeout();
+        let mut res = tokio::time::timeout(timeout, self.request(&req, true).send())
+            .await
+            .map_err(|_| err("LLM HTTP: operation timed out"))?
+            .map_err(|e| err(format!("LLM HTTP: {}", error_chain(&e))))?;
+        let status = res.status();
+        if !status.is_success() {
+            let retry_after = Self::retry_after(&res);
+            let text = res.text().await.unwrap_or_default();
+            // Fournisseur qui refuse `stream` : réponse complète, un seul morceau.
+            if matches!(status.as_u16(), 400 | 422) && text.to_lowercase().contains("stream") {
+                tracing::info!(model = %self.model, "streaming refusé par le fournisseur — réponse complète");
+                let turn = self.chat(req).await?;
+                if !turn.content.is_empty() {
+                    on_delta(&turn.content);
+                }
+                return Ok(turn);
+            }
+            return Err(Self::http_error(status, retry_after, &text));
+        }
+        let ctype = res
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_lowercase();
+        if ctype.contains("application/json") {
+            // `stream` ignoré : réponse complète.
+            let text = res.text().await.map_err(|e| err(format!("LLM body: {e}")))?;
+            let data: serde_json::Value =
+                serde_json::from_str(&text).map_err(|e| err(format!("LLM JSON: {e}")))?;
+            let turn = Self::with_text_tool_calls(Self::turn_from_completion(&data));
+            if !turn.content.is_empty() {
+                on_delta(&turn.content);
+            }
+            return Ok(turn);
+        }
+        let mut acc = OpenAiStreamAccumulator::new();
+        loop {
+            let chunk = tokio::time::timeout(timeout, res.chunk())
+                .await
+                .map_err(|_| err("LLM HTTP: stream timed out"))?
+                .map_err(|e| err(format!("LLM HTTP: {}", error_chain(&e))))?;
+            let Some(bytes) = chunk else { break };
+            for d in acc.push_bytes(&bytes) {
+                on_delta(&d);
+            }
+            if acc.is_done() {
+                break;
+            }
+        }
+        if let Some(e) = acc.error() {
+            return Err(err(format!("LLM stream: {e}")));
+        }
+        Ok(Self::with_text_tool_calls(acc.finish()))
     }
 }
 
@@ -876,6 +930,74 @@ impl OpenAiCompatibleProvider {
 
         // Fallback to first candidate
         candidates.into_iter().next()
+    }
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Mini serveur HTTP : renvoie `body` en plusieurs paquets avec le `content_type` donné.
+    async fn serve(status: &'static str, content_type: &'static str, body: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 65536];
+                let _ = sock.read(&mut buf).await;
+                let head = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = sock.write_all(head.as_bytes()).await;
+                for part in body.as_bytes().chunks(37) {
+                    let _ = sock.write_all(part).await;
+                    let _ = sock.flush().await;
+                }
+            }
+        });
+        format!("http://{addr}/v1")
+    }
+
+    fn req() -> ChatRequest {
+        ChatRequest { messages: vec![ChatMessage::user("salut")], tools: vec![], temperature: 0.0 }
+    }
+
+    #[tokio::test]
+    async fn streams_deltas_over_http() {
+        let base = serve("200 OK", "text/event-stream", include_str!("../tests/fixtures/openai_content.sse")).await;
+        let p = OpenAiCompatibleProvider::new(base, "k", "m");
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let s2 = seen.clone();
+        let turn = p.chat_stream(req(), &move |d: &str| s2.lock().unwrap().push(d.to_string())).await.unwrap();
+        assert_eq!(turn.content, "Bonjour, c'est réglé — preview OK.");
+        assert!(seen.lock().unwrap().len() >= 3, "plusieurs morceaux attendus");
+    }
+
+    #[tokio::test]
+    async fn json_answer_to_stream_request_is_one_delta() {
+        let base = serve(
+            "200 OK",
+            "application/json",
+            r#"{"choices":[{"message":{"content":"complet"},"finish_reason":"stop"}]}"#,
+        )
+        .await;
+        let p = OpenAiCompatibleProvider::new(base, "k", "m");
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let s2 = seen.clone();
+        let turn = p.chat_stream(req(), &move |d: &str| s2.lock().unwrap().push(d.to_string())).await.unwrap();
+        assert_eq!(turn.content, "complet");
+        assert_eq!(*seen.lock().unwrap(), vec!["complet".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn http_error_keeps_status_for_retry_classification() {
+        let base = serve("429 Too Many Requests", "application/json", r#"{"error":"slow"}"#).await;
+        let p = OpenAiCompatibleProvider::new(base, "k", "m");
+        let e = p.chat_stream(req(), &|_d: &str| {}).await.unwrap_err();
+        assert!(matches!(crate::classify(&e), crate::LlmErrorKind::RateLimited { .. }), "{e}");
     }
 }
 

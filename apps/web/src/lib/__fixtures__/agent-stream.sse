@@ -1,0 +1,66 @@
+event: message
+data: {"type":"run_started","run_uuid":"run-1","message_uuid":"msg-1"}
+
+event: message
+data: {"type":"ack","text":"C'est noté, je m'en occupe."}
+
+event: message
+data: {"type":"thinking","round":0,"label":"Connexion aux modèles…"}
+
+event: message
+data: {"type":"thinking","round":1,"label":"Analyse de la demande…"}
+
+event: message
+data: {"type":"delta","text":"Je lis ","round":1}
+
+event: message
+data: {"type":"delta","text":"le header.","round":1}
+
+event: message
+data: {"type":"delta_reset","round":1}
+
+event: message
+data: {"type":"thinking","round":1,"label":"Je lis le header."}
+
+event: message
+data: {"type":"tool_start","id":"c1","name":"read_project_file","arguments":{"path":"src/Header.astro"},"label":"Lecture de src/Header.astro"}
+
+event: message
+data: {"type":"tool_done","id":"c1","name":"read_project_file","ok":true,"arguments":{"path":"src/Header.astro"},"result":{"ok":true,"content":"<nav/>"},"elapsed_ms":40,"summary":"✓ Lecture de src/Header.astro · 40 ms"}
+
+event: message
+data: {"type":"tool_start","id":"c2","name":"write_project_file","arguments":{"path":"src/Header.astro","mode":"local"},"label":"Écriture de src/Header.astro"}
+
+event: message
+data: {"type":"milestone","label":"Modification des fichiers","status":"running"}
+
+event: message
+data: {"type":"tool_done","id":"c2","name":"write_project_file","ok":true,"arguments":{"path":"src/Header.astro","mode":"local"},"result":{"ok":true,"mode":"local"},"elapsed_ms":12,"summary":"✓ Écriture de src/Header.astro · 12 ms"}
+
+event: message
+data: {"type":"tool_start","id":"c3","name":"run_workdir_command","arguments":{"command":"npm run build"},"label":"npm run build"}
+
+event: message
+data: {"type":"milestone","label":"Modification des fichiers","status":"done"}
+
+event: message
+data: {"type":"milestone","label":"Build","status":"running"}
+
+event: message
+data: {"type":"tool_done","id":"c3","name":"run_workdir_command","ok":true,"arguments":{"command":"npm run build"},"result":{"ok":true,"exit_code":0},"elapsed_ms":12300,"summary":"✓ build OK · 12 s"}
+
+event: message
+data: {"type":"milestone","label":"Build","status":"done"}
+
+event: message
+data: {"type":"delta","text":"Contraste ","round":3}
+
+event: message
+data: {"type":"delta","text":"corrigé, build OK.","round":3}
+
+event: message
+data: {"type":"reply","content":"Contraste corrigé, build OK.","provider":"xai","tool_calls":[{"id":"c1","name":"read_project_file","arguments":{"path":"src/Header.astro"},"result":{"ok":true,"content":"<nav/>"}},{"id":"c2","name":"write_project_file","arguments":{"path":"src/Header.astro","mode":"local"},"result":{"ok":true,"mode":"local"}},{"id":"c3","name":"run_workdir_command","arguments":{"command":"npm run build"},"result":{"ok":true,"exit_code":0}}]}
+
+event: done
+data: {}
+
