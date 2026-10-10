@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
+import { deployStatusShort, isDeployInProgress, shortSha } from '../../lib/deployStatus';
 import { X, ListFilter, AlignLeft, Square } from 'lucide-preact';
 import { api, type Deployment } from '../../lib/api';
 import { Badge, Button, Portal, Spinner } from '../ui';
@@ -45,9 +46,6 @@ function deployTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
 }
 
 
-function isDeployInProgress(status: string): boolean {
-  return ['queued', 'running', 'building', 'pending', 'deploying'].includes(status);
-}
 
 function pickCurrentDeployment(deployments: Deployment[]): Deployment | null {
   return deployments.find((d) => isDeployInProgress(d.status)) ?? deployments[0] ?? null;
@@ -269,10 +267,10 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
                   )}
                 >
                   <div class="flex items-center gap-2">
-                    <Badge tone={deployTone(d.status)}>{d.status}</Badge>
+                    <Badge tone={deployTone(d.status)}>{deployStatusShort(d.status)}</Badge>
                   </div>
                   <div class="mt-1 font-mono text-xs">
-                    {d.git_sha ? d.git_sha.slice(0, 7) : '—'}
+                    {shortSha(d.git_sha) ?? '—'}
                   </div>
                   <div class="mt-0.5 text-[10px] text-[var(--color-ink-faint)]">
                     {formatWhen(d.created_at)}
@@ -297,10 +295,10 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
                 <div class="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3">
                   <div class="flex flex-wrap items-center justify-between gap-2">
                     <div class="flex flex-wrap items-center gap-2">
-                      <Badge tone={deployTone(selected.status)}>{selected.status}</Badge>
-                      {selected.git_sha && (
+                      <Badge tone={deployTone(selected.status)}>{deployStatusShort(selected.status)}</Badge>
+                      {shortSha(selected.git_sha) && (
                         <span class="font-mono text-xs text-[var(--color-ink-muted)]">
-                          {selected.git_sha.slice(0, 7)}
+                          {shortSha(selected.git_sha)}
                         </span>
                       )}
                       <span class="text-xs text-[var(--color-ink-faint)]">

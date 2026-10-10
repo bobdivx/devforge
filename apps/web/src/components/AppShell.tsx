@@ -13,7 +13,16 @@ import { LaunchedAgentsSheet } from './LaunchedAgentsSheet';
 import { useLaunchedAgents } from './LaunchedAgentsMenu';
 import { pollLaunchedAgents } from '../lib/launched-agents';
 import { UpdateRecoveryOverlay } from './UpdateRecoveryOverlay';
-import { ChevronDown } from 'lucide-preact';
+import { Bot, ChevronDown, LayoutGrid, Server, Settings, type LucideIcon } from 'lucide-preact';
+
+/** Icône de la barre du bas (mobile / tablette). */
+const BOTTOM_ICONS: Record<string, LucideIcon> = {
+  home: LayoutGrid,
+  settings: Settings,
+  reglages: Settings,
+  node: Server,
+  agents: Bot,
+};
 
 type Props = {
   active?: string;
@@ -515,7 +524,7 @@ function ShellInner({
           style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
           aria-label="Navigation principale"
         >
-          <div class="mx-auto flex max-w-lg justify-around gap-0.5 px-1 py-1.5">
+          <div class="mx-auto flex max-w-lg justify-around gap-1 px-2 py-1.5 md:max-w-2xl md:gap-3 md:py-2">
             {(isWorker ? WORKER_NAV : mobileBottomNav(userRole)).map((item) => {
               if (item.key === 'agents') {
                 const count = launchedAgents.length;
@@ -526,7 +535,7 @@ function ShellInner({
                     key={item.key}
                     type="button"
                     class={cn(
-                      'flex min-h-[44px] min-w-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] leading-tight transition-[background-color,color,transform] duration-200 md:hidden',
+                      'flex min-h-[52px] min-w-[4rem] flex-1 flex-col items-center justify-center gap-1 rounded-xl px-2 py-1.5 text-[11px] leading-tight transition-[background-color,color,transform] duration-200 md:min-h-[56px] md:flex-row md:gap-2 md:text-sm md:hidden',
                       agentsSheetOpen
                         ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
                         : 'text-[var(--color-ink-muted)] active:scale-[0.96] active:bg-white/5',
@@ -536,14 +545,13 @@ function ShellInner({
                     aria-haspopup="dialog"
                     aria-expanded={agentsSheetOpen}
                   >
-                    <span
-                      class={cn(
-                        'text-sm font-semibold leading-none',
-                        anyWorking && 'text-[var(--color-warn)]',
+                    <span class="relative inline-flex" aria-hidden>
+                      <Bot size={22} strokeWidth={1.8} class={cn(anyWorking && 'text-[var(--color-warn)]')} />
+                      {count > 0 && (
+                        <span class="absolute -right-2 -top-1.5 min-w-[1.1rem] rounded-full bg-[var(--color-accent)] px-1 text-center text-[10px] font-semibold leading-[1.1rem] text-white">
+                          {count}
+                        </span>
                       )}
-                      aria-hidden
-                    >
-                      {count > 0 ? count : '•'}
                     </span>
                     <span class="max-w-full truncate">{label}</span>
                   </button>
@@ -555,16 +563,17 @@ function ShellInner({
                   href={item.href}
                   {...(isWorker ? { 'data-df-node-tab': true } : {})}
                   class={cn(
-                    'flex min-h-[44px] min-w-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-1.5 text-[10px] leading-tight transition-[background-color,color,transform] duration-200 active:scale-[0.96]',
+                    'flex min-h-[52px] min-w-[4rem] flex-1 flex-col items-center justify-center gap-1 rounded-xl px-2 py-1.5 text-[11px] leading-tight transition-[background-color,color,transform] duration-200 md:min-h-[56px] md:flex-row md:gap-2 md:text-sm active:scale-[0.96]',
                     bottomItemActive(active, item.key)
                       ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
                       : 'text-[var(--color-ink-muted)] active:bg-white/5',
                   )}
                   aria-current={bottomItemActive(active, item.key) ? 'page' : undefined}
                 >
-                  <span class="text-base leading-none" aria-hidden>
-                    •
-                  </span>
+                  {(() => {
+                    const Icon = BOTTOM_ICONS[item.key] ?? LayoutGrid;
+                    return <Icon size={22} strokeWidth={1.8} aria-hidden />;
+                  })()}
                   <span class="max-w-full truncate">{shortLabel(item.label)}</span>
                 </a>
               );
