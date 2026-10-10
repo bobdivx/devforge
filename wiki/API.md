@@ -18,6 +18,7 @@ Le front utilise `PUBLIC_SERVER_URL` en dev. En image Docker, UI et API sont le 
 
 - **Projects** `GET/POST /projects` · `POST /projects/scaffold` · CRUD par uuid
 - **Deployments** `POST /projects/{uuid}/deployments` · `GET /deployments/{uuid}/logs`
+- **Branches** `GET /projects/{uuid}/branches` · `PUT /projects/{uuid}/branches/production` `{branch, redeploy}` · `PUT|DELETE /projects/{uuid}/branches/dev` · `POST /projects/{uuid}/branches/dev/deploy`
 - **Agent** `POST /agent/chat` · `GET /agent/tools` · `POST /agent/tools/{tool}`
 - **Env** `/projects/{uuid}/env`
 - **Git** `/projects/{uuid}/git` · diff · discard
