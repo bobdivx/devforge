@@ -15,7 +15,7 @@ import { NewBuilderWizard } from './NewBuilderWizard';
 
 function statusLineClass(tone: string) {
   return cn(
-    'mt-1 text-[11px] font-medium leading-[14px]',
+    'mt-1 truncate text-[11px] font-medium leading-[14px]',
     tone === 'ok' && 'text-[var(--color-ok)]',
     tone === 'warn' && 'text-[var(--color-warn)]',
     tone === 'danger' && 'text-[var(--color-danger)]',
@@ -43,7 +43,7 @@ function AppCard({
   return (
     <a
       href={`/app/projects/view?uuid=${encodeURIComponent(project.uuid)}`}
-      class="group flex aspect-square h-full w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4"
+      class="group flex aspect-square h-full w-full min-w-0 cursor-pointer flex-col overflow-hidden items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4"
       animate={motion(settleIn(Math.min(index * 0.05, 0.32)), interactiveLift())}
     >
         <div class="relative">
@@ -59,21 +59,20 @@ function AppCard({
             aria-hidden
           />
 
-          {showSyncWarn && (
-            <span
-              class="absolute -bottom-1 -left-1 rounded-full bg-amber-500 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-zinc-950"
-              title={sync.title || sync.label}
-            >
-              Sync
-            </span>
-          )}
         </div>
 
         <div class="w-full text-center">
           <div class="truncate text-sm font-medium text-white">{project.name}</div>
           <div class={statusLineClass(badgeTone)}>{status.label}</div>
-          <div class="mt-0.5 truncate text-[10px] leading-[14px] text-[var(--color-ink-faint)]">
-            {showNode ? node : '\u00a0'}
+          {/* Sync GitHub en retard / en erreur : sur la 3e ligne, jamais en badge qui déborde. */}
+          <div
+            class={cn(
+              'mt-0.5 truncate text-[10px] leading-[14px]',
+              showSyncWarn ? 'text-amber-400' : 'text-[var(--color-ink-faint)]',
+            )}
+            title={showSyncWarn ? sync.title || sync.label : undefined}
+          >
+            {showSyncWarn ? `Sync · ${sync.label}` : showNode ? node : '\u00a0'}
           </div>
         </div>
     </a>
@@ -106,7 +105,7 @@ function GroupCard({
   return (
     <a
       href={`/app/groups/view?uuid=${encodeURIComponent(uuid)}`}
-      class="group flex aspect-square h-full w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4"
+      class="group flex aspect-square h-full w-full min-w-0 cursor-pointer flex-col overflow-hidden items-center justify-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4"
       animate={motion(settleIn(Math.min(index * 0.05, 0.32)), interactiveLift())}
     >
       <div class="relative">

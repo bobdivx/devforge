@@ -13,9 +13,9 @@ import { enterUp, interactiveLift, motion, settleIn } from '../../lib/motion';
  */
 
 const TILE_CLASS =
-  'group flex h-full min-h-[8.75rem] w-full cursor-pointer flex-col items-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 text-center ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4';
+  'group flex h-full min-h-[8.75rem] w-full min-w-0 cursor-pointer overflow-hidden flex-col items-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 text-center ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4';
 
-const TILE_SQUARE = 'justify-center sm:aspect-square sm:min-h-0';
+const TILE_SQUARE = 'justify-center sm:aspect-square sm:min-h-[10.5rem]';
 const TILE_AUTO = 'justify-start';
 
 const ICON_WRAP =
@@ -36,7 +36,7 @@ export function HubGrid({ class: className, cols = 4, children }: HubGridProps) 
   return (
     <div
       class={cn(
-        'grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-4',
+        'grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-4 [&>*]:min-w-0',
         cols === 3 && 'md:grid-cols-3',
         cols === 4 && 'md:grid-cols-4',
         cols === 5 && 'md:grid-cols-4 lg:grid-cols-5',
@@ -98,14 +98,14 @@ export function HubTile({
         {badge}
       </div>
       <div class="w-full min-w-0 shrink-0">
-        <div class="truncate text-[13px] font-medium text-white sm:text-sm">{title}</div>
+        <div class="truncate text-[13px] font-medium text-white sm:text-sm" title={title}>{title}</div>
         {subtitle ??
           (description ? (
-            <div class="mt-1 line-clamp-2 text-[11px] leading-snug text-[var(--color-ink-muted)]">
+            <div class="mt-1 line-clamp-2 break-words text-[11px] leading-snug text-[var(--color-ink-muted)] [overflow-wrap:anywhere]">
               {description}
             </div>
           ) : null)}
-        {footer ? <div class="mt-2 flex justify-center">{footer}</div> : null}
+        {footer ? <div class="mt-2 flex min-w-0 justify-center">{footer}</div> : null}
       </div>
     </>
   );

@@ -35,6 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Composants JSX importés (évite ReferenceError au rendu)
+        run: node scripts/check-jsx-imports.mjs
       - name: Build web (même image que le Dockerfile)
         run: |
           docker run --rm \

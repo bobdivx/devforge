@@ -376,7 +376,6 @@ export function ProjectHome({
   const coordinatorUuid = agents.find((a) => a.role === 'coordinator')?.uuid ?? null;
 
   const chips: ChatChip[] = [
-    { key: 'feature', label: '✨ Nouvelle fonctionnalité', onClick: onNewFeature },
     {
       key: 'health',
       label: '🩺 Est-ce que tout va bien ?',
