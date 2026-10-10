@@ -57,7 +57,7 @@ export function mobileAvatarNav(role?: string | null): NavItem[] {
 }
 
 const PROJECT_PRIMARY_KEYS = ['overview', 'workspace', 'agents', 'deployments'] as const;
-const PROJECT_MORE_KEYS = ['git', 'actions', 'database', 'env', 'backups', 'settings', 'home'] as const;
+const PROJECT_MORE_KEYS = ['domains', 'git', 'actions', 'database', 'env', 'backups', 'settings', 'home'] as const;
 
 function projectNavItems(uuid: string, opts?: { workspace?: boolean }): NavItem[] {
   const base = `/app/projects/view?uuid=${encodeURIComponent(uuid)}`;

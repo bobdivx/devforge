@@ -1691,16 +1691,28 @@ function DeploymentsPanel({
             <h2 class="text-base font-medium tracking-tight">Déploiements</h2>
             <p class="mt-0.5 text-sm text-[var(--color-ink-muted)]">
               {items.length === 0
-                ? 'Aucun déploiement pour l’instant'
-                : showAll || hiddenCount === 0
-                  ? `${items.length} déploiement${items.length > 1 ? 's' : ''} · en cours d’abord`
-                  : `${DEPLOYMENTS_VISIBLE_DEFAULT} visibles sur ${items.length} · en cours d’abord`}
+                ? 'Aucun déploiement'
+                : (() => {
+                    const current = pickCurrentDeployment(items);
+                    if (current && isDeployInProgress(current.status)) {
+                      return `En cours · ${current.git_sha?.slice(0, 7) || ''} · ${current.status}`;
+                    }
+                    if (current) {
+                      return `Dernier · ${current.git_sha?.slice(0, 7) || ''} · ${current.status}`;
+                    }
+                    return `${items.length} déploiement${items.length > 1 ? 's' : ''}`;
+                  })()}
             </p>
           </div>
-          <Button size="sm" variant="secondary" class="max-lg:h-11" disabled={busy} onClick={deploy}>
-            {busy ? <Spinner /> : null}
-            Déployer
-          </Button>
+          <div class="flex gap-2">
+            <Button size="sm" variant="ghost" class="max-lg:h-11" onClick={() => reload(true)}>
+              Rafraîchir
+            </Button>
+            <Button size="sm" variant="secondary" class="max-lg:h-11" disabled={busy} onClick={deploy}>
+              {busy ? <Spinner /> : null}
+              Déployer
+            </Button>
+          </div>
         </div>
 
         {items.length === 0 ? (
