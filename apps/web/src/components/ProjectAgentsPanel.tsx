@@ -1,8 +1,10 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useId, useRef, useState } from 'preact/hooks';
-import { MessageSquare, Plus, Share2 } from 'lucide-preact';
+import { memo } from 'preact/compat';
+import { useCallback, useEffect, useId, useRef, useState } from 'preact/hooks';
+import { AlertTriangle, MessageSquare, Plus, RotateCcw, Share2 } from 'lucide-preact';
 import { api, type ProjectAgent } from '../lib/api';
 import {
+  normalizeToolCalls,
   planFromToolCalls,
   streamAgentChat,
   wroteLocalFiles,
@@ -10,8 +12,21 @@ import {
   type AgentReflection,
   type AgentToolCall,
 } from '../lib/agent-stream';
+import {
+  isLocalId,
+  localMessageId,
+  messagesSignature,
+  reconcileMessageIds,
+  serverMessageId,
+} from '../lib/chat-messages';
 import { cn } from '../lib/cn';
-import { Markdown } from '../lib/markdown';
+import { cancelQueued, EMPTY_QUEUE, enqueue, flushOnIdle, type ComposerQueue } from '../lib/composer-queue';
+import { Markdown, MD_MESSAGE_CLASS } from '../lib/markdown';
+import { prefersReducedMotion } from '../lib/motion';
+import { useKeyboardOverlap } from '../lib/useVisualViewport';
+import { Composer } from './chat/Composer';
+import { JumpToLatest } from './chat/JumpToLatest';
+import { MessageEnter } from './chat/MessageEnter';
 import {
   AgentActionList,
   AgentPlanActions,
@@ -21,7 +36,7 @@ import {
   type LiveAction,
 } from './agents/AgentActionCards';
 import { markLaunchedStatus } from '../lib/launched-agents';
-import { Alert, Badge, Button, Card, FadeIn, Input, Spinner, useToast } from './ui';
+import { Alert, Badge, Button, Card, FadeIn, Spinner, useToast } from './ui';
 
 const ROLE_META: Record<string, { label: string; blurb: string; starters: string[] }> = {
   coordinator: {
@@ -86,7 +101,11 @@ const THREAD_STARTERS = [
 ];
 
 type ChatMessage = {
+  /** uuid serveur, ou `local-…` pour un message optimiste (clé React stable). */
+  id: string;
   role: string;
+  /** Erreur d'agent (réseau, 524…) : affichée en carte, jamais persistée. */
+  error?: boolean;
   content: string;
   provider?: string;
   toolCalls?: AgentToolCall[];
@@ -223,6 +242,129 @@ type Props = {
   embedded?: boolean;
 };
 
+type MessageItemProps = {
+  m: ChatMessage;
+  persona?: ChatPersona;
+  busy: boolean;
+  animate: boolean;
+  onSend(text: string): void;
+  onRetry(errorId: string): void;
+};
+
+const WAKE_RE = /COORD-WAKE|Événement projet|Déploiement :/;
+
+/** Un message du fil. Mémoïsé : le polling ne re-rend (ni ne re-parse le Markdown) que ce qui change. */
+function MessageItemView({ m, persona, busy, animate, onSend, onRetry }: MessageItemProps) {
+  const isWake = m.role === 'user' && WAKE_RE.test(m.content);
+  const wakeSummary = isWake
+    ? m.content.split('\n').slice(0, 3).join(' ').slice(0, 180) + (m.content.length > 180 ? '…' : '')
+    : '';
+  const role = m.role === 'user' ? 'user' : 'assistant';
+  return (
+    <MessageEnter role={role} animate={animate} class="space-y-2">
+      {m.role === 'user' ? (
+        isWake ? (
+          <div class="mx-auto max-w-[92%] rounded-lg border border-[var(--color-warn)]/40 bg-[var(--color-warn)]/10 px-3 py-2 text-xs text-[var(--color-ink-muted)]">
+            <span class="font-medium text-[var(--color-warn)]">Événement</span> · {wakeSummary}
+          </div>
+        ) : (
+          <div class="ml-auto w-fit max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-[var(--color-accent)] px-3 py-2 text-sm text-white [overflow-wrap:anywhere]">
+            {m.content}
+          </div>
+        )
+      ) : m.error ? (
+        <div
+          role="alert"
+          class="max-w-[92%] rounded-xl border border-[var(--color-line)] border-l-4 border-l-[var(--color-danger)] bg-[var(--color-danger)]/[0.06] px-3 py-2.5"
+        >
+          <div class="flex items-start gap-2.5">
+            <AlertTriangle size={16} strokeWidth={2} class="mt-0.5 shrink-0 text-[var(--color-danger)]" aria-hidden />
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium text-[var(--color-ink)]">L’agent n’a pas pu répondre</p>
+              <p class="mt-0.5 break-words text-sm text-[var(--color-ink-muted)] [overflow-wrap:anywhere]">{m.content}</p>
+              <Button
+                size="sm"
+                variant="outline"
+                class="mt-2"
+                disabled={busy}
+                onClick={() => onRetry(m.id)}
+              >
+                <RotateCcw size={13} strokeWidth={2} aria-hidden />
+                Réessayer
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div class={cn(persona && 'flex items-start gap-2.5')}>
+          {persona && <div class="pt-0.5">{persona.smallAvatar}</div>}
+          <div class={cn('space-y-2', persona && 'min-w-0 flex-1')}>
+            {m.reflections && m.reflections.length > 0 && <AgentReflectionList items={m.reflections} />}
+            {m.toolCalls && m.toolCalls.length > 0 && <AgentActionList actions={toLiveActions(m.toolCalls)} />}
+            {m.content.trim() ? (
+              <div class="max-w-full">
+                <Markdown text={m.content} class={MD_MESSAGE_CLASS} />
+                {m.provider && !persona && (
+                  <div class="mt-1 text-[11px] text-[var(--color-ink-faint)]">{m.provider}</div>
+                )}
+              </div>
+            ) : null}
+            {m.plan && m.plan.steps.length > 0 && (
+              <AgentPlanActions
+                plan={m.plan}
+                canOpenPr={m.canOpenPr}
+                busy={busy}
+                onApprovePlan={
+                  m.canOpenPr ? undefined : () => onSend('Go — exécute ce plan en local, puis lance la preview.')
+                }
+                onOpenPr={() => onSend('Valide les changements locaux et ouvre une pull request.')}
+              />
+            )}
+            {m.needsUserAction && (
+              <Card class="max-w-[92%] border-l-4 border-l-[var(--color-warn)]">
+                <div class="flex items-start gap-3">
+                  <span class="text-2xl" aria-hidden>
+                    !
+                  </span>
+                  <div class="flex-1">
+                    <p class="mb-2 text-sm font-medium">Action requise</p>
+                    <p class="mb-3 text-sm text-[var(--color-ink-muted)]">{m.needsUserAction.message_fr}</p>
+                    {m.needsUserAction.settings_href && (
+                      <Button size="sm" variant="outline" href={m.needsUserAction.settings_href} class="mb-2">
+                        Ouvrir les paramètres
+                      </Button>
+                    )}
+                    {m.needsUserAction.resume_hint && (
+                      <p class="mt-2 text-xs text-[var(--color-ink-faint)]">{m.needsUserAction.resume_hint}</p>
+                    )}
+                    <Button size="sm" variant="secondary" disabled={busy} onClick={() => onSend('Continuer')} class="mt-3">
+                      Continuer
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            )}
+          </div>
+        </div>
+      )}
+    </MessageEnter>
+  );
+}
+
+const MessageItem = memo(
+  MessageItemView,
+  (a, b) =>
+    a.m.id === b.m.id &&
+    a.m.content.length === b.m.content.length &&
+    (a.m.toolCalls?.length ?? 0) === (b.m.toolCalls?.length ?? 0) &&
+    !!a.m.error === !!b.m.error &&
+    a.busy === b.busy &&
+    a.animate === b.animate &&
+    a.persona === b.persona &&
+    a.onSend === b.onSend &&
+    a.onRetry === b.onRetry,
+);
+
 /** Chat agents projet — mode équipe ou fils de conversation. */
 export function ProjectAgentsPanel({
   projectUuid,
@@ -252,10 +394,25 @@ export function ProjectAgentsPanel({
   const [llmError, setLlmError] = useState<string | null>(null);
   const [pollEnabled, setPollEnabled] = useState(builderMode || false);
   const [sharing, setSharing] = useState(false);
-  const endRef = useRef<HTMLDivElement>(null);
   /** Zone des messages : on la fait défiler elle seule (pas la page, sinon l'en-tête saute sur mobile). */
   const scrollRef = useRef<HTMLDivElement>(null);
   const bootstrapped = useRef(false);
+  /** Garde synchrone (le state `busy` capturé dans une closure peut être périmé). */
+  const busyRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  /** Un seul message en file pendant un run (envoyé à la fin). */
+  const [queue, setQueueState] = useState<ComposerQueue>(EMPTY_QUEUE);
+  const queueRef = useRef<ComposerQueue>(EMPTY_QUEUE);
+  const setQueue = (q: ComposerQueue) => {
+    queueRef.current = q;
+    setQueueState(q);
+  };
+  /** Ids de l'historique chargé au montage du fil : ceux-là ne sont pas animés. */
+  const history = useRef<{ agent: string | null; ids: Set<string> }>({ agent: null, ids: new Set() });
+  const [hasUnseen, setHasUnseen] = useState(false);
+  const [announce, setAnnounce] = useState('');
+  /** Grille du chat : sert à mesurer la part cachée par le clavier (iOS). */
+  const gridRef = useRef<HTMLDivElement>(null);
 
   const list = threadsMode ? threads : agents;
   const current = list.find((a) => a.uuid === selected) ?? agents.find((a) => a.uuid === selected) ?? null;
@@ -421,27 +578,35 @@ export function ProjectAgentsPanel({
   async function loadMessages(agentUuid: string) {
     try {
       const r = await api.agentMessages(projectUuid, agentUuid);
-      setMessages(
-        (r.data ?? []).map((m) => {
-          let tools: AgentToolCall[] = [];
-          if (m.tool_calls_json) {
-            try {
-              tools = JSON.parse(m.tool_calls_json) as AgentToolCall[];
-            } catch {
-              tools = [];
-            }
+      const next: ChatMessage[] = (r.data ?? []).map((m, i) => {
+        let tools: AgentToolCall[] = [];
+        if (m.tool_calls_json) {
+          try {
+            tools = normalizeToolCalls(JSON.parse(m.tool_calls_json));
+          } catch {
+            tools = [];
           }
-          const plan = planFromToolCalls(tools);
-          return {
-            role: m.role,
-            content: m.content,
-            provider: m.provider || undefined,
-            toolCalls: tools,
-            plan,
-            canOpenPr: wroteLocalFiles(tools),
-          };
-        }),
-      );
+        }
+        const plan = planFromToolCalls(tools);
+        return {
+          id: serverMessageId(m.uuid, i),
+          role: m.role,
+          content: m.content,
+          provider: m.provider || undefined,
+          toolCalls: tools,
+          plan,
+          canOpenPr: wroteLocalFiles(tools),
+        };
+      });
+      // Premier chargement de ce fil : c'est l'historique, pas d'animation en cascade.
+      if (history.current.agent !== agentUuid) {
+        history.current = { agent: agentUuid, ids: new Set(next.map((m) => m.id)) };
+      }
+      setMessages((prev) => {
+        const reconciled = reconcileMessageIds(prev, next);
+        // Polling (1 s) : même contenu ⇒ même tableau ⇒ aucun re-rendu.
+        return messagesSignature(reconciled) === messagesSignature(prev) && prev.length > 0 ? prev : reconciled;
+      });
     } catch {
       setMessages([]);
     }
@@ -555,6 +720,7 @@ export function ProjectAgentsPanel({
   /** Suit le bas du fil seulement si l'utilisateur y est déjà (il peut remonter lire sans être ramené). */
   const stickToBottom = useRef(true);
   const lastScrollSig = useRef('');
+  const lastScrollLen = useRef(0);
   useEffect(() => {
     const box = scrollRef.current;
     if (!box) return;
@@ -573,22 +739,73 @@ export function ProjectAgentsPanel({
     if (sig === lastScrollSig.current) return;
     const first = lastScrollSig.current === '';
     lastScrollSig.current = sig;
-    // Message que l'on vient d'envoyer : toujours le montrer.
-    if (!first && !stickToBottom.current && last?.role !== 'user') return;
+    const grew = messages.length > lastScrollLen.current;
+    lastScrollLen.current = messages.length;
+    // Message que l'on vient d'envoyer : toujours le montrer (une fois, pas pendant tout le run).
+    const justSent = grew && last?.role === 'user';
+    if (!first && !stickToBottom.current && !justSent) {
+      // L'utilisateur lit plus haut : on signale le nouveau contenu sans le déplacer.
+      setHasUnseen(true);
+      return;
+    }
     // Seule la zone des messages défile, jamais la page (sinon l'écran saute sur mobile).
-    box.scrollTo({ top: box.scrollHeight, behavior: first ? 'auto' : 'smooth' });
+    box.scrollTo({ top: box.scrollHeight, behavior: first || prefersReducedMotion() ? 'auto' : 'smooth' });
   }, [messages, thinking, liveActions, liveReflections, thinkDetail]);
 
   useEffect(() => {
     // Nouveau fil : repartir en bas.
     lastScrollSig.current = '';
+    lastScrollLen.current = 0;
     stickToBottom.current = true;
+    setHasUnseen(false);
   }, [selected]);
+
+  // Lecteurs d'écran : annoncer chaque nouvelle réponse de l'agent (pas l'historique).
+  const lastAnnounced = useRef<string | null>(null);
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (!last || last.role === 'user') return;
+    if (lastAnnounced.current === null || history.current.ids.has(last.id)) {
+      lastAnnounced.current = last.id;
+      return;
+    }
+    if (last.id === lastAnnounced.current) return;
+    lastAnnounced.current = last.id;
+    setAnnounce(last.error ? 'Erreur de l’agent' : 'Nouvelle réponse de l’agent');
+  }, [messages]);
+
+  function jumpToLatest() {
+    const box = scrollRef.current;
+    if (!box) return;
+    stickToBottom.current = true;
+    setHasUnseen(false);
+    box.scrollTo({ top: box.scrollHeight, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  }
+
+  // Clavier mobile (iOS) : remonter le composer juste au-dessus, garder la dernière bulle visible.
+  const kbOverlap = useKeyboardOverlap(gridRef, () => {
+    if (!stickToBottom.current) return;
+    window.requestAnimationFrame(() => {
+      const box = scrollRef.current;
+      if (box) box.scrollTo({ top: box.scrollHeight, behavior: 'auto' });
+    });
+  });
 
   async function clearChat() {
     if (!selected) return;
     await api.clearAgentMessages(projectUuid, selected);
     setMessages([]);
+  }
+
+  /** Fin de run : envoie le message en attente (s'il y en a un). */
+  function flushQueue() {
+    const { state, send } = flushOnIdle(queueRef.current);
+    setQueue(state);
+    if (send) window.setTimeout(() => void sendRef.current(send), 0);
+  }
+
+  function stopLive() {
+    abortRef.current?.abort();
   }
 
   async function shareChat() {
@@ -613,7 +830,17 @@ export function ProjectAgentsPanel({
 
   async function sendText(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || busy || !selected) return;
+    if (!trimmed || !selected) return;
+    if (busyRef.current) {
+      // Run en cours : la saisie reste libre, l'envoi part à la fin.
+      setQueue(enqueue(queueRef.current, trimmed));
+      setInput('');
+      return;
+    }
+    busyRef.current = true;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let aborted = false;
     setBusy(true);
     markLaunchedStatus(selected, 'working');
     setThinking('Analyse de la demande…');
@@ -621,8 +848,10 @@ export function ProjectAgentsPanel({
     setThinkStarted(Date.now());
     setLiveActions([]);
     setLiveReflections([]);
-    setMessages((m) => [...m, { role: 'user', content: trimmed }]);
+    setMessages((m) => [...m, { id: localMessageId(), role: 'user', content: trimmed }]);
     setInput('');
+    stickToBottom.current = true;
+    setHasUnseen(false);
 
     if (threadsMode && (current?.name === 'Nouveau chat' || current?.name === 'Tâche isolée') && messages.length === 0) {
       const title = titleFromMessage(trimmed);
@@ -664,7 +893,8 @@ export function ProjectAgentsPanel({
               const next = [...prev];
               let idx = -1;
               for (let i = next.length - 1; i >= 0; i--) {
-                if (next[i].name === call.name && next[i].status === 'running') {
+                const same = call.call_id && next[i].call_id ? next[i].call_id === call.call_id : next[i].name === call.name;
+                if (same && next[i].status === 'running') {
                   idx = i;
                   break;
                 }
@@ -676,6 +906,7 @@ export function ProjectAgentsPanel({
             });
           },
         },
+        controller.signal,
       );
       const tools = res.tool_calls ?? [];
       let needsUserAction: ChatMessage['needsUserAction'];
@@ -694,6 +925,7 @@ export function ProjectAgentsPanel({
       setMessages((m) => [
         ...m,
         {
+          id: localMessageId(),
           role: 'assistant',
           content: res.reply,
           provider: res.provider || undefined,
@@ -724,23 +956,64 @@ export function ProjectAgentsPanel({
         });
       }
     } catch (err: unknown) {
-      const msg = String((err as Error).message || err);
-      setMessages((m) => [...m, { role: 'assistant', content: msg }]);
-      toast.push({ title: 'Agent KO', detail: msg, tone: 'danger' });
+      if (controller.signal.aborted || (err as Error)?.name === 'AbortError') {
+        // Stop : seul l'affichage en direct s'arrête ; le run continue côté serveur,
+        // le fil repasse en polling pour récupérer la réponse.
+        aborted = true;
+        setPollEnabled(true);
+      } else {
+        const msg = String((err as Error).message || err);
+        // La carte d'erreur (avec « Réessayer ») suffit : pas de toast en double sur le composer.
+        setMessages((m) => [...m, { id: localMessageId(), role: 'assistant', content: msg, error: true }]);
+      }
     } finally {
+      busyRef.current = false;
+      abortRef.current = null;
       setBusy(false);
-      markLaunchedStatus(selected, 'idle');
+      markLaunchedStatus(selected, aborted ? 'working' : 'idle');
       setThinking(null);
       setThinkDetail(undefined);
       setLiveActions([]);
       setLiveReflections([]);
+      if (aborted) {
+        // Le serveur travaille encore : on ne relance pas de run par-dessus.
+        // Le message en attente revient dans la saisie.
+        const pending = queueRef.current.queued;
+        setQueue(EMPTY_QUEUE);
+        if (pending) setInput((cur) => (cur.trim() ? `${pending}\n\n${cur}` : pending));
+      } else {
+        flushQueue();
+      }
     }
   }
 
-  function onSubmit(e: Event) {
-    e.preventDefault();
-    void sendText(input);
+  /** « Réessayer » sur une carte d'erreur : renvoie le dernier message utilisateur. */
+  function retryAfterError(errorId: string) {
+    if (busyRef.current) return;
+    const idx = messages.findIndex((m) => m.id === errorId);
+    if (idx < 0) return;
+    let userIdx = -1;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        userIdx = i;
+        break;
+      }
+    }
+    const text = userIdx >= 0 ? messages[userIdx].content : null;
+    // Le message utilisateur optimiste sera ré-ajouté par sendText (pas de doublon).
+    const dropUser = userIdx >= 0 && isLocalId(messages[userIdx].id);
+    const dropIds = new Set([errorId, ...(dropUser ? [messages[userIdx].id] : [])]);
+    setMessages((prev) => prev.filter((m) => !dropIds.has(m.id)));
+    if (text) void sendText(text);
   }
+
+  // Callbacks stables pour les messages mémoïsés (toujours la dernière version de sendText).
+  const sendRef = useRef(sendText);
+  sendRef.current = sendText;
+  const retryRef = useRef(retryAfterError);
+  retryRef.current = retryAfterError;
+  const onSendStable = useCallback((t: string) => void sendRef.current(t), []);
+  const onRetryStable = useCallback((id: string) => retryRef.current(id), []);
 
   function onChip(chip: ChatChip) {
     if (chip.onClick) {
@@ -754,7 +1027,7 @@ export function ProjectAgentsPanel({
     if (chip.prefill !== undefined) {
       setInput(chip.prefill);
       window.setTimeout(() => {
-        const el = document.getElementById(inputId) as HTMLInputElement | null;
+        const el = document.getElementById(inputId) as HTMLTextAreaElement | null;
         if (el) {
           el.focus();
           el.setSelectionRange(el.value.length, el.value.length);
@@ -927,6 +1200,8 @@ export function ProjectAgentsPanel({
     <FadeIn class={embedded ? 'flex h-full min-h-0 flex-col' : undefined}>
       {mobileThreadBar}
       <div
+        ref={gridRef}
+        style={{ '--kb': `${kbOverlap}px` }}
         class={cn(
           'grid min-h-0 gap-4',
           embedded ? 'h-full flex-1 grid-cols-1' : threadsMode ? 'lg:grid-cols-[200px_1fr]' : 'lg:grid-cols-[240px_1fr]',
@@ -938,6 +1213,9 @@ export function ProjectAgentsPanel({
           padding="none"
           class={cn(
             'flex min-h-0 flex-col overflow-hidden',
+            // Clavier iOS : la part du panneau cachée sous le clavier devient du padding,
+            // le composer reste juste au-dessus (0 sur desktop et Android).
+            'max-lg:pb-[var(--kb,0px)]',
             persona && 'df-tap',
             embedded
               ? 'h-full'
@@ -969,7 +1247,16 @@ export function ProjectAgentsPanel({
                 <span class="truncate font-medium tracking-tight">{chatHeaderTitle}</span>
                 {isCoordinator && <Badge tone="accent">Coordinateur</Badge>}
                 {isSubagent && <Badge tone="neutral">Sous-agent</Badge>}
-                <Badge tone={llmReady ? 'ok' : 'warn'}>{llmMode}</Badge>
+                {llmReady ? (
+                  <span
+                    class="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-ok)]"
+                    title={`Modèle prêt (${llmMode})`}
+                    role="img"
+                    aria-label="Modèle prêt"
+                  />
+                ) : (
+                  <Badge tone="warn">Modèle indisponible</Badge>
+                )}
               </div>
               {chatHeaderBlurb && (
                 <p class="mt-0.5 truncate text-xs text-[var(--color-ink-faint)]">{chatHeaderBlurb}</p>
@@ -1027,12 +1314,18 @@ export function ProjectAgentsPanel({
             </Alert>
           )}
 
+          <div class="relative flex min-h-0 flex-1 flex-col">
+          <span class="sr-only" aria-live="polite">
+            {announce}
+          </span>
           <div
             ref={scrollRef}
             class="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4"
             onScroll={(e) => {
               const el = e.currentTarget;
-              stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              stickToBottom.current = atBottom;
+              if (atBottom && hasUnseen) setHasUnseen(false);
             }}
           >
             {messages.length === 0 && persona && (
@@ -1065,109 +1358,17 @@ export function ProjectAgentsPanel({
                 </div>
               </div>
             )}
-            {messages.map((m, i) => {
-              const isWake = m.role === 'user' && /COORD-WAKE|Événement projet|Déploiement :/.test(m.content);
-              const wakeSummary = isWake ? m.content.split('\n').slice(0, 3).join(' ').slice(0, 180) + (m.content.length > 180 ? '…' : '') : '';
-              return (
-              <div key={i} class="space-y-2">
-                {m.role === 'user' ? (
-                  isWake ? (
-                    <div class="mx-auto max-w-[92%] rounded-lg border border-[var(--color-warn)]/40 bg-[var(--color-warn)]/10 px-3 py-2 text-xs text-[var(--color-ink-muted)]">
-                      <span class="font-medium text-[var(--color-warn)]">Événement</span> · {wakeSummary}
-                    </div>
-                  ) : (
-                  <div class="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-[var(--color-accent)] px-3 py-2 text-sm text-white">
-                    {m.content}
-                  </div>
-                  )
-                ) : (
-                  <div class={cn(persona && 'flex items-start gap-2.5')}>
-                    {persona && <div class="pt-0.5">{persona.smallAvatar}</div>}
-                    <div class={cn(persona && 'min-w-0 flex-1 space-y-2')}>
-                    {m.reflections && m.reflections.length > 0 && (
-                      <AgentReflectionList items={m.reflections} />
-                    )}
-                    {m.toolCalls && m.toolCalls.length > 0 && (
-                      <AgentActionList actions={toLiveActions(m.toolCalls)} />
-                    )}
-                    {m.content.trim() && persona ? (
-                      <Markdown
-                        text={m.content}
-                        class="min-w-0 max-w-full space-y-2 break-words text-sm leading-relaxed text-[var(--color-ink)] [overflow-wrap:anywhere]"
-                      />
-                    ) : m.content.trim() ? (
-                      <div class="max-w-[92%] whitespace-pre-wrap break-words text-sm text-[var(--color-ink)]">
-                        {m.content}
-                        {m.provider && !persona && (
-                          <div class="mt-1 text-[11px] text-[var(--color-ink-faint)]">{m.provider}</div>
-                        )}
-                      </div>
-                    ) : null}
-                    {m.plan && m.plan.steps.length > 0 && (
-                      <AgentPlanActions
-                        plan={m.plan}
-                        canOpenPr={m.canOpenPr}
-                        busy={busy}
-                        onApprovePlan={
-                          m.canOpenPr
-                            ? undefined
-                            : () =>
-                                void sendText(
-                                  'Go — exécute ce plan en local, puis lance la preview.',
-                                )
-                        }
-                        onOpenPr={() =>
-                          void sendText(
-                            'Valide les changements locaux et ouvre une pull request.',
-                          )
-                        }
-                      />
-                    )}
-                    {m.needsUserAction && (
-                      <Card class="max-w-[92%] border-l-4 border-l-[var(--color-warn)]">
-                        <div class="flex items-start gap-3">
-                          <span class="text-2xl" aria-hidden>
-                            !
-                          </span>
-                          <div class="flex-1">
-                            <p class="mb-2 text-sm font-medium">Action requise</p>
-                            <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
-                              {m.needsUserAction.message_fr}
-                            </p>
-                            {m.needsUserAction.settings_href && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                href={m.needsUserAction.settings_href}
-                                class="mb-2"
-                              >
-                                Ouvrir les paramètres
-                              </Button>
-                            )}
-                            {m.needsUserAction.resume_hint && (
-                              <p class="mt-2 text-xs text-[var(--color-ink-faint)]">
-                                {m.needsUserAction.resume_hint}
-                              </p>
-                            )}
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              disabled={busy}
-                              onClick={() => void sendText('Continuer')}
-                              class="mt-3"
-                            >
-                              Continuer
-                            </Button>
-                          </div>
-                        </div>
-                      </Card>
-                    )}
-                    </div>
-                  </div>
-                )}
-              </div>
-              );
-            })}
+            {messages.map((m) => (
+              <MessageItem
+                key={m.id}
+                m={m}
+                persona={persona}
+                busy={busy}
+                animate={!history.current.ids.has(m.id)}
+                onSend={onSendStable}
+                onRetry={onRetryStable}
+              />
+            ))}
             {busy && liveReflections.length > 0 && (
               <AgentReflectionList items={liveReflections} />
             )}
@@ -1179,7 +1380,8 @@ export function ProjectAgentsPanel({
                 startedAt={thinkStarted || Date.now()}
               />
             )}
-            <div ref={endRef} />
+          </div>
+          <JumpToLatest visible={hasUnseen} onClick={jumpToLatest} />
           </div>
 
           {persona && persona.chips.length > 0 && (
@@ -1202,35 +1404,24 @@ export function ProjectAgentsPanel({
               ))}
             </div>
           )}
-          <form
+          <Composer
+            inputId={inputId}
+            value={input}
+            onChange={setInput}
+            onSubmit={(text) => void sendText(text)}
+            busy={busy}
+            disabled={!selected}
+            onStop={stopLive}
+            queued={queue.queued}
+            onCancelQueued={() => setQueue(cancelQueued(queueRef.current))}
+            placeholder={persona ? persona.placeholder : threadsMode ? 'Message…' : current ? `Message pour ${chatHeaderTitle}…` : 'Message…'}
             class={cn(
-              'flex min-w-0 gap-2 p-3',
+              'shrink-0 p-3',
               // Au focus (clavier mobile), garder la saisie au-dessus du dock bas.
               persona && 'scroll-mb-[calc(5rem+env(safe-area-inset-bottom,0px))]',
               !(persona && persona.chips.length > 0) && 'border-t border-[var(--color-line)]',
             )}
-            onSubmit={onSubmit}
-          >
-            <div class="min-w-0 flex-1">
-              <Input
-                id={inputId}
-                value={input}
-                placeholder={persona ? persona.placeholder : threadsMode ? 'Message…' : current ? `Message pour ${chatHeaderTitle}…` : 'Message…'}
-                onInput={(ev) => setInput((ev.target as HTMLInputElement).value)}
-                disabled={busy || !selected}
-                class={persona ? 'max-lg:h-11!' : undefined}
-                enterKeyHint="send"
-              />
-            </div>
-            <Button
-              type="submit"
-              variant="secondary"
-              disabled={busy || !selected || !input.trim()}
-              class={cn('shrink-0', persona && 'max-lg:h-11')}
-            >
-              {busy ? <Spinner /> : 'Envoyer'}
-            </Button>
-          </form>
+          />
         </Card>
       </div>
     </FadeIn>

@@ -11,6 +11,7 @@
     "dev:web": "npm run dev -w apps/web",
     "dev:server": "cargo watch -q -c -w apps/server -w crates -x \"run -p devforge-server\"",
     "build:web": "npm run build -w apps/web",
+    "test:web": "npm run test -w apps/web",
     "check:forbidden": "node scripts/check-forbidden-names.mjs",
     "check:jsx": "node scripts/check-jsx-imports.mjs",
     "sanitize:lock": "node scripts/sanitize-lockfile.mjs",

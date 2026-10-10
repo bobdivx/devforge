@@ -6,6 +6,7 @@ import {
   type LiveAction,
 } from './agents/AgentActionCards';
 import type { AgentToolCall } from '../lib/agent-stream';
+import { Markdown, MD_MESSAGE_CLASS } from '../lib/markdown';
 import { Alert, Badge, Card, FadeIn, Spinner } from './ui';
 
 type SharedMsg = {
@@ -23,6 +24,7 @@ function parseTools(raw?: string): AgentToolCall[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.map((t) => ({
+      call_id: typeof t.id === 'string' && t.id ? t.id : undefined,
       name: String(t.name || ''),
       arguments: t.arguments || {},
       result: t.result,
@@ -130,7 +132,7 @@ export function SharedAgentConversation({ token: tokenProp }: { token?: string }
                 return (
                   <div
                     key={m.uuid}
-                    class="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-[var(--color-accent)] px-3 py-2 text-sm text-white"
+                    class="ml-auto w-fit max-w-[90%] whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl bg-[var(--color-accent)] px-3 py-2 text-sm text-white"
                   >
                     {m.content}
                   </div>
@@ -140,8 +142,8 @@ export function SharedAgentConversation({ token: tokenProp }: { token?: string }
                 <div key={m.uuid} class="space-y-2">
                   {actions.length > 0 && <AgentActionList actions={actions} />}
                   {m.content.trim() && (
-                    <div class="max-w-[92%] whitespace-pre-wrap break-words text-sm text-[var(--color-ink)]">
-                      {m.content}
+                    <div class="max-w-full">
+                      <Markdown text={m.content} class={MD_MESSAGE_CLASS} />
                       {m.provider && (
                         <div class="mt-1 text-[11px] text-[var(--color-ink-faint)]">
                           {m.provider}

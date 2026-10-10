@@ -387,7 +387,8 @@ function ShellInner({
       <div class="min-h-screen pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-8">
         <div
           class={cn(
-            'mx-auto flex min-h-screen px-4 pt-4 lg:px-6',
+            // viewport-fit=cover : encoche / îlot et bords arrondis (paysage) pris en compte.
+            'mx-auto flex min-h-screen pt-[max(1rem,env(safe-area-inset-top))] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] lg:px-6',
             // Plus d’air quand le menu projet est présent (évite le chevauchement)
             nav ? 'max-w-7xl gap-6 lg:gap-10' : wide ? 'max-w-7xl gap-6 lg:gap-8' : 'max-w-6xl gap-6 lg:gap-8',
           )}

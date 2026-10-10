@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import type { AgentPlan, AgentReflection, AgentToolCall } from '../../lib/agent-stream';
+import { toolCallKey, type AgentPlan, type AgentReflection, type AgentToolCall } from '../../lib/agent-stream';
 import { cn } from '../../lib/cn';
 import { InlinePatch } from '../DiffViewer';
-import { Button, PulseDot, Spinner } from '../ui';
+import { Button, Spinner } from '../ui';
 
 export type LiveAction = AgentToolCall & { status: 'running' | 'ok' | 'fail' };
 
@@ -336,7 +336,7 @@ export function AgentActionList({
     <div class={cn('max-w-[92%] space-y-2', className)}>
       {actions.map((a, i) => (
         <AgentActionCard
-          key={`${a.name}-${i}`}
+          key={toolCallKey(a, i)}
           call={a}
           defaultOpen={
             a.status === 'running' ||
@@ -352,6 +352,20 @@ export function AgentActionList({
     </div>
   );
 }
+
+/** Trois points animés (statiques sous reduced-motion, cf. global.css). */
+export function TypingDots({ class: className }: { class?: string }) {
+  return (
+    <span class={cn('inline-flex h-3 items-center gap-1', className)} aria-hidden>
+      <span class="df-dot h-1.5 w-1.5 rounded-full bg-[var(--color-ink-muted)]" />
+      <span class="df-dot h-1.5 w-1.5 rounded-full bg-[var(--color-ink-muted)] [animation-delay:0.15s]" />
+      <span class="df-dot h-1.5 w-1.5 rounded-full bg-[var(--color-ink-muted)] [animation-delay:0.3s]" />
+    </span>
+  );
+}
+
+/** Délai avant d'afficher le compteur « Réflexion · N s » (évite le bruit des runs rapides). */
+export const THINKING_COUNTER_AFTER_S = 3;
 
 export function AgentThinkingBlock({
   label,
@@ -372,18 +386,28 @@ export function AgentThinkingBlock({
   }, [startedAt]);
 
   return (
-    <div class="max-w-[92%] space-y-1.5">
+    <div class="max-w-[92%] space-y-1.5" data-testid="agent-thinking">
       <button
         type="button"
-        class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)]"
+        class={cn(
+          'flex min-h-8 items-center gap-2.5 rounded-lg text-left text-sm text-[var(--color-ink-muted)]',
+          detail ? 'cursor-pointer' : 'cursor-default',
+        )}
         onClick={() => detail && setOpen((o) => !o)}
+        aria-expanded={detail ? open : undefined}
       >
-        <Spinner class="h-3.5 w-3.5" />
-        <span>
-          Réflexion {secs}s
-          {label ? <span class="text-[var(--color-ink-faint)]"> · {label}</span> : null}
+        <TypingDots />
+        <span role="status" aria-live="polite" class="min-w-0">
+          {/* Nouvelle clé = nouveau nœud = fondu entre deux libellés. */}
+          <span key={label} class="df-fade-in inline-block">
+            {label || 'Réflexion…'}
+          </span>
         </span>
-        <PulseDot tone="accent" />
+        {secs >= THINKING_COUNTER_AFTER_S ? (
+          <span class="shrink-0 text-xs text-[var(--color-ink-faint)]" aria-hidden>
+            Réflexion · {secs} s
+          </span>
+        ) : null}
       </button>
       {open && detail ? (
         <div class="rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)]/80 px-3 py-2 text-xs leading-relaxed text-[var(--color-ink-muted)] whitespace-pre-wrap">
@@ -398,8 +422,9 @@ export function AgentReflectionList({ items }: { items: AgentReflection[] }) {
   if (!items.length) return null;
   return (
     <div class="max-w-[92%] space-y-2">
+      {/* Liste en ajout seul : la position est stable, on la combine au tour. */}
       {items.map((r, i) => (
-        <AgentReflectionCard key={i} item={r} defaultOpen={i === items.length - 1} />
+        <AgentReflectionCard key={`r${r.round ?? 0}-${i}`} item={r} defaultOpen={i === items.length - 1} />
       ))}
     </div>
   );
