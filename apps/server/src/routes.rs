@@ -3220,6 +3220,16 @@ async fn agent_chat(
 
         // Octets tout de suite : la résolution LLM (sondes) ne doit pas retarder les en-têtes,
         // sinon Cloudflare renvoie 524 avant le premier octet.
+        // P2-03 : début du run + accusé de réception immédiat (règles, sans LLM), jamais persisté.
+        let _ = ev_tx.send(devforge_agent::AgentEvent::RunStarted {
+            run_uuid: run_uuid.clone().unwrap_or_default(),
+            message_uuid: uuid::Uuid::new_v4().to_string(),
+        });
+        if force_tool.as_deref().map(str::is_empty).unwrap_or(true) {
+            let _ = ev_tx.send(devforge_agent::AgentEvent::Ack {
+                text: devforge_agent::events::ack_for(&user_message).to_string(),
+            });
+        }
         let _ = ev_tx.send(devforge_agent::AgentEvent::Thinking {
             round: 0,
             label: "Connexion aux modèles…".into(),
@@ -3285,8 +3295,15 @@ async fn agent_chat(
                         crate::agent_runs::fail_run(&pool, run_uuid, agent_uuid, &e.to_string())
                             .await;
                     }
+                    let retryable = matches!(
+                        devforge_llm::classify(&e),
+                        devforge_llm::LlmErrorKind::RateLimited { .. }
+                            | devforge_llm::LlmErrorKind::Server
+                            | devforge_llm::LlmErrorKind::Timeout
+                    );
                     let _ = ev_tx.send(devforge_agent::AgentEvent::Error {
                         message: e.to_string(),
+                        retryable,
                     });
                 }
             }

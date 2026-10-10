@@ -1,5 +1,6 @@
 pub mod claims;
 pub mod coerce;
+pub mod events;
 pub mod guard;
 pub mod roles;
 pub mod sdd;
@@ -236,9 +237,17 @@ pub struct AgentReply {
     pub executed_plan: bool,
 }
 
+pub use events::MilestoneStatus;
+
+/// Événements d'un run (SSE `/agent/chat`, P2-01). Champs ajoutés avec `#[serde(default)]` :
+/// les anciens clients et anciens flux restent compatibles.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
+    /// Début du run : id du run et id du message brouillon côté front.
+    RunStarted { run_uuid: String, message_uuid: String },
+    /// Accusé de réception immédiat (règles, pas de LLM) ; jamais persisté.
+    Ack { text: String },
     Thinking {
         round: usize,
         label: String,
@@ -246,12 +255,20 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         detail: String,
     },
+    /// Morceau du texte du modèle (streaming).
+    Delta { text: String, round: usize },
+    /// Le texte streamé de ce tour était du raisonnement (le tour finit par des outils) :
+    /// le front le déplace de la bulle vers la réflexion.
+    DeltaReset { round: usize },
     ToolStart {
         /// Id du tool call (LLM) — relie `tool_start` et `tool_done`, clé stable côté UI.
         #[serde(default)]
         id: String,
         name: String,
         arguments: Value,
+        /// Libellé humain (« Lecture de src/app.ts »).
+        #[serde(default)]
+        label: String,
     },
     ToolDone {
         #[serde(default)]
@@ -259,7 +276,13 @@ pub enum AgentEvent {
         name: String,
         ok: bool,
         arguments: Value,
+        /// Borné à 16 Ko pour l'UI ; le résultat complet est dans `Reply` et en base.
         result: Value,
+        #[serde(default)]
+        elapsed_ms: u64,
+        /// Une ligne : « ✓ build OK · 12 s ».
+        #[serde(default)]
+        summary: String,
     },
     Plan {
         title: String,
@@ -271,9 +294,17 @@ pub enum AgentEvent {
         provider: String,
         tool_calls: Vec<ToolCallRecord>,
     },
-    /// Jalon de progression (ex. « Modèle saturé, nouvel essai… »).
-    Milestone { label: String },
-    Error { message: String },
+    /// Jalon de progression (« Build », « Preview locale »…).
+    Milestone {
+        label: String,
+        #[serde(default)]
+        status: MilestoneStatus,
+    },
+    Error {
+        message: String,
+        #[serde(default)]
+        retryable: bool,
+    },
 }
 
 pub type AgentProgressTx = tokio::sync::mpsc::UnboundedSender<AgentEvent>;
@@ -399,7 +430,13 @@ impl AgentRunner {
                 coerce::coerce_args(&schema, &mut args);
             }
             let call_id = format!("forced-{tool}");
-            emit(&progress, AgentEvent::ToolStart { id: call_id.clone(), name: tool.to_string(), arguments: args.clone() });
+            let started = std::time::Instant::now();
+            emit(&progress, AgentEvent::ToolStart {
+                id: call_id.clone(),
+                name: tool.to_string(),
+                arguments: args.clone(),
+                label: events::tool_label(tool, &args),
+            });
             let result = if let Some(blocked) = refuse_bare_spec_approval(tool, &args, message) {
                 blocked
             } else if let Some(blocked) = refuse_spec_publish(tool, message) {
@@ -410,7 +447,16 @@ impl AgentRunner {
                 self.registry.execute(tool, args.clone()).await?
             };
             let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
-            emit(&progress, AgentEvent::ToolDone { id: call_id.clone(), name: tool.to_string(), ok, arguments: args.clone(), result: result.clone() });
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            emit(&progress, AgentEvent::ToolDone {
+                id: call_id.clone(),
+                name: tool.to_string(),
+                ok,
+                arguments: args.clone(),
+                result: events::for_ui(tool, &args, &result),
+                elapsed_ms,
+                summary: events::tool_summary(tool, &args, ok, &result, elapsed_ms),
+            });
             return Ok(AgentReply {
                 reply: summarize(tool, &result),
                 tool_calls: vec![ToolCallRecord { id: call_id, name: tool.to_string(), arguments: args, result }],
@@ -428,6 +474,25 @@ impl AgentRunner {
         progress: Option<AgentProgressTx>,
         llm_override: Option<(Arc<dyn LlmProvider>, String)>,
     ) -> Result<AgentReply> {
+        let mut milestones = events::MilestoneTracker::default();
+        let out = self.run_loop_inner(message, ctx, &progress, llm_override, &mut milestones).await;
+        for (label, status) in milestones.finish() {
+            emit(&progress, AgentEvent::Milestone { label: label.into(), status });
+        }
+        out
+    }
+
+    async fn run_loop_inner(
+        &self,
+        message: &str,
+        ctx: AgentChatContext,
+        progress: &Option<AgentProgressTx>,
+        llm_override: Option<(Arc<dyn LlmProvider>, String)>,
+        milestones: &mut events::MilestoneTracker,
+    ) -> Result<AgentReply> {
+        let progress = progress.clone();
+        let max_pushes = guard::max_pushes_per_run();
+        let mut pushes: usize = 0;
         let mut messages = vec![ChatMessage::system(system_prompt(&ctx, message))];
         if let Some(brief) = &ctx.project_brief {
             messages.push(ChatMessage::system(brief.clone()));
@@ -489,36 +554,58 @@ impl AgentRunner {
                 tools: tools.clone(),
                 temperature: 0.2,
             };
+            let round_no = round + 1;
+            let streamed = std::sync::atomic::AtomicBool::new(false);
             let turn: AssistantTurn = match &progress {
                 Some(tx) => {
-                    let tx = tx.clone();
+                    let tx_retry = tx.clone();
+                    // Nouvel essai LLM (P1-09) : libellé de l'étape en cours.
                     let notify: devforge_llm::RetryNotifier = Arc::new(move |label: String| {
-                        let _ = tx.send(AgentEvent::Milestone { label });
+                        let _ = tx_retry.send(AgentEvent::Thinking { round: round_no, label, detail: String::new() });
                     });
-                    devforge_llm::with_retry_notifier(notify, llm.chat(req)).await?
+                    let tx_delta = tx.clone();
+                    let streamed_ref = &streamed;
+                    // P2-02 : chaque morceau de texte part tout de suite vers le front.
+                    let sink = move |d: &str| {
+                        streamed_ref.store(true, std::sync::atomic::Ordering::SeqCst);
+                        let _ = tx_delta.send(AgentEvent::Delta { text: d.to_string(), round: round_no });
+                    };
+                    devforge_llm::with_retry_notifier(notify, llm.chat_stream(req, &sink)).await?
                 }
                 None => llm.chat(req).await?,
             };
-            if !turn.content.trim().is_empty() {
-                let detail = turn.content.trim().to_string();
+            let streamed = streamed.load(std::sync::atomic::Ordering::SeqCst);
+            // Texte d'un tour qui appelle des outils = raisonnement intermédiaire → bloc réflexion.
+            let to_reflection = |progress: &Option<AgentProgressTx>, content: &str| {
+                if content.trim().is_empty() && !streamed {
+                    return;
+                }
+                if streamed {
+                    emit(progress, AgentEvent::DeltaReset { round: round_no });
+                }
+                let detail = content.trim().to_string();
+                if detail.is_empty() {
+                    return;
+                }
                 let label: String = detail.chars().take(120).collect();
                 emit(
-                    &progress,
+                    progress,
                     AgentEvent::Thinking {
-                        round: round + 1,
-                        label: if detail.chars().count() > 120 {
-                            format!("{label}…")
-                        } else {
-                            label
-                        },
-                        detail,
+                        round: round_no,
+                        label: if detail.chars().count() > 120 { format!("{label}…") } else { label },
+                        // Déjà streamé : le front a le texte (DeltaReset), pas de doublon.
+                        detail: if streamed { String::new() } else { detail },
                     },
                 );
+            };
+            if !turn.tool_calls.is_empty() {
+                to_reflection(&progress, &turn.content);
             }
             if turn.tool_calls.is_empty() {
                 // P1-02 : « j'ai corrigé » sans aucun outil dans ce tour → un rappel, puis transparence.
                 if records.is_empty() && claims::unverified_claim(&turn.content) {
                     if !claim_nudged && round + 1 < self.max_rounds {
+                        to_reflection(&progress, &turn.content);
                         claim_nudged = true;
                         messages.push(ChatMessage::assistant(turn.content.clone()));
                         messages.push(ChatMessage::system(claims::CLAIM_NUDGE));
@@ -553,30 +640,81 @@ impl AgentRunner {
                 if let Some(schema) = self.registry.schema(&call.name) {
                     coerce::coerce_args(&schema, &mut args);
                 }
-                emit(&progress, AgentEvent::ToolStart { id: call.id.clone(), name: call.name.clone(), arguments: args.clone() });
-                let result = if let Some(blocked) = refuse_bare_spec_approval(&call.name, &args, message) {
-                    blocked
+                let refusal = if let Some(blocked) = refuse_bare_spec_approval(&call.name, &args, message) {
+                    Some(blocked)
                 } else if let Some(blocked) = refuse_spec_publish(&call.name, message) {
-                    blocked
+                    Some(blocked)
                 } else if self.registry.has(&call.name)
                     && !roles::role_allows(&role, kind.as_deref(), &call.name, security_review)
                 {
-                    roles::role_refusal(&role, &call.name)
+                    Some(roles::role_refusal(&role, &call.name))
                 } else if let Some(blocked) = self.remote_write_refusal(&call.name, &args, &ctx).await {
-                    blocked
+                    Some(blocked)
+                } else if guard::is_github_push(&call.name, &args) && pushes >= max_pushes {
+                    // Plafond de pushes par run : on s'arrête et on demande à l'utilisateur.
+                    Some(guard::push_limit_blocked(&call.name, &args, max_pushes))
                 } else {
-                    match self.registry.execute(&call.name, args.clone()).await {
-                    Ok(v) => v,
-                    Err(e) => match e {
-                        devforge_shared::DevForgeError::NeedsUserAction { kind, message_fr, settings_href, resume_hint } => {
-                            json!({"ok": false, "needs_user_action": true, "kind": kind, "message_fr": message_fr, "settings_href": settings_href, "resume_hint": resume_hint})
+                    None
+                };
+                let push_limited = refusal
+                    .as_ref()
+                    .and_then(|r| r.get("kind"))
+                    .and_then(|k| k.as_str())
+                    == Some(guard::PUSH_LIMIT_KIND);
+                emit(&progress, AgentEvent::ToolStart {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    arguments: args.clone(),
+                    label: events::tool_label(&call.name, &args),
+                });
+                let started = std::time::Instant::now();
+                let executed = refusal.is_none();
+                let result = match refusal {
+                    Some(blocked) => blocked,
+                    None => {
+                        for (label, status) in milestones.on_tool_start(&call.name, &args) {
+                            emit(&progress, AgentEvent::Milestone { label: label.into(), status });
                         }
-                        _ => json!({ "ok": false, "error": e.to_string() }),
-                    },
+                        if guard::is_github_push(&call.name, &args) {
+                            pushes += 1;
+                        }
+                        match self.registry.execute(&call.name, args.clone()).await {
+                            Ok(v) => v,
+                            Err(e) => match e {
+                                devforge_shared::DevForgeError::NeedsUserAction { kind, message_fr, settings_href, resume_hint } => {
+                                    json!({"ok": false, "needs_user_action": true, "kind": kind, "message_fr": message_fr, "settings_href": settings_href, "resume_hint": resume_hint})
+                                }
+                                _ => json!({ "ok": false, "error": e.to_string() }),
+                            },
+                        }
                     }
                 };
+                let elapsed_ms = started.elapsed().as_millis() as u64;
                 let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
-                emit(&progress, AgentEvent::ToolDone { id: call.id.clone(), name: call.name.clone(), ok, arguments: args.clone(), result: result.clone() });
+                emit(&progress, AgentEvent::ToolDone {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    ok,
+                    arguments: args.clone(),
+                    result: events::for_ui(&call.name, &args, &result),
+                    elapsed_ms,
+                    summary: events::tool_summary(&call.name, &args, ok, &result, elapsed_ms),
+                });
+                if executed {
+                    for (label, status) in milestones.on_tool_done(&call.name, &args, ok, &result) {
+                        emit(&progress, AgentEvent::Milestone { label: label.into(), status });
+                    }
+                }
+                if push_limited {
+                    let reply = result
+                        .get("message_fr")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Plafond de pushes atteint.")
+                        .to_string();
+                    records.push(ToolCallRecord { id: call.id.clone(), name: call.name.clone(), arguments: args, result });
+                    let executed_plan = executed_plan(&records);
+                    return Ok(AgentReply { reply, tool_calls: records, provider, executed_plan });
+                }
                 if call.name == "propose_plan" {
                     if let Some(plan) = result.get("plan") {
                         emit(&progress, AgentEvent::Plan {
@@ -996,6 +1134,7 @@ mod event_serde_tests {
             id: "call_42".into(),
             name: "read_project_file".into(),
             arguments: json!({ "path": "README.md" }),
+            label: "Lecture de README.md".into(),
         };
         let v = serde_json::to_value(&ev).unwrap();
         assert_eq!(v["type"], "tool_start");
@@ -1012,6 +1151,8 @@ mod event_serde_tests {
             ok: true,
             arguments: json!({}),
             result: json!({ "ok": true }),
+            elapsed_ms: 1200,
+            summary: "✓ Smoke HTTP · 1 s".into(),
         };
         let v = serde_json::to_value(&ev).unwrap();
         assert_eq!(v["type"], "tool_done");

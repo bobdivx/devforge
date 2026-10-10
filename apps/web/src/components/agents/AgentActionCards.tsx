@@ -4,7 +4,9 @@ import { cn } from '../../lib/cn';
 import { InlinePatch } from '../DiffViewer';
 import { Button, Spinner } from '../ui';
 
-export type LiveAction = AgentToolCall & { status: 'running' | 'ok' | 'fail' };
+import type { LiveAction } from '../../lib/activity';
+
+export type { LiveAction };
 
 const SHELL_TOOLS = new Set([
   'start_local_preview',
@@ -224,22 +226,9 @@ function ActionIcon({
   return <span class="w-4 shrink-0 text-center text-[11px] text-[var(--color-ink-faint)]">·</span>;
 }
 
-export function AgentActionCard({
-  call,
-  defaultOpen,
-}: {
-  call: LiveAction;
-  defaultOpen?: boolean;
-}) {
+/** Détail d'une action (diff, logs, sortie) — réutilisé par les pastilles d'activité. */
+export function AgentActionDetail({ call }: { call: LiveAction }) {
   const kind = kindOf(call);
-  const [open, setOpen] = useState(Boolean(defaultOpen) || call.status === 'running');
-  const ok = call.status !== 'fail' && call.result?.ok !== false;
-  const label = headerLabel(call);
-
-  useEffect(() => {
-    if (call.status === 'running') setOpen(true);
-  }, [call.status]);
-
   const body = useMemo(() => {
     if (kind === 'file') {
       const content = strArg(call, 'content');
@@ -303,6 +292,26 @@ export function AgentActionCard({
       </pre>
     );
   }, [call, kind]);
+  return body;
+}
+
+export function AgentActionCard({
+  call,
+  defaultOpen,
+}: {
+  call: LiveAction;
+  defaultOpen?: boolean;
+}) {
+  const kind = kindOf(call);
+  const [open, setOpen] = useState(Boolean(defaultOpen) || call.status === 'running');
+  const ok = call.status !== 'fail' && call.result?.ok !== false;
+  const label = headerLabel(call);
+
+  useEffect(() => {
+    if (call.status === 'running') setOpen(true);
+  }, [call.status]);
+
+  const body = <AgentActionDetail call={call} />;
 
   return (
     <div class="overflow-hidden rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)]">

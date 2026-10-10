@@ -9,6 +9,16 @@ export type NeedsUserAction = {
 };
 
 export const PUBLISH_APPROVAL_KIND = 'publish_approval';
+/** Plafond de pushes GitHub par run atteint : l'agent s'est arrêté. */
+export const PUSH_LIMIT_KIND = 'push_limit';
+export const PUSH_LIMIT_CONTINUE_MESSAGE = 'J’ai vérifié les commits : continue, tu peux pousser à nouveau.';
+
+/** Titre et bouton de la carte « Action requise » selon le cas. */
+export function userActionCopy(kind: string): { title: string; button: string } {
+  if (kind === PUBLISH_APPROVAL_KIND) return { title: 'Validation requise', button: 'Valider la publication' };
+  if (kind === PUSH_LIMIT_KIND) return { title: 'Pause : plusieurs envois sur GitHub', button: 'Autoriser à continuer' };
+  return { title: 'Action requise', button: 'Continuer' };
+}
 /** Message envoyé à l'agent après le clic « Valider la publication ». */
 export const PUBLISH_APPROVED_MESSAGE = 'Publication validée, continue.';
 export const OPEN_PR_MESSAGE = 'Valide les changements locaux et ouvre une pull request.';

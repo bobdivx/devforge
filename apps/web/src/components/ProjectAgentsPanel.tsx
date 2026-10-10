@@ -28,6 +28,9 @@ import {
   OPEN_PR_MESSAGE,
   PUBLISH_APPROVAL_KIND,
   PUBLISH_APPROVED_MESSAGE,
+  PUSH_LIMIT_CONTINUE_MESSAGE,
+  PUSH_LIMIT_KIND,
+  userActionCopy,
   type NeedsUserAction,
 } from '../lib/publish-approval';
 import { prefersReducedMotion } from '../lib/motion';
@@ -35,14 +38,11 @@ import { useKeyboardOverlap } from '../lib/useVisualViewport';
 import { Composer } from './chat/Composer';
 import { JumpToLatest } from './chat/JumpToLatest';
 import { MessageEnter } from './chat/MessageEnter';
-import {
-  AgentActionList,
-  AgentPlanActions,
-  AgentReflectionList,
-  AgentThinkingBlock,
-  toLiveActions,
-  type LiveAction,
-} from './agents/AgentActionCards';
+import { AgentPlanActions, toLiveActions, type LiveAction } from './agents/AgentActionCards';
+import { ActivityGroup } from './chat/ActivityGroup';
+import { MilestoneBar } from './chat/MilestoneBar';
+import { RunBubble } from './chat/RunBubble';
+import { applyMilestone, mergeLiveFinal, type Milestone } from '../lib/activity';
 import { markLaunchedStatus } from '../lib/launched-agents';
 import { Alert, Badge, Button, Card, FadeIn, Spinner, useToast } from './ui';
 
@@ -121,6 +121,17 @@ type ChatMessage = {
   plan?: AgentPlan | null;
   canOpenPr?: boolean;
   needsUserAction?: NeedsUserAction;
+  /** Run en cours (brouillon streamé, P2-02) : le message final garde le même id. */
+  streaming?: boolean;
+  /** Accusé de réception immédiat (jamais persisté). */
+  ack?: string;
+  /** Étape courante (outil, jalon) affichée dans l'en-tête de la bulle. */
+  liveLabel?: string;
+  milestones?: Milestone[];
+  /** Actions du run (live puis fusionnées avec le `Reply` par id). */
+  actions?: LiveAction[];
+  startedAt?: number;
+  elapsedMs?: number;
 };
 
 function metaFor(agent: ProjectAgent) {
@@ -304,9 +315,23 @@ function MessageItemView({ m, persona, busy, animate, onSend, onRetry, onApprove
         <div class={cn(persona && 'flex items-start gap-2.5')}>
           {persona && <div class="pt-0.5">{persona.smallAvatar}</div>}
           <div class={cn('space-y-2', persona && 'min-w-0 flex-1')}>
-            {m.reflections && m.reflections.length > 0 && <AgentReflectionList items={m.reflections} />}
-            {m.toolCalls && m.toolCalls.length > 0 && <AgentActionList actions={toLiveActions(m.toolCalls)} />}
-            {m.content.trim() ? (
+            {m.milestones && m.milestones.length > 0 && <MilestoneBar items={m.milestones} />}
+            <ActivityGroup
+              actions={m.actions ?? toLiveActions(m.toolCalls ?? [])}
+              reflections={m.reflections ?? []}
+              live={!!m.streaming}
+              elapsedMs={m.elapsedMs}
+            />
+            {m.streaming || m.elapsedMs !== undefined ? (
+              <RunBubble
+                content={m.content}
+                streaming={!!m.streaming}
+                ack={m.ack}
+                label={m.liveLabel}
+                startedAt={m.startedAt}
+                elapsedMs={m.elapsedMs}
+              />
+            ) : m.content.trim() ? (
               <div class="max-w-full">
                 <Markdown text={m.content} class={MD_MESSAGE_CLASS} />
                 {m.provider && !persona && (
@@ -332,9 +357,7 @@ function MessageItemView({ m, persona, busy, animate, onSend, onRetry, onApprove
                     !
                   </span>
                   <div class="flex-1">
-                    <p class="mb-2 text-sm font-medium">
-                      {m.needsUserAction.kind === PUBLISH_APPROVAL_KIND ? 'Validation requise' : 'Action requise'}
-                    </p>
+                    <p class="mb-2 text-sm font-medium">{userActionCopy(m.needsUserAction.kind).title}</p>
                     <p class="mb-3 text-sm text-[var(--color-ink-muted)]">{m.needsUserAction.message_fr}</p>
                     {m.needsUserAction.settings_href && (
                       <Button size="sm" variant="outline" href={m.needsUserAction.settings_href} class="mb-2">
@@ -355,6 +378,17 @@ function MessageItemView({ m, persona, busy, animate, onSend, onRetry, onApprove
                       >
                         Valider la publication
                       </Button>
+                    ) : m.needsUserAction.kind === PUSH_LIMIT_KIND ? (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={busy}
+                        onClick={() => onSend(PUSH_LIMIT_CONTINUE_MESSAGE)}
+                        class="mt-3"
+                        title="L’agent repart avec un nouveau quota de 3 envois sur GitHub."
+                      >
+                        {userActionCopy(PUSH_LIMIT_KIND).button}
+                      </Button>
                     ) : (
                       <Button size="sm" variant="secondary" disabled={busy} onClick={() => onSend('Continuer')} class="mt-3">
                         Continuer
@@ -374,6 +408,8 @@ function MessageItemView({ m, persona, busy, animate, onSend, onRetry, onApprove
 const MessageItem = memo(
   MessageItemView,
   (a, b) =>
+    // Run en direct : chaque événement crée un nouvel objet message → re-rendu de ce seul message.
+    (a.m === b.m || !(a.m.streaming || b.m.streaming || a.m.elapsedMs !== b.m.elapsedMs)) &&
     a.m.id === b.m.id &&
     a.m.content.length === b.m.content.length &&
     (a.m.toolCalls?.length ?? 0) === (b.m.toolCalls?.length ?? 0) &&
@@ -407,11 +443,6 @@ export function ProjectAgentsPanel({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [thinking, setThinking] = useState<string | null>(null);
-  const [thinkDetail, setThinkDetail] = useState<string | undefined>(undefined);
-  const [thinkStarted, setThinkStarted] = useState(0);
-  const [liveActions, setLiveActions] = useState<LiveAction[]>([]);
-  const [liveReflections, setLiveReflections] = useState<AgentReflection[]>([]);
   const [llmMode, setLlmMode] = useState<string>('—');
   const [llmError, setLlmError] = useState<string | null>(null);
   const [pollEnabled, setPollEnabled] = useState(builderMode || false);
@@ -756,10 +787,11 @@ export function ProjectAgentsPanel({
       messages.length,
       last?.content.length ?? 0,
       last?.toolCalls?.length ?? 0,
-      thinking ?? '',
-      thinkDetail ?? '',
-      liveActions.length,
-      liveReflections.length,
+      last?.actions?.length ?? 0,
+      last?.reflections?.length ?? 0,
+      last?.milestones?.length ?? 0,
+      last?.liveLabel ?? '',
+      last?.streaming ? 1 : 0,
     ].join('|');
     if (sig === lastScrollSig.current) return;
     const first = lastScrollSig.current === '';
@@ -774,8 +806,10 @@ export function ProjectAgentsPanel({
       return;
     }
     // Seule la zone des messages défile, jamais la page (sinon l'écran saute sur mobile).
-    box.scrollTo({ top: box.scrollHeight, behavior: first || prefersReducedMotion() ? 'auto' : 'smooth' });
-  }, [messages, thinking, liveActions, liveReflections, thinkDetail]);
+    // Pendant le streaming : 'auto' (le smooth saccade à chaque delta), smooth pour un nouveau message.
+    const instant = first || prefersReducedMotion() || (!!last?.streaming && !grew);
+    box.scrollTo({ top: box.scrollHeight, behavior: instant ? 'auto' : 'smooth' });
+  }, [messages]);
 
   useEffect(() => {
     // Nouveau fil : repartir en bas.
@@ -868,12 +902,26 @@ export function ProjectAgentsPanel({
     let aborted = false;
     setBusy(true);
     markLaunchedStatus(selected, 'working');
-    setThinking('Analyse de la demande…');
-    setThinkDetail(undefined);
-    setThinkStarted(Date.now());
-    setLiveActions([]);
-    setLiveReflections([]);
-    setMessages((m) => [...m, { id: localMessageId(), role: 'user', content: trimmed }]);
+    // Brouillon de réponse créé tout de suite : points de frappe, puis texte streamé (même id à la fin).
+    const draftId = localMessageId();
+    const startedAt = Date.now();
+    let seq = 0;
+    const updateDraft = (fn: (m: ChatMessage) => ChatMessage) =>
+      setMessages((prev) => prev.map((m) => (m.id === draftId ? fn(m) : m)));
+    setMessages((m) => [
+      ...m,
+      { id: localMessageId(), role: 'user', content: trimmed },
+      {
+        id: draftId,
+        role: 'assistant',
+        content: '',
+        streaming: true,
+        startedAt,
+        actions: [],
+        reflections: [],
+        milestones: [],
+      },
+    ]);
     setInput('');
     stickToBottom.current = true;
     setHasUnseen(false);
@@ -901,21 +949,46 @@ export function ProjectAgentsPanel({
           agent_uuid: selected,
         },
         {
-          onThinking: (label, _round, detail) => {
-            setThinking(label);
-            if (detail?.trim()) {
-              setThinkDetail(detail);
-              setLiveReflections((prev) => [...prev, { label, detail, round: _round }]);
-            }
+          onAck: (text) => updateDraft((m) => ({ ...m, ack: text })),
+          onThinking: (label, round, detail) => {
+            updateDraft((m) => ({
+              ...m,
+              // L'accusé de réception reste affiché jusqu'au premier outil.
+              liveLabel: detail?.trim() || (m.ack && !(m.actions ?? []).length) ? m.liveLabel : label,
+              reflections: detail?.trim()
+                ? [...(m.reflections ?? []), { label, detail, round, seq: seq++ }]
+                : m.reflections,
+            }));
           },
+          onDelta: (text) => updateDraft((m) => ({ ...m, content: m.content + text })),
+          onDeltaReset: (round) =>
+            // Texte d'un tour à outils = raisonnement : il passe dans le groupe d'activité.
+            updateDraft((m) => {
+              const text = m.content.trim();
+              if (!text) return { ...m, content: '' };
+              const label = text.length > 120 ? `${text.slice(0, 120)}…` : text;
+              return {
+                ...m,
+                content: '',
+                reflections: [...(m.reflections ?? []), { label, detail: text, round, seq: seq++ }],
+              };
+            }),
+          onMilestone: (label, status) =>
+            updateDraft((m) => ({
+              ...m,
+              milestones: applyMilestone(m.milestones ?? [], label, status),
+            })),
           onToolStart: (call) => {
-            setThinking(call.name.replace(/_/g, ' '));
-            setThinkDetail(undefined);
-            setLiveActions((prev) => [...prev, { ...call, status: 'running' }]);
+            const s = seq++;
+            updateDraft((m) => ({
+              ...m,
+              liveLabel: call.label || call.name.replace(/_/g, ' '),
+              actions: [...(m.actions ?? []), { ...call, seq: s, status: 'running' }],
+            }));
           },
           onToolDone: (call, ok) => {
-            setLiveActions((prev) => {
-              const next = [...prev];
+            updateDraft((m) => {
+              const next = [...(m.actions ?? [])];
               let idx = -1;
               for (let i = next.length - 1; i >= 0; i--) {
                 const same = call.call_id && next[i].call_id ? next[i].call_id === call.call_id : next[i].name === call.name;
@@ -924,10 +997,9 @@ export function ProjectAgentsPanel({
                   break;
                 }
               }
-              const done: LiveAction = { ...call, status: ok ? 'ok' : 'fail' };
-              if (idx >= 0) next[idx] = done;
-              else next.push(done);
-              return next;
+              if (idx >= 0) next[idx] = { ...next[idx], ...call, seq: next[idx].seq, status: ok ? 'ok' : 'fail' };
+              else next.push({ ...call, seq: seq++, status: ok ? 'ok' : 'fail' });
+              return { ...m, actions: next };
             });
           },
         },
@@ -935,21 +1007,24 @@ export function ProjectAgentsPanel({
       );
       const tools = res.tool_calls ?? [];
       const needsUserAction = needsUserActionFrom(tools);
+      const elapsedMs = Date.now() - startedAt;
 
-      setMessages((m) => [
+      // Finalisation sur le même id : pas de nouveau message, pas de saut.
+      updateDraft((m) => ({
         ...m,
-        {
-          id: localMessageId(),
-          role: 'assistant',
-          content: res.reply,
-          provider: res.provider || undefined,
-          toolCalls: tools,
-          reflections: res.reflections ?? [],
-          plan: res.plan,
-          canOpenPr: wroteLocalFiles(tools) || res.executed_plan === true,
-          needsUserAction,
-        },
-      ]);
+        streaming: false,
+        content: res.reply,
+        provider: res.provider || undefined,
+        toolCalls: tools,
+        actions: mergeLiveFinal(m.actions ?? [], tools),
+        reflections: m.reflections?.length ? m.reflections : (res.reflections ?? []),
+        milestones: (m.milestones ?? []).map((x) => (x.status === 'running' ? { ...x, status: 'done' as const } : x)),
+        plan: res.plan,
+        canOpenPr: wroteLocalFiles(tools) || res.executed_plan === true,
+        needsUserAction,
+        liveLabel: undefined,
+        elapsedMs,
+      }));
       api
         .llmStatus()
         .then((s) => setLlmMode(s.mode || llmMode))
@@ -974,21 +1049,18 @@ export function ProjectAgentsPanel({
         // Stop : seul l'affichage en direct s'arrête ; le run continue côté serveur,
         // le fil repasse en polling pour récupérer la réponse.
         aborted = true;
+        setMessages((prev) => prev.filter((m) => m.id !== draftId));
         setPollEnabled(true);
       } else {
         const msg = String((err as Error).message || err);
-        // La carte d'erreur (avec « Réessayer ») suffit : pas de toast en double sur le composer.
-        setMessages((m) => [...m, { id: localMessageId(), role: 'assistant', content: msg, error: true }]);
+        // La carte d'erreur (avec « Réessayer ») remplace le brouillon, au même endroit.
+        updateDraft(() => ({ id: draftId, role: 'assistant', content: msg, error: true }));
       }
     } finally {
       busyRef.current = false;
       abortRef.current = null;
       setBusy(false);
       markLaunchedStatus(selected, aborted ? 'working' : 'idle');
-      setThinking(null);
-      setThinkDetail(undefined);
-      setLiveActions([]);
-      setLiveReflections([]);
       if (aborted) {
         // Le serveur travaille encore : on ne relance pas de run par-dessus.
         // Le message en attente revient dans la saisie.
@@ -1409,17 +1481,6 @@ export function ProjectAgentsPanel({
                 onApprovePublish={onApprovePublishStable}
               />
             ))}
-            {busy && liveReflections.length > 0 && (
-              <AgentReflectionList items={liveReflections} />
-            )}
-            {busy && liveActions.length > 0 && <AgentActionList actions={liveActions} />}
-            {busy && thinking && (
-              <AgentThinkingBlock
-                label={thinking}
-                detail={thinkDetail}
-                startedAt={thinkStarted || Date.now()}
-              />
-            )}
           </div>
           <JumpToLatest visible={hasUnseen} onClick={jumpToLatest} />
           </div>
