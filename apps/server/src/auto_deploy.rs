@@ -94,7 +94,7 @@ pub async fn ensure_project_webhook(state: &AppState, project: &Project) -> Opti
 
 async fn latest_success_sha(state: &AppState, project_id: i64) -> Option<String> {
     let row: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT git_sha FROM deployments WHERE project_id = $1 AND status IN ('success', 'ready') ORDER BY created_at DESC LIMIT 1",
+        "SELECT git_sha FROM deployments WHERE project_id = $1 AND environment = 'production' AND status IN ('success', 'ready') ORDER BY created_at DESC LIMIT 1",
     )
     .bind(project_id)
     .fetch_optional(&state.pool)
@@ -265,6 +265,8 @@ async fn tick(state: &AppState, ensure_webhooks: bool) {
         if ensure_webhooks {
             let _ = ensure_project_webhook(state, &project).await;
         }
+        // Environnement dev (branche dédiée) : même filet que la prod.
+        crate::dev_env::poll_dev(state, &project).await;
 
         // Incident 2026-09-25 : le poller relançait un deploy toutes les ~3 min tant que le
         // précédent n'avait pas réussi (le SHA déployé ne change qu'au succès), annulant
@@ -296,6 +298,7 @@ async fn has_recent_active_deployment(state: &AppState, project_id: i64) -> bool
     let row: Option<(i64,)> = sqlx::query_as(
         r#"SELECT COUNT(*) FROM deployments
            WHERE project_id = $1
+             AND environment = 'production'
              AND status IN ('queued', 'running', 'building', 'pending', 'deploying')
              AND created_at > $2"#,
     )

@@ -168,6 +168,10 @@ export type Project = {
   production_url?: string | null;
   /** Zone choisie pour cette app. Vide = groupe, puis domaine principal. */
   domain_apex?: string | null;
+  /** Branche de l’environnement dev (null = désactivé). */
+  dev_branch?: string | null;
+  /** URL publique de la dev (`dev-…` / `dev.…`) quand activée. */
+  dev_url?: string | null;
   workdir?: string | null;
   test_command?: string | null;
   server_id?: string | null;
@@ -287,7 +291,29 @@ export type Deployment = {
   logs?: string | null;
   error_summary?: string | null;
   error_hint?: string | null;
+  /** `production` (défaut) ou `dev`. */
+  environment?: string | null;
   created_at?: string;
+};
+
+export type ProjectBranches = {
+  production: { branch: string; url?: string | null };
+  dev: {
+    enabled: boolean;
+    branch?: string | null;
+    url?: string | null;
+    container: string;
+    env_from: string;
+    unsupported_reason?: string | null;
+    last_deployment?: {
+      uuid: string;
+      status: string;
+      git_sha?: string | null;
+      git_message?: string | null;
+      created_at?: string;
+    } | null;
+  };
+  auto_deploy: boolean;
 };
 
 export type SpecFeature = {
@@ -653,6 +679,27 @@ export const api = {
   deploymentLogs: (uuid: string) =>
     request<{ data: { logs?: string; status?: string } } | { logs?: string }>(
       `/deployments/${uuid}/logs`,
+    ),
+  projectBranches: (projectUuid: string) =>
+    request<{ data: ProjectBranches }>(`/projects/${projectUuid}/branches`),
+  setProductionBranch: (projectUuid: string, branch: string, redeploy: boolean) =>
+    request<{ ok: boolean; data: ProjectBranches; deployment_uuid?: string | null }>(
+      `/projects/${projectUuid}/branches/production`,
+      { method: 'PUT', body: JSON.stringify({ branch, redeploy }) },
+    ),
+  setDevBranch: (projectUuid: string, branch: string, deploy: boolean) =>
+    request<{ ok: boolean; data: ProjectBranches; deployment_uuid?: string | null }>(
+      `/projects/${projectUuid}/branches/dev`,
+      { method: 'PUT', body: JSON.stringify({ branch, redeploy: deploy }) },
+    ),
+  disableDevBranch: (projectUuid: string) =>
+    request<{ ok: boolean; data: ProjectBranches }>(`/projects/${projectUuid}/branches/dev`, {
+      method: 'DELETE',
+    }),
+  deployDev: (projectUuid: string) =>
+    request<{ ok: boolean; deployment_uuid: string }>(
+      `/projects/${projectUuid}/branches/dev/deploy`,
+      { method: 'POST', body: '{}' },
     ),
   cancelDeployment: (uuid: string) =>
     request<{ data: Deployment; ok?: boolean; cancelled?: boolean }>(

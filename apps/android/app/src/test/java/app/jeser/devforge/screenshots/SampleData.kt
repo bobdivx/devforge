@@ -185,4 +185,19 @@ object SampleData {
         appVersion = "2.0.199",
         instance = "https://web.jeser.app",
     )
+
+    val branchesDev = app.jeser.devforge.data.ProjectBranches(
+        production = app.jeser.devforge.data.ProdBranch("main", "https://template-studio.jeser.app"),
+        dev = app.jeser.devforge.data.DevBranch(
+            enabled = true,
+            branch = "devforge-dev-test",
+            url = "https://dev-template-studio.jeser.app",
+            lastDeployment = Deployment("d-dev", "success", gitSha = "4f2a9c1", environment = "dev"),
+        ),
+        autoDeploy = true,
+    )
+    val branchesOff = app.jeser.devforge.data.ProjectBranches(
+        production = app.jeser.devforge.data.ProdBranch("main", "https://vigie.jeser.app"),
+        dev = app.jeser.devforge.data.DevBranch(enabled = false, url = "https://dev-vigie.jeser.app"),
+    )
 }

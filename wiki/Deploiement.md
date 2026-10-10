@@ -35,3 +35,18 @@ Chrome **runtime** (Puppeteer / Playwright) : fournis un `Dockerfile` ou `nixpac
 - `POST .../request-repair` — playbook agent (corriger puis redéployer)
 
 Statuts projet typiques : `draft` → `deploying` → `live` / `failed`.
+
+## Branches (prod et dev)
+
+**Paramètres → Branches** :
+
+- **Production** : choisis la branche dans la liste GitHub (avec recherche). Une confirmation propose de redéployer tout de suite ou au prochain déploiement.
+- **Dev** (désactivée par défaut) : choisis une autre branche. DevForge la déploie dans un conteneur séparé (`df-dv…`), distinct de la prod et de l’aperçu du brouillon.
+  - URL : `app.zone.tld` → `dev-app.zone.tld` (un seul niveau, couvert par le certificat de la zone) ; domaine apex `example.com` → `dev.example.com`.
+  - Reprend les variables d’environnement et la protection SSO de la prod. Pas de ports publiés ni de dossiers montés de la prod.
+  - Redéployée à chaque push sur sa branche si l’auto-deploy du projet est actif.
+  - Désactiver supprime le conteneur dev, son image et son entrée DNS. La prod n’est pas touchée.
+  - Non disponible pour les projets docker compose.
+
+Les déploiements sont étiquetés **Prod** / **Dev** dans l’historique (web et Android).
+

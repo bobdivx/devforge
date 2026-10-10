@@ -57,7 +57,7 @@ async fn auth_project(
 
 async fn latest_deploy_sha(state: &AppState, project: &Project) -> Option<String> {
     let row: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT git_sha FROM deployments WHERE project_id = $1 AND status IN ('ready', 'success', 'running') ORDER BY created_at DESC LIMIT 1",
+        "SELECT git_sha FROM deployments WHERE project_id = $1 AND environment = 'production' AND status IN ('ready', 'success', 'running') ORDER BY created_at DESC LIMIT 1",
     )
     .bind(project.id)
     .fetch_optional(&state.pool)
@@ -72,7 +72,7 @@ async fn any_deploy_sha(state: &AppState, project: &Project) -> Option<String> {
         return Some(s);
     }
     let row: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT git_sha FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1",
+        "SELECT git_sha FROM deployments WHERE project_id = $1 AND environment = 'production' ORDER BY created_at DESC LIMIT 1",
     )
     .bind(project.id)
     .fetch_optional(&state.pool)

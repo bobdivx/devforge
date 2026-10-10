@@ -2142,6 +2142,10 @@ async fn github_webhook(
         )
     })?;
 
+    // Environnement dev : branche `dev_branch` → conteneur dev séparé (tâche détachée).
+    let dev_deployed =
+        crate::dev_env::on_push(&state, &projects, branch, sha.as_deref(), &message).await;
+
     let mut deployed = Vec::new();
     for project in projects {
         // Filter: only auto-deploy if enabled for this project (default=1)
@@ -2257,7 +2261,7 @@ async fn github_webhook(
         }));
     }
 
-    Ok(Json(json!({"ok": true, "deployed": deployed})))
+    Ok(Json(json!({"ok": true, "deployed": deployed, "dev_deployed": dev_deployed})))
 }
 
 fn verify_github_sig(secret: &str, body: &[u8], signature_header: &str) -> bool {

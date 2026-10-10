@@ -331,6 +331,7 @@ mod tests {
             volumes_json: "[]".into(),
             runtime_json: "{}".into(),
             domain_apex: "".into(),
+            dev_branch: None,
             created_at: "".into(),
             updated_at: "".into(),
         }

@@ -193,6 +193,13 @@ fun DetailsSheet(
                 onOpen = { runCatching { uri.openUri(p) } }, onCopy = { clip.setText(AnnotatedString(p)) })
         }
 
+        state.project?.let { p ->
+            if (!p.gitRepository.isNullOrBlank()) {
+                SectionLabel("Branches")
+                BranchesSection(p)
+            }
+        }
+
         val sync = syncLabel(state.git)
         val workdir = state.git?.workdir?.takeIf { it.available }
         if (sync != null || workdir != null) SectionLabel("GitHub")

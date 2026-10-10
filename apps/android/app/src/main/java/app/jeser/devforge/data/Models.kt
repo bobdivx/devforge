@@ -43,6 +43,9 @@ data class Project(
     @SerialName("production_url") val productionUrl: String? = null,
     @SerialName("git_repository") val gitRepository: String? = null,
     @SerialName("git_branch") val gitBranch: String? = null,
+    /** Branche de l'environnement dev (null = désactivé). */
+    @SerialName("dev_branch") val devBranch: String? = null,
+    @SerialName("dev_url") val devUrl: String? = null,
     @SerialName("build_pack") val buildPack: String? = null,
     @SerialName("group_name") val groupName: String? = null,
     val role: String? = null,
@@ -96,7 +99,12 @@ data class Deployment(
     @SerialName("created_at") val createdAt: String = "",
     @SerialName("finished_at") val finishedAt: String? = null,
     val logs: String? = null,
+    /** `production` (défaut) ou `dev`. */
+    val environment: String? = null,
 ) {
+    /** Déploiement de l'environnement dev (sinon prod). */
+    val isDev: Boolean get() = environment.equals("dev", ignoreCase = true)
+    val envLabel: String get() = if (isDev) "Dev" else "Prod"
     val isFailed: Boolean get() = status == "failed" || status == "error"
     val isRunning: Boolean get() = status in setOf("running", "queued", "building", "pending", "deploying")
     val isSuccess: Boolean get() = status in setOf("success", "ready", "completed", "live")
@@ -399,3 +407,43 @@ data class DraftSummary(
 
 @Serializable
 data class DraftList(val drafts: List<DraftSummary> = emptyList())
+
+/** `GET /projects/{uuid}/branches` : branche de prod + environnement dev. */
+@Serializable
+data class ProjectBranches(
+    val production: ProdBranch = ProdBranch(),
+    val dev: DevBranch = DevBranch(),
+    @SerialName("auto_deploy") val autoDeploy: Boolean = false,
+)
+
+@Serializable
+data class ProdBranch(
+    val branch: String = "main",
+    val url: String? = null,
+)
+
+@Serializable
+data class DevBranch(
+    val enabled: Boolean = false,
+    val branch: String? = null,
+    val url: String? = null,
+    @SerialName("unsupported_reason") val unsupportedReason: String? = null,
+    @SerialName("last_deployment") val lastDeployment: Deployment? = null,
+)
+
+@Serializable
+data class BranchUpdate(
+    val ok: Boolean = false,
+    val data: ProjectBranches = ProjectBranches(),
+    @SerialName("deployment_uuid") val deploymentUuid: String? = null,
+)
+
+@Serializable
+data class GithubBranch(val name: String)
+
+/** `owner/repo` d'une URL GitHub, sinon null. */
+fun githubOwnerRepo(url: String?): Pair<String, String>? {
+    val m = Regex("""github\.com[/:]([^/]+)/([^/#?]+?)(?:\.git)?(?:[/#?].*)?$""", RegexOption.IGNORE_CASE)
+        .find(url?.trim().orEmpty()) ?: return null
+    return m.groupValues[1] to m.groupValues[2]
+}

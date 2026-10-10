@@ -130,6 +130,11 @@ pub async fn supersede_in_progress(
            WHERE project_id = $4
              AND uuid <> $5
              AND status IN ('queued', 'running', 'building')
+             -- Prod et dev ne s'annulent pas entre eux.
+             AND environment = COALESCE(
+               (SELECT environment FROM deployments WHERE uuid = $5),
+               'production'
+             )
            RETURNING uuid"#,
     )
     .bind(&note)
@@ -199,6 +204,7 @@ pub async fn cancel_one_deployment(
     let active: (i64,) = sqlx::query_as(
         r#"SELECT COUNT(*) FROM deployments
            WHERE project_id = $1
+             AND environment = 'production'
              AND status IN ('queued', 'running', 'building', 'pending', 'deploying')"#,
     )
     .bind(project_id)
@@ -209,7 +215,8 @@ pub async fn cancel_one_deployment(
     if active.0 == 0 {
         let has_success: (i64,) = sqlx::query_as(
             r#"SELECT COUNT(*) FROM deployments
-               WHERE project_id = $1 AND status IN ('success', 'deployed', 'ok')"#,
+               WHERE project_id = $1 AND environment = 'production'
+                 AND status IN ('success', 'deployed', 'ok')"#,
         )
         .bind(project_id)
         .fetch_one(pool)
@@ -217,7 +224,8 @@ pub async fn cancel_one_deployment(
         .unwrap_or((0,));
         let last_failed: (i64,) = sqlx::query_as(
             r#"SELECT COUNT(*) FROM deployments
-               WHERE project_id = $1 AND status IN ('failed', 'error')"#,
+               WHERE project_id = $1 AND environment = 'production'
+                 AND status IN ('failed', 'error')"#,
         )
         .bind(project_id)
         .fetch_one(pool)
@@ -425,11 +433,13 @@ pub async fn reap_orphans(
         let _ = sqlx::query(
             r#"UPDATE projects SET status = CASE WHEN EXISTS (
                    SELECT 1 FROM deployments WHERE project_id = $1 AND status = 'success'
+                     AND environment = 'production'
                ) THEN 'live' ELSE 'failed' END,
                updated_at = $2
                WHERE id = $1 AND status = 'deploying'
                  AND NOT EXISTS (
                    SELECT 1 FROM deployments WHERE project_id = $1
+                     AND environment = 'production'
                      AND status IN ('queued', 'running', 'building')
                  )"#,
         )
@@ -646,6 +656,7 @@ mod tests {
                 uuid TEXT PRIMARY KEY,
                 project_id BIGINT NOT NULL,
                 status TEXT NOT NULL,
+                environment TEXT NOT NULL DEFAULT 'production',
                 logs TEXT,
                 error_summary TEXT,
                 error_hint TEXT,
@@ -725,6 +736,7 @@ mod tests {
                 uuid TEXT PRIMARY KEY,
                 project_id BIGINT NOT NULL,
                 status TEXT NOT NULL,
+                environment TEXT NOT NULL DEFAULT 'production',
                 logs TEXT,
                 error_summary TEXT,
                 error_hint TEXT,
@@ -775,6 +787,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn supersede_keeps_prod_and_dev_independent() {
+        let pool = devforge_database::ephemeral_pg().await;
+        sqlx::query(
+            r#"CREATE TABLE deployments (
+                uuid TEXT PRIMARY KEY,
+                project_id BIGINT NOT NULL,
+                status TEXT NOT NULL,
+                environment TEXT NOT NULL DEFAULT 'production',
+                logs TEXT,
+                error_summary TEXT,
+                error_hint TEXT,
+                finished_at TEXT,
+                updated_at TEXT
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (uuid, env) in [
+            ("prod-run", "production"),
+            ("dev-run", "dev"),
+            ("dev-new", "dev"),
+            ("prod-new", "production"),
+        ] {
+            sqlx::query(
+                "INSERT INTO deployments (uuid, project_id, status, environment, logs) VALUES ($1, 9, 'running', $2, 'x')",
+            )
+            .bind(uuid)
+            .bind(env)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let queue = DeployQueue::new();
+        // Un nouveau déploiement dev n'annule que l'ancien dev.
+        let cancelled = supersede_in_progress(&queue, &pool, 9, "dev-new").await;
+        assert_eq!(cancelled, vec!["dev-run".to_string()]);
+        // Un nouveau déploiement prod n'annule que l'ancienne prod.
+        let cancelled = supersede_in_progress(&queue, &pool, 9, "prod-new").await;
+        assert_eq!(cancelled, vec!["prod-run".to_string()]);
+        let rows: Vec<(String, String)> =
+            sqlx::query_as("SELECT uuid, status FROM deployments ORDER BY uuid")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("dev-new".into(), "running".into()),
+                ("dev-run".into(), "cancelled".into()),
+                ("prod-new".into(), "running".into()),
+                ("prod-run".into(), "cancelled".into()),
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn run_slot_returns_cancelled_when_signaled() {
         let pool = devforge_database::ephemeral_pg().await;
         sqlx::query(
@@ -782,6 +851,7 @@ mod tests {
                 uuid TEXT PRIMARY KEY,
                 project_id BIGINT NOT NULL,
                 status TEXT NOT NULL,
+                environment TEXT NOT NULL DEFAULT 'production',
                 logs TEXT,
                 updated_at TEXT
             )"#,
@@ -826,6 +896,7 @@ mod tests {
                 uuid TEXT PRIMARY KEY,
                 project_id BIGINT NOT NULL,
                 status TEXT NOT NULL,
+                environment TEXT NOT NULL DEFAULT 'production',
                 logs TEXT,
                 error_summary TEXT,
                 error_hint TEXT,
