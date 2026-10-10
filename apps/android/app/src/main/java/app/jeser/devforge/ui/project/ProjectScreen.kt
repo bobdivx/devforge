@@ -99,7 +99,7 @@ data class ProjectActions(
 )
 
 /** Feuilles de la page app (une seule ouverte à la fois). */
-enum class ProjectSheet { None, Details, More, Deploys, Stop, Restart, Deploy, NewFeature, Draft, DraftFile, DraftValidate, DraftDiscard }
+enum class ProjectSheet { None, Details, More, Deploys, Stop, Restart, Deploy, NewFeature, Draft, DraftFile, DraftValidate, DraftDiscard, Chat }
 
 private data class Chip(val key: String, val label: String, val danger: Boolean = false)
 
@@ -200,19 +200,26 @@ fun ProjectScreen(
                             ChatPane(state, input, { input = it }, actions, onNewFeature = { sheet = ProjectSheet.NewFeature }, modifier = Modifier.weight(1f))
                         }
                     } else {
-                        // Hauteur réelle du clavier (isImeVisible vaut true tant que les insets ne sont pas connus).
-                        val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+                        // Mobile : Overview par défaut, chat ouvrable en sheet.
                         val side = if (maxWidth >= 600.dp) 24.dp else 12.dp
-                        Column(Modifier.fillMaxSize()) {
-                            // Une seule bande d'état : la discussion garde l'essentiel de l'écran.
-                            AnimatedVisibility(visible = !imeOpen) {
-                                Column(Modifier.padding(horizontal = side).padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    StatusStrip(state, onClick = { sheet = ProjectSheet.Details })
-                                    DeployBanner(state, onDeploy = { sheet = ProjectSheet.Deploy }, onLogs = { state.latest?.let(actions.onOpenLogs) ?: actions.onOpenRuntimeLogs() })
-                                    DraftBanner(state.draft, onClick = openDraft)
-                                }
+                        Box(Modifier.fillMaxSize()) {
+                            Column(
+                                Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                                    .padding(horizontal = side).padding(bottom = 80.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                StatusStrip(state, onClick = { sheet = ProjectSheet.Details })
+                                DeployBanner(state, onDeploy = { sheet = ProjectSheet.Deploy }, onLogs = { state.latest?.let(actions.onOpenLogs) ?: actions.onOpenRuntimeLogs() })
+                                DraftBanner(state.draft, onClick = openDraft)
+                                RecentDeploys(state, onOpen = actions.onOpenLogs)
                             }
-                            ChatPane(state, input, { input = it }, actions, onNewFeature = { sheet = ProjectSheet.NewFeature }, modifier = Modifier.weight(1f))
+                            FloatingActionButton(
+                                onClick = { sheet = ProjectSheet.Chat },
+                                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                                containerColor = DfColors.Accent,
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.Subject, contentDescription = "Discuter")
+                            }
                         }
                     }
                 }
@@ -289,6 +296,16 @@ fun ProjectScreen(
                 onDismiss = { sheet = ProjectSheet.Draft },
                 onConfirm = { actions.onDraftDiscard { sheet = ProjectSheet.None } },
             )
+            ProjectSheet.Chat -> ModalBottomSheet(
+                onDismissRequest = close,
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            ) {
+                ChatPane(
+                    state, input, { input = it }, actions,
+                    onNewFeature = { sheet = ProjectSheet.NewFeature },
+                    modifier = Modifier.fillMaxHeight(0.9f).padding(16.dp),
+                )
+            }
             ProjectSheet.None -> Unit
         }
     }

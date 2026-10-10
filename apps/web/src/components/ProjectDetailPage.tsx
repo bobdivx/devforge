@@ -1,1 +1,4797 @@
-FULL_CONTENT_WILL_BE_HANDLED
+import { useEffect, useRef, useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
+import { api, type AppGroupMember, type ClusterNode, type Deployment, type InstanceDomain, type Project, type ProjectRuntime, type PublishedPort } from '../lib/api';
+import { nodeShortLabel, resolveNode } from '../lib/cluster-display';
+import { cn } from '../lib/cn';
+import { partitionEnvRows } from '../lib/env-groups';
+import { projectNavMore, projectNavPrimary } from '../lib/nav';
+import { projectStatusMeta, projectSyncMeta } from '../lib/status';
+import { AppIcon, statusDotClass } from './AppIcon';
+import { AppShell } from './AppShell';
+import { ModelSentence } from './ModelSentence';
+import { ProjectAgentsHub } from './ProjectAgentsHub';
+import { ProjectHome } from './ProjectHome';
+import { StatusBadge } from './StatusBadge';
+import { DeployLogSheet } from './DeployLogSheet';
+import { ProjectSpecsModal } from './ProjectSpecsModal';
+import { ProjectActionsPanel } from './ProjectActionsPanel';
+import { ProjectGitPanel } from './ProjectGitPanel';
+import { ProjectOidcPanel } from './ProjectOidcPanel';
+import { ProjectGroupPanel, ProjectGroupSuggest } from './GroupPage';
+import { ProjectWorkspace } from './ProjectWorkspace';
+import { ProjectRulesModal } from './workspace/ProjectRulesModal';
+import { NodeSelect } from './NodeSelect';
+import {
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  ExternalLink,
+  FileCode,
+  HeartPulse,
+  Rocket,
+  RotateCw,
+  Square,
+} from 'lucide-preact';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  FadeIn,
+  HubAddTile,
+  HubGrid,
+  HubIcon,
+  HubTile,
+  Input,
+  LiveStatus,
+  Modal,
+  Spinner,
+  Table,
+  Td,
+  Tr,
+  useToast,
+} from './ui';
+
+type Tab =
+  | 'home'
+  | 'overview'
+  | 'workspace'
+  | 'deployments'
+  | 'git'
+  | 'actions'
+  | 'agents'
+  | 'domains'
+  | 'database'
+  | 'env'
+  | 'backups'
+  | 'crons'
+  | 'settings';
+
+type Props = { uuid?: string; tab?: Tab };
+
+function readQuery(): { uuid: string; tab: Tab; builder?: boolean; agent?: string; spec?: string } {
+  if (typeof window === 'undefined') {
+    return { uuid: '', tab: 'overview' };
+  }
+  const q = new URLSearchParams(window.location.search);
+  // Sans ?tab : Tableau de bord (Overview). Les anciens ?tab= restent valides.
+  const tab = (q.get('tab') as Tab) || 'overview';
+  const allowed: Tab[] = [
+    'home',
+    'overview',
+    'workspace',
+    'deployments',
+    'git',
+    'actions',
+    'agents',
+    'domains',
+    'database',
+    'env',
+    'backups',
+    'crons',
+    'settings',
+  ];
+  return {
+    uuid: q.get('uuid') || '',
+    tab: allowed.includes(tab) ? tab : 'overview',
+    builder: q.get('builder') === '1',
+    agent: q.get('agent') || undefined,
+    spec: q.get('spec') || undefined,
+  };
+}
+
+function deployTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
+  if (status === 'deployed' || status === 'success' || status === 'ok') return 'ok';
+  if (status === 'failed' || status === 'error' || status === 'cancelled' || status === 'canceled') return 'danger';
+  if (
+    status === 'deploying' ||
+    status === 'building' ||
+    status === 'pending' ||
+    status === 'queued' ||
+    status === 'running'
+  ) {
+    return 'warn';
+  }
+  return projectStatusMeta(status).tone;
+}
+
+
+function isDeployInProgress(status: string): boolean {
+  return ['queued', 'running', 'building', 'pending', 'deploying'].includes(status);
+}
+
+/** Prefers any in-progress deploy over a stale last-success (Overview + list). */
+function pickCurrentDeployment(deployments: Deployment[]): Deployment | null {
+  const active = deployments.find((d) => isDeployInProgress(d.status));
+  return active ?? deployments[0] ?? null;
+}
+
+function sortDeploymentsForDisplay(items: Deployment[]): Deployment[] {
+  return [...items].sort((a, b) => {
+    const ap = isDeployInProgress(a.status) ? 0 : 1;
+    const bp = isDeployInProgress(b.status) ? 0 : 1;
+    if (ap !== bp) return ap - bp;
+    return (b.created_at || '').localeCompare(a.created_at || '');
+  });
+}
+
+function formatWhen(iso?: string | null) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString('fr-FR', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+/** Tuiles Deployments visibles par défaut (strip compact). */
+const DEPLOYMENTS_VISIBLE_DEFAULT = 5;
+/** Backups / crons : historique un peu plus large. */
+const HISTORY_VISIBLE_DEFAULT = 12;
+
+export function ProjectDetailPage(props: Props) {
+  const initial = readQuery();
+  const uuid = props.uuid ?? initial.uuid;
+  const tab = props.tab ?? initial.tab;
+  const builderMode = initial.builder;
+  const builderAgentUuid = initial.agent;
+  const pendingSpec = initial.spec;
+  const [featureOpen, setFeatureOpen] = useState(!!pendingSpec);
+  const [project, setProject] = useState<Project | null>(null);
+  const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [rulesModalOpen, setRulesModalOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [workspaceBeta, setWorkspaceBeta] = useState(true);
+
+  useEffect(() => {
+    api
+      .bootstrap()
+      .then((b) => {
+        setIsAdmin(b.user?.role === 'instance_admin');
+        setWorkspaceBeta(b.features?.workspace !== false);
+      })
+      .catch(() => {
+        setIsAdmin(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!uuid) {
+      setError('Lien incomplet : il manque l’identifiant de l’app.');
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    // Premier paint : Postgres seul (pas de probe HTTP/Docker ni GitHub).
+    api
+      .project(uuid)
+      .then((p) => {
+        if (cancelled) return;
+        setProject(p.data);
+        if (p.deployments) {
+          setDeployments(p.deployments);
+        } else {
+          // Fallback si l’API ne renvoie pas encore les deployments inline.
+          void api.deployments(uuid).then((d) => {
+            if (!cancelled) setDeployments(d.data ?? []);
+          });
+        }
+        setError(null);
+        setLoading(false);
+        // Refresh live en arrière-plan (reach + sync GitHub) sans bloquer l’UI.
+        void api
+          .project(uuid, { live: true })
+          .then((live) => {
+            if (cancelled) return;
+            setProject(live.data);
+            if (live.deployments) setDeployments(live.deployments);
+          })
+          .catch(() => {});
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(String(e.message || e));
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [uuid, reloadKey]);
+
+  // Garde l’Overview à jour : préférer le running courant au succès stale.
+  useEffect(() => {
+    const active = deployments.some((d) => isDeployInProgress(d.status));
+    if (!active) return;
+    const interval = setInterval(() => {
+      void api
+        .deployments(uuid)
+        .then((d) => setDeployments(d.data ?? []))
+        .catch(() => {});
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [uuid, deployments]);
+
+  const titles: Record<string, string> = {
+    home: project?.name ?? 'Projet',
+    overview: project?.name ?? 'Projet',
+    workspace: 'Espace de travail',
+    deployments: 'Déploiements',
+    git: 'Git',
+    actions: 'Actions',
+    agents: 'Agents',
+    domains: 'Domaines',
+    database: 'Base de données',
+    env: 'Env',
+    backups: 'Sauvegardes',
+    crons: 'Crons',
+    settings: 'Paramètres',
+  };
+
+  const navOpts = { workspace: workspaceBeta };
+  const isHome = tab === 'home';
+
+  if (isHome) {
+    return (
+      <AppShell active="projects" sideNavLabel="" wide hideHeaderOnMobile>
+        {error && !project && !loading ? (
+          <ProjectLoadError error={error} onRetry={() => setReloadKey((k) => k + 1)} />
+        ) : (
+        <>
+        {error && (
+          <Alert tone="warn" class="mb-4">
+            {error}
+          </Alert>
+        )}
+        <ProjectHome
+          uuid={uuid}
+          project={project}
+          deployments={deployments}
+          loading={loading}
+          onDeployments={(d) => setDeployments(d)}
+          onNewFeature={() => setFeatureOpen(true)}
+          onOpenRules={() => setRulesModalOpen(true)}
+          groupSwitcher={
+            project?.group_uuid ? (
+              <GroupSiblingSwitcher
+                projectUuid={uuid}
+                groupUuid={project.group_uuid}
+                groupName={project.group_name}
+              />
+            ) : null
+          }
+        />
+        <ProjectRulesModal
+          open={rulesModalOpen}
+          onClose={() => setRulesModalOpen(false)}
+          projectUuid={uuid}
+          projectName={project?.name}
+        />
+        <ProjectSpecsModal
+          projectUuid={uuid}
+          open={featureOpen}
+          onClose={() => setFeatureOpen(false)}
+        />
+        </>
+        )}
+      </AppShell>
+    );
+  }
+
+  return (
+    <AppShell
+      hideHeaderOnMobile
+      active="projects"
+      projectNav={projectNavPrimary(uuid, navOpts)}
+      projectNavMore={projectNavMore(uuid, navOpts)}
+      sideNavLabel=""
+      title={
+        tab === 'workspace'
+          ? undefined
+          : (
+              <span class="flex flex-wrap items-center gap-2.5 sm:gap-3">
+                <span class="min-w-0 break-words">{titles[tab]}</span>
+                {project?.group_uuid ? (
+                  <GroupSiblingSwitcher
+                    projectUuid={uuid}
+                    groupUuid={project.group_uuid}
+                    groupName={project.group_name}
+                    // Tableau de bord : le titre est déjà le nom de l'app, la pastille montre le groupe.
+                    currentName={tab === 'overview' ? undefined : project.name}
+                    tab={tab}
+                  />
+                ) : project && tab !== 'overview' ? (
+                  <CurrentAppChip projectUuid={uuid} name={project.name} />
+                ) : null}
+              </span>
+            )
+      }
+      description={
+        tab === 'agents'
+          ? 'Agents autonomes réveillés par cron ou événement — le chat reste sur le Coordinateur / Workspace.'
+          : undefined
+      }
+      actions={
+        <>
+          <Button size="sm" class="max-lg:h-11" onClick={() => setFeatureOpen(true)}>
+            Nouvelle fonctionnalité
+          </Button>
+          <StatusBadge compact class="lg:hidden" />
+        </>
+      }
+      belowTitle={
+        <ProjectActivityStrip
+          uuid={uuid}
+          deployments={deployments}
+          project={project}
+        />
+      }
+    >
+      {error && !project && !loading ? (
+        <ProjectLoadError error={error} onRetry={() => setReloadKey((k) => k + 1)} />
+      ) : error ? (
+        <Alert tone="warn" class="mb-4">
+          {error}
+        </Alert>
+      ) : null}
+      {tab === 'overview' && loading && !project && (
+        <p class="text-sm text-[var(--color-ink-muted)]">Chargement du projet…</p>
+      )}
+      {tab === 'overview' && project && (
+        <ProjectOverview
+          uuid={uuid}
+          project={project}
+          deployments={deployments}
+          isAdmin={isAdmin}
+          onDeployments={(d) => setDeployments(d)}
+          onProject={setProject}
+          onOpenRules={() => setRulesModalOpen(true)}
+        />
+      )}
+      {tab === 'workspace' && !workspaceBeta && (
+        <Alert tone="warn">Le workspace est une fonctionnalité bêta désactivée sur cette instance.</Alert>
+      )}
+      {tab === 'workspace' && workspaceBeta && (
+        <ProjectWorkspace
+          projectUuid={uuid}
+          project={project}
+          builderMode={builderMode}
+          builderAgentUuid={builderAgentUuid}
+        />
+      )}
+      {tab === 'deployments' && (
+        <DeploymentsPanel
+          projectUuid={uuid}
+          initial={deployments}
+          onRefresh={(d) => setDeployments(d)}
+        />
+      )}
+      {tab === 'git' && (
+        <ProjectGitPanel
+          projectUuid={uuid}
+          project={project}
+          onDeployed={() => {
+            void api.deployments(uuid).then((r) => setDeployments(r.data ?? []));
+          }}
+        />
+      )}
+      {tab === 'actions' && (
+        <ProjectActionsPanel
+          projectUuid={uuid}
+          gitRepository={project?.git_repository}
+        />
+      )}
+      {tab === 'agents' && (
+        <ProjectAgentsHub projectUuid={uuid} projectName={project?.name ?? ''} />
+      )}
+      {tab === 'database' && <DatabasePanel uuid={uuid} />}
+      {tab === 'env' && <EnvPanel uuid={uuid} />}
+      {tab === 'backups' && <BackupsPanel projectUuid={uuid} />}
+      {tab === 'crons' && <CronsPanel projectUuid={uuid} />}
+      {tab === 'domains' && (
+        <DomainsPanel
+          uuid={uuid}
+          project={project}
+          onProjectUpdate={(p) => setProject(p)}
+        />
+      )}
+      {tab === 'settings' && project && (
+        <ProjectSettingsPanel project={project} isAdmin={isAdmin} onSaved={(p) => setProject(p)} />
+      )}
+      {tab === 'settings' && !project && !error && (
+        <Card>
+          <p class="text-sm text-[var(--color-ink-muted)]">Chargement…</p>
+        </Card>
+      )}
+      <ProjectRulesModal
+        open={rulesModalOpen}
+        onClose={() => setRulesModalOpen(false)}
+        projectUuid={uuid}
+        projectName={project?.name}
+      />
+      <ProjectSpecsModal
+        projectUuid={uuid}
+        open={featureOpen}
+        onClose={() => setFeatureOpen(false)}
+      />
+    </AppShell>
+  );
+}
+
+
+function ProjectActivityStrip({
+  uuid,
+  deployments,
+  project,
+}: {
+  uuid: string;
+  deployments: Deployment[];
+  project: Project | null;
+}) {
+  const active = deployments.filter((d) => isDeployInProgress(d.status));
+  const failed = deployments.find((d) => d.status === 'failed' || d.status === 'error');
+  const unhealthy =
+    project && (project.status === 'unhealthy' || project.status === 'unrouted')
+      ? project
+      : null;
+
+  const items: Array<{
+    key: string;
+    tone: 'ok' | 'warn' | 'danger' | 'neutral';
+    label: string;
+    detail?: string;
+    href?: string;
+  }> = [];
+
+  for (const d of active.slice(0, 2)) {
+    items.push({
+      key: `deploy-${d.uuid}`,
+      tone: 'warn',
+      label: `Déploiement ${d.status}`,
+      detail: d.git_sha ? d.git_sha.slice(0, 7) : formatWhen(d.created_at),
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`,
+    });
+  }
+
+  if (!active.length && failed && pickCurrentDeployment(deployments)?.uuid === failed.uuid) {
+    items.push({
+      key: `fail-${failed.uuid}`,
+      tone: 'danger',
+      label: 'Échec de déploiement',
+      detail: failed.git_message || formatWhen(failed.created_at),
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`,
+    });
+  }
+
+  if (unhealthy) {
+    items.push({
+      key: 'health',
+      tone: 'danger',
+      label: projectStatusMeta(unhealthy.status).label,
+      detail:
+        unhealthy.status === 'unrouted'
+          ? 'Route Traefik absente'
+          : `Pas de réponse sur le port ${unhealthy.port || 3000}`,
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`,
+    });
+  }
+
+  if (items.length === 0) return null;
+
+  return (
+    <div class="mb-4 flex flex-wrap gap-2" aria-label="Activité du projet">
+      {items.map((item) => (
+        <a
+          key={item.key}
+          href={item.href}
+          class={cn(
+            'inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors',
+            item.tone === 'warn' &&
+              'border-[var(--color-warn)]/30 bg-[var(--color-warn)]/10 text-[var(--color-warn)]',
+            item.tone === 'danger' &&
+              'border-[var(--color-danger)]/30 bg-[var(--color-danger)]/10 text-[var(--color-danger)]',
+            item.tone === 'ok' &&
+              'border-[var(--color-ok)]/30 bg-[var(--color-ok)]/10 text-[var(--color-ok)]',
+            item.tone === 'neutral' &&
+              'border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)]',
+          )}
+        >
+          <span
+            class={cn(
+              'h-1.5 w-1.5 shrink-0 rounded-full',
+              item.tone === 'warn' && 'animate-pulse bg-[var(--color-warn)]',
+              item.tone === 'danger' && 'bg-[var(--color-danger)]',
+              item.tone === 'ok' && 'bg-[var(--color-ok)]',
+              item.tone === 'neutral' && 'bg-[var(--color-ink-faint)]',
+            )}
+            aria-hidden
+          />
+          <span class="font-medium">{item.label}</span>
+          {item.detail ? (
+            <span class="truncate opacity-80">{item.detail}</span>
+          ) : null}
+        </a>
+      ))}
+    </div>
+  );
+}
+
+/** Pastille « app courante » (apps sans groupe) : toujours le nom de l'app ouverte. */
+function CurrentAppChip({ projectUuid, name }: { projectUuid: string; name: string }) {
+  return (
+    <a
+      href={`/app/projects/view?uuid=${encodeURIComponent(projectUuid)}`}
+      class="df-hit inline-flex max-w-[14rem] items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1 text-xs font-medium text-[var(--color-ink)] hover:bg-white/5"
+      title={`App : ${name}`}
+      aria-label={`App : ${name}. Revenir à l’app`}
+    >
+      <span class="truncate">{name}</span>
+    </a>
+  );
+}
+
+function GroupSiblingSwitcher({
+  projectUuid,
+  groupUuid,
+  groupName,
+  currentName,
+  tab,
+}: {
+  projectUuid: string;
+  groupUuid: string;
+  groupName?: string | null;
+  /**
+   * Nom de l'app ouverte. Fourni sur les onglets détaillés (le titre est « Déploiements »,
+   * « Git »…) : la pastille affiche alors l'app courante, jamais seulement le groupe.
+   */
+  currentName?: string | null;
+  /** Onglet courant, conservé quand on passe à une autre app du groupe. */
+  tab?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [members, setMembers] = useState<AppGroupMember[]>([]);
+  const [loading, setLoading] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api
+      .group(groupUuid)
+      .then((r) => {
+        if (!cancelled) setMembers(r.data?.members ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setMembers([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [groupUuid]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const siblings = members.filter((m) => m.project_uuid !== projectUuid);
+  const group = groupName || 'Groupe';
+  // Préfixe « Groupe / » seulement s'il apporte quelque chose (pas « Popcornn / popcornn »).
+  const showGroupPrefix =
+    !!currentName && !!groupName && groupName.trim().toLowerCase() !== currentName.trim().toLowerCase();
+  const label = currentName ? (
+    <>
+      {showGroupPrefix && (
+        <span class="hidden max-w-[7rem] truncate text-[var(--color-ink-faint)] sm:inline">
+          {groupName}
+          <span aria-hidden> /</span>
+        </span>
+      )}
+      <span class="truncate text-[var(--color-ink)]">{currentName}</span>
+    </>
+  ) : (
+    <span class="truncate">{group}</span>
+  );
+  const tabSuffix = tab && tab !== 'home' ? `&tab=${encodeURIComponent(tab)}` : '';
+
+  if (!loading && siblings.length === 0 && members.length <= 1) {
+    // Seule dans son groupe : lien compact vers la page du groupe.
+    return (
+      <a
+        href={`/app/groups/view?uuid=${encodeURIComponent(groupUuid)}`}
+        class="df-hit inline-flex max-w-[14rem] items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1 text-xs font-medium text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]"
+        title={currentName ? `App : ${currentName} · groupe ${group}` : group}
+      >
+        {label}
+      </a>
+    );
+  }
+
+  return (
+    <div class="relative" ref={ref}>
+      <button
+        type="button"
+        class="df-hit inline-flex max-w-[16rem] items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1 text-xs font-medium text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={
+          currentName
+            ? `App : ${currentName} (groupe ${group}). Changer d’app du groupe`
+            : `Groupe ${group}. Apps du même groupe`
+        }
+        onClick={() => setOpen((v) => !v)}
+        title="Apps du même groupe"
+      >
+        {label}
+        <ChevronDown size={12} class={cn('shrink-0 opacity-70', open && 'rotate-180')} aria-hidden />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          class="absolute left-0 top-full z-30 mt-1 min-w-[14rem] max-w-[18rem] rounded-xl border border-[var(--color-line)] bg-[var(--color-card)] p-1 shadow-xl"
+        >
+          <a
+            href={`/app/groups/view?uuid=${encodeURIComponent(groupUuid)}`}
+            class="flex items-center rounded-lg px-3 py-2 text-xs font-medium text-[var(--color-accent)] hover:bg-white/5 max-lg:min-h-11"
+            onClick={() => setOpen(false)}
+          >
+            Voir le groupe
+          </a>
+          <div class="my-1 border-t border-[var(--color-line)]" />
+          {loading ? (
+            <p class="px-3 py-2 text-xs text-[var(--color-ink-muted)]">Chargement…</p>
+          ) : (
+            members.map((m) => {
+              const current = m.project_uuid === projectUuid;
+              return (
+                <a
+                  key={m.project_uuid}
+                  role="option"
+                  aria-selected={current}
+                  href={`/app/projects/view?uuid=${encodeURIComponent(m.project_uuid)}${tabSuffix}`}
+                  class={cn(
+                    'flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs transition-colors max-lg:min-h-11',
+                    current
+                      ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
+                      : 'text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)]',
+                  )}
+                  onClick={() => setOpen(false)}
+                >
+                  <span class="min-w-0 truncate">{m.name}</span>
+                  <span class="shrink-0 text-[10px] uppercase tracking-wide opacity-70">
+                    {m.role}
+                  </span>
+                </a>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type HealthItem = {
+  key: string;
+  label: string;
+  detail: string;
+  tone: 'ok' | 'warn' | 'danger' | 'neutral';
+  href?: string;
+};
+
+function ProjectOverview({
+  uuid,
+  project,
+  deployments,
+  isAdmin,
+  onDeployments,
+  onProject,
+  onOpenRules,
+}: {
+  uuid: string;
+  project: Project;
+  deployments: Deployment[];
+  isAdmin: boolean;
+  onDeployments: (d: Deployment[]) => void;
+  onProject: (project: Project) => void;
+  onOpenRules: () => void;
+}) {
+  const toast = useToast();
+  const [envCount, setEnvCount] = useState<number | null>(null);
+  const [envKeys, setEnvKeys] = useState<string[]>([]);
+  const [dbLinks, setDbLinks] = useState<
+    Array<{ id: string; provider: string; resource_name: string }>
+  >([]);
+  const [domainCount, setDomainCount] = useState<number | null>(null);
+  const [gitSync, setGitSync] = useState<Project['sync'] | null>(project.sync ?? null);
+  const [lifeBusy, setLifeBusy] = useState<string | null>(null);
+  const [lifeDetail, setLifeDetail] = useState<string | null>(null);
+  const [deployBusy, setDeployBusy] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyShowAll, setHistoryShowAll] = useState(false);
+  const [autresOpen, setAutresOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [nodes, setNodes] = useState<ClusterNode[]>([]);
+
+  // Préférer un déploiement encore en cours (sinon le succès stale masque le running).
+  const latest = pickCurrentDeployment(deployments);
+  // Ne remonter une erreur que si le déploiement *courant* a échoué (pas un vieux fail).
+  const latestFailed =
+    latest && (latest.status === 'failed' || latest.status === 'error') ? latest : null;
+
+  useEffect(() => {
+    setGitSync(project.sync ?? null);
+  }, [project.sync]);
+
+  useEffect(() => {
+    // Compteurs overview : lectures Postgres (pas de GitHub/workdir ici).
+    // La sync Git arrive via project.sync (refresh ?live=1 du parent).
+    Promise.allSettled([
+      api.envList(uuid),
+      api.projectResources(uuid),
+      api.domains(uuid),
+      isAdmin ? api.clusterNodes() : Promise.resolve(null),
+    ]).then(([envR, resR, domR, nodesR]) => {
+      if (envR.status === 'fulfilled') {
+        const rows = envR.value.data ?? [];
+        setEnvCount(rows.length);
+        setEnvKeys(rows.map((r) => r.key));
+      } else {
+        setEnvCount(0);
+      }
+      if (resR.status === 'fulfilled') {
+        setDbLinks(resR.value.data ?? []);
+      }
+      if (domR.status === 'fulfilled') {
+        setDomainCount((domR.value.domains ?? domR.value.data ?? []).length);
+      } else {
+        setDomainCount(0);
+      }
+      if (nodesR.status === 'fulfilled' && nodesR.value?.nodes) {
+        setNodes(nodesR.value.nodes);
+      }
+    });
+  }, [uuid, isAdmin]);
+
+  const hasDbEnv =
+    envKeys.some((k) =>
+      ['DATABASE_URL', 'TURSO_DATABASE_URL', 'LIBSQL_URL', 'TURSO_AUTH_TOKEN'].includes(k),
+    ) || dbLinks.length > 0;
+
+  const statusMeta = projectStatusMeta(project.status);
+
+  const host = resolveNode(nodes, project.server_id);
+  const hostOffline = host.status === 'offline';
+
+  const gpuNvidia = project.gpu_nvidia === true || project.gpu_nvidia === 1;
+  const gpuDri = project.gpu_dri === true || project.gpu_dri === 1;
+  const gpuDetail = gpuNvidia && gpuDri
+    ? 'NVIDIA · /dev/dri'
+    : gpuNvidia
+      ? 'NVIDIA'
+      : gpuDri
+        ? 'Accès /dev/dri'
+        : 'Aucun accès';
+
+  const health: Array<HealthItem & { icon: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu' | 'settings' }> = [
+    {
+      key: 'deploy',
+      icon: 'deploy',
+      label: 'Déploiement',
+      detail: latest
+        ? `${latest.status}${latest.git_sha ? ` · ${latest.git_sha.slice(0, 7)}` : ''} · ${formatWhen(latest.created_at)}`
+        : 'Aucun déploiement',
+      tone: latest ? deployTone(latest.status) : 'warn',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`,
+    },
+    {
+      key: 'node',
+      icon: 'node',
+      label: 'Nœud',
+      detail: hostOffline
+        ? `${nodeShortLabel(nodes, project.server_id)} · hors ligne`
+        : host.drained
+          ? `${nodeShortLabel(nodes, project.server_id)} · drain`
+          : `${nodeShortLabel(nodes, project.server_id)} · un seul nœud, pas de réplica`,
+      tone: hostOffline ? 'danger' : host.drained ? 'warn' : 'ok',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=settings`,
+    },
+    {
+      key: 'actions',
+      icon: 'actions',
+      label: 'GitHub Actions',
+      detail: project.git_repository
+        ? 'Workflows & runners'
+        : 'Repo GitHub requis',
+      tone: project.git_repository ? 'ok' : 'neutral',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=actions`,
+    },
+    {
+      key: 'errors',
+      icon: 'pulse',
+      label: latestFailed
+        ? 'Échec actif'
+        : project.status === 'unrouted'
+          ? 'Route absente'
+          : project.status === 'unhealthy'
+            ? 'Injoignable'
+            : 'Santé',
+      detail: latestFailed
+        ? `${latestFailed.git_message || latestFailed.status} · ${formatWhen(latestFailed.created_at)}`
+        : project.status === 'unrouted'
+          ? 'Traefik répond à la place du site : la route Host n’est pas branchée'
+          : project.status === 'unhealthy'
+            ? `Pas de réponse sur le port ${project.port || 3000}${latest ? ` · Deploy ${latest.status}` : ''}`
+            : latest && isDeployInProgress(latest.status)
+              ? `Déploiement ${latest.status}`
+              : latest
+                ? 'Dernier déploiement OK'
+                : 'En attente du premier deploy',
+      tone: latestFailed || project.status === 'unhealthy' || project.status === 'unrouted'
+        ? 'danger'
+        : latest && isDeployInProgress(latest.status)
+          ? 'warn'
+          : latest
+            ? 'ok'
+            : 'neutral',
+      href: latestFailed
+        ? `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`
+        : undefined,
+    },
+    {
+      key: 'db',
+      icon: 'db',
+      label: 'Base de données',
+      detail:
+        dbLinks.length > 0
+          ? dbLinks.map((l) => `${l.provider}: ${l.resource_name}`).join(', ')
+          : hasDbEnv
+            ? 'Configurée via variables d’env'
+            : 'Aucune DB reliée',
+      tone: dbLinks.length > 0 || hasDbEnv ? 'ok' : 'neutral',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=database`,
+    },
+    {
+      key: 'env',
+      icon: 'env',
+      label: 'Environnement',
+      detail:
+        envCount === null
+          ? '…'
+          : envCount === 0
+            ? 'Aucune variable'
+            : `${envCount} variable${envCount > 1 ? 's' : ''}`,
+      tone: envCount === null ? 'neutral' : envCount === 0 ? 'warn' : 'ok',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=env`,
+    },
+    (() => {
+      const sync = projectSyncMeta(gitSync);
+      const repo = project.git_repository
+        ? `${project.git_repository.replace(/^https?:\/\/(www\.)?github\.com\//, '')}${
+            project.git_branch ? ` @ ${project.git_branch}` : ''
+          }`
+        : null;
+      return {
+        key: 'git',
+        icon: 'git' as const,
+        label: 'Git',
+        detail: !repo
+          ? 'Pas de dépôt'
+          : gitSync?.state
+            ? `${sync.label} · ${repo}`
+            : repo,
+        tone: !repo
+          ? ('warn' as const)
+          : sync.tone === 'warn' || sync.tone === 'danger'
+            ? sync.tone
+            : sync.tone === 'ok'
+              ? ('ok' as const)
+              : ('neutral' as const),
+        href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=git`,
+      };
+    })(),
+    {
+      key: 'gpu',
+      icon: 'gpu',
+      label: gpuNvidia ? 'GPU' : gpuDri ? 'Accès /dev/dri' : 'GPU',
+      detail: gpuDetail,
+      tone: gpuNvidia || gpuDri ? 'ok' : 'neutral',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=settings&section=gpu`,
+    },
+    {
+      key: 'domain',
+      icon: 'globe',
+      label: 'URL',
+      detail: project.production_url
+        ? project.production_url.replace(/^https?:\/\//, '')
+        : domainCount
+          ? `${domainCount} domaine(s)`
+          : 'Pas d’URL',
+      tone: project.production_url || (domainCount ?? 0) > 0 ? 'ok' : 'neutral',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=domains`,
+    },
+    {
+      key: 'settings',
+      icon: 'settings',
+      label: 'Paramètres',
+      detail: 'Nœud, GPU, volumes, danger zone',
+      tone: 'neutral',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=settings`,
+    },
+  ];
+
+  async function runLifecycle(action: string) {
+    setLifeBusy(action);
+    setLifeDetail(`${action}…`);
+    try {
+      const r = await api.lifecycle(uuid, action);
+      setLifeDetail(r.output?.slice(0, 200) || r.phase || (r.ok === false ? 'Échec' : 'OK'));
+      toast.push({
+        title: r.ok === false ? `${labelAction(action)} échoué` : `${labelAction(action)} OK`,
+        detail: r.error || r.phase || undefined,
+        tone: r.ok === false ? 'danger' : 'ok',
+      });
+    } catch (e) {
+      setLifeDetail(String(e));
+      toast.push({ title: `${labelAction(action)} KO`, detail: String(e), tone: 'danger' });
+    } finally {
+      setLifeBusy(null);
+    }
+  }
+
+  async function deployNow() {
+    setDeployBusy(true);
+    toast.push({ title: 'Déploiement…', detail: 'Clone + build', tone: 'info' });
+    try {
+      const started = await api.createDeployment(uuid, { git_message: 'Deploy depuis overview' });
+      const r = started.data?.uuid ? await api.waitDeployment(started.data.uuid) : started;
+      const ok = !(r.ok === false || r.data.status === 'failed');
+      toast.push({
+        title: ok ? 'Déployé' : 'Échec déploiement',
+        detail: r.data.git_sha || r.data.status,
+        tone: ok ? 'ok' : 'danger',
+      });
+      const list = await api.deployments(uuid);
+      onDeployments(list.data ?? []);
+      try {
+        const git = await api.projectGit(uuid);
+        if (git.sync) setGitSync(git.sync);
+      } catch {
+        /* ignore */
+      }
+    } catch (e) {
+      toast.push({ title: 'Deploy KO', detail: String(e), tone: 'danger' });
+    } finally {
+      setDeployBusy(false);
+    }
+  }
+
+  async function copyUrl() {
+    const url = project.production_url;
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      toast.push({ title: 'URL copiée', detail: url.replace(/^https?:\/\//, ''), tone: 'ok' });
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      toast.push({ title: 'Copie impossible', detail: String(e), tone: 'danger' });
+    }
+  }
+
+  const visibleHealth = isAdmin ? health : health.filter((h) => h.key !== 'node');
+  const primaryKeys = new Set(['deploy', 'errors', 'domain', 'settings', 'env', 'db']);
+  const primaryTiles = visibleHealth.filter((h) => primaryKeys.has(h.key));
+  const secondaryTiles = visibleHealth.filter((h) => !primaryKeys.has(h.key));
+
+  function tileBadge(tone: HealthItem['tone']) {
+    if (tone === 'neutral') return null;
+    return (
+      <span
+        class={cn(
+          'absolute -right-1 -top-1 h-3 w-3 rounded-full ring-2 ring-[#1c1c1e]',
+          tone === 'ok' && 'bg-[var(--color-ok)]',
+          tone === 'warn' && 'bg-[var(--color-warn)]',
+          tone === 'danger' && 'bg-[var(--color-danger)]',
+        )}
+      />
+    );
+  }
+
+  return (
+    <FadeIn>
+      <div class="space-y-4">
+        {/* En-tête compact avec statut + contrôles URL */}
+        <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]/70 px-4 py-3 backdrop-blur-sm sm:px-5">
+          <div class="flex min-w-0 items-center gap-3">
+            <StatusGlyph
+              project={project}
+              tone={statusMeta.tone}
+              busy={deployBusy || !!lifeBusy}
+              label={statusMeta.label}
+            />
+            <div class="min-w-0">
+              <h2 class="text-lg font-medium">{statusMeta.label}</h2>
+              {project.production_url && (
+                <a
+                  href={project.production_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  class="df-hit mt-0.5 block text-sm text-[var(--color-accent)] hover:underline"
+                >
+                  <span class="block truncate">{project.production_url.replace(/^https?:\/\//, '')}</span>
+                </a>
+              )}
+              {/* Touch : espacement élargi pour que chaque zone de toucher de 44 px reste à son bouton. */}
+              <div class="mt-2 flex flex-wrap items-center gap-1 max-lg:mt-5 max-lg:gap-3">
+                {project.production_url && (
+                  <>
+                    <button
+                      type="button"
+                      class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+                      title="Ouvrir l’app"
+                      aria-label="Ouvrir l’app"
+                      onClick={() => window.open(project.production_url!, '_blank', 'noopener,noreferrer')}
+                    >
+                      <ExternalLink size={14} aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+                      title={copied ? 'Copié' : 'Copier l’URL'}
+                      aria-label="Copier l’URL"
+                      onClick={copyUrl}
+                    >
+                      <Copy size={14} aria-hidden />
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
+                  title="Déployer"
+                  aria-label="Déployer"
+                  disabled={deployBusy || !!lifeBusy || !project.git_repository}
+                  onClick={deployNow}
+                >
+                  {deployBusy ? <Spinner /> : <Rocket size={14} aria-hidden />}
+                </button>
+                <button
+                  type="button"
+                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
+                  title="Redémarrer"
+                  aria-label="Redémarrer"
+                  disabled={!!lifeBusy || deployBusy}
+                  onClick={() => runLifecycle('restart')}
+                >
+                  {lifeBusy === 'restart' ? <Spinner /> : <RotateCw size={14} aria-hidden />}
+                </button>
+                <button
+                  type="button"
+                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)] disabled:opacity-40"
+                  title="Arrêter"
+                  aria-label="Arrêter"
+                  disabled={!!lifeBusy || deployBusy}
+                  onClick={() => runLifecycle('stop')}
+                >
+                  {lifeBusy === 'stop' ? <Spinner /> : <Square size={14} aria-hidden />}
+                </button>
+                <a
+                  href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`}
+                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+                  title="Santé / déploiements"
+                  aria-label="Santé / déploiements"
+                >
+                  <HeartPulse size={14} aria-hidden />
+                </a>
+                <button
+                  type="button"
+                  class="df-hit inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line)] bg-white/[0.03] text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+                  title="Règles & Directives Agent (AGENTS.md)"
+                  aria-label="Règles & Directives Agent"
+                  onClick={onOpenRules}
+                >
+                  <FileCode size={14} aria-hidden />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <ModelSentence />
+
+        <ProjectGroupSuggest project={project} onJoined={onProject} />
+
+        {(lifeBusy || lifeDetail) && (
+          <LiveStatus
+            busy={!!lifeBusy}
+            label={lifeBusy ? labelAction(lifeBusy) : 'Dernière action'}
+            detail={lifeDetail ?? undefined}
+          />
+        )}
+
+        {/* Tuiles importantes */}
+        <HubGrid cols={4}>
+          {primaryTiles.map((h, i) => (
+            <HubTile
+              key={h.key}
+              index={i}
+              title={h.label}
+              description={h.detail}
+              href={h.href}
+              icon={<HealthIcon kind={h.icon} tone={h.tone} />}
+              iconClass="!bg-transparent"
+              badge={tileBadge(h.tone)}
+            />
+          ))}
+          <HubTile
+            index={primaryTiles.length}
+            title="Historique"
+            description={`${deployments.length} déploiement${deployments.length > 1 ? 's' : ''}`}
+            icon={<HealthIcon kind="deploy" tone="neutral" />}
+            iconClass="!bg-transparent"
+            onClick={() => setHistoryOpen(true)}
+          />
+        </HubGrid>
+
+        {secondaryTiles.length > 0 && (
+          <div>
+            <button
+              type="button"
+              class="df-hit mb-3 inline-flex items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-ink)]"
+              aria-expanded={autresOpen}
+              onClick={() => setAutresOpen((v) => !v)}
+            >
+              Autres
+              <ChevronDown
+                size={12}
+                class={cn('opacity-70 transition-transform', autresOpen && 'rotate-180')}
+                aria-hidden
+              />
+            </button>
+            {autresOpen && (
+              <HubGrid cols={4}>
+                {secondaryTiles.map((h, i) => (
+                  <HubTile
+                    key={h.key}
+                    index={i}
+                    title={h.label}
+                    description={h.detail}
+                    href={h.href}
+                    icon={<HealthIcon kind={h.icon} tone={h.tone} />}
+                    iconClass="!bg-transparent"
+                    badge={tileBadge(h.tone)}
+                  />
+                ))}
+              </HubGrid>
+            )}
+          </div>
+        )}
+      </div>
+
+      <Modal
+        open={historyOpen}
+        onClose={() => {
+          setHistoryOpen(false);
+          setHistoryShowAll(false);
+        }}
+        title="Historique des déploiements"
+        description={
+          deployments.length === 0
+            ? 'Aucune entrée'
+            : historyShowAll || deployments.length <= DEPLOYMENTS_VISIBLE_DEFAULT
+              ? `${deployments.length} entrée${deployments.length > 1 ? 's' : ''}`
+              : `${DEPLOYMENTS_VISIBLE_DEFAULT} plus récentes sur ${deployments.length}`
+        }
+        size="lg"
+        padded={false}
+      >
+        {deployments.length === 0 ? (
+          <p class="px-4 py-8 text-sm text-[var(--color-ink-muted)] sm:px-5">Aucun déploiement.</p>
+        ) : (
+          <>
+            <ul class="divide-y divide-[var(--color-line)]">
+              {(historyShowAll
+                ? deployments
+                : deployments.slice(0, DEPLOYMENTS_VISIBLE_DEFAULT)
+              ).map((d) => (
+                <li key={d.uuid} class="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 sm:px-5">
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <Badge tone={deployTone(d.status)}>{d.status}</Badge>
+                      <span class="font-mono text-xs text-[var(--color-ink-muted)]">
+                        {d.git_sha ? d.git_sha.slice(0, 7) : '—'}
+                      </span>
+                      <span class="text-xs text-[var(--color-ink-faint)]">
+                        {formatWhen(d.created_at)}
+                      </span>
+                    </div>
+                    <p class="mt-1 truncate text-sm text-[var(--color-ink-muted)]">
+                      {d.git_message || 'Sans message'}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`}
+                  >
+                    Logs
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            {deployments.length > DEPLOYMENTS_VISIBLE_DEFAULT && (
+              <div class="border-t border-[var(--color-line)] px-4 py-3 sm:px-5">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setHistoryShowAll((v) => !v)}
+                >
+                  {historyShowAll
+                    ? 'Voir moins'
+                    : `Voir plus (${deployments.length - DEPLOYMENTS_VISIBLE_DEFAULT})`}
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </Modal>
+    </FadeIn>
+  );
+}
+
+function labelAction(a: string) {
+  const map: Record<string, string> = {
+    build: 'Build',
+    start: 'Démarrage',
+    stop: 'Arrêt',
+    restart: 'Redémarrage',
+  };
+  return map[a] || a;
+}
+
+function StatusGlyph({
+  project,
+  tone,
+  busy,
+  label,
+}: {
+  project: Project;
+  tone: 'ok' | 'warn' | 'danger' | 'neutral';
+  busy?: boolean;
+  label: string;
+}) {
+  const deploying = busy || tone === 'warn';
+  const ringColor =
+    tone === 'ok'
+      ? 'border-[var(--color-ok)]/55'
+      : tone === 'danger'
+        ? 'border-[var(--color-danger)]/55'
+        : tone === 'warn'
+          ? 'border-[var(--color-warn)]/55'
+          : 'border-white/20';
+
+  return (
+    <div
+      class={cn(
+        'relative shrink-0',
+        deploying && 'df-breathe',
+        tone === 'danger' && !busy && 'df-status-fail',
+      )}
+      title={label}
+    >
+      <AppIcon
+        project={project}
+        statusTone={tone}
+        size="md"
+        ringOffset="ring-offset-[var(--color-card)]"
+      />
+
+      {tone === 'ok' && !deploying && (
+        <span
+          class={cn(
+            'pointer-events-none absolute -inset-1 rounded-[1.15rem] border df-status-live',
+            ringColor,
+          )}
+          aria-hidden
+        />
+      )}
+      {deploying && (
+        <span
+          class={cn(
+            'pointer-events-none absolute -inset-1 rounded-[1.15rem] border border-dashed df-status-spin',
+            ringColor,
+          )}
+          aria-hidden
+        />
+      )}
+      {tone === 'danger' && !busy && (
+        <span
+          class={cn(
+            'pointer-events-none absolute -inset-1 rounded-[1.15rem] border opacity-70',
+            ringColor,
+          )}
+          aria-hidden
+        />
+      )}
+
+      <span
+        class={cn(
+          'absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full ring-2 ring-[var(--color-card)]',
+          statusDotClass(tone),
+          (tone === 'ok' || deploying) && 'animate-pulse',
+        )}
+        aria-hidden
+      />
+    </div>
+  );
+}
+
+function HealthIcon({
+  kind,
+  tone,
+}: {
+  kind: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu' | 'settings';
+  tone: 'ok' | 'warn' | 'danger' | 'neutral';
+}) {
+  const color =
+    tone === 'ok'
+      ? 'text-[var(--color-ok)] bg-[var(--color-ok)]/10'
+      : tone === 'danger'
+        ? 'text-[var(--color-danger)] bg-[var(--color-danger)]/10'
+        : tone === 'warn'
+          ? 'text-[var(--color-warn)] bg-[var(--color-warn)]/10'
+          : 'text-[var(--color-ink-muted)] bg-white/5';
+  const paths: Record<string, ComponentChildren> = {
+    deploy: <path d="M12 2v14M7 11l5 5 5-5M5 20h14" />,
+    pulse:
+      tone === 'danger' ? (
+        <path d="M12 8v4M12 16h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+      ) : (
+        <path d="M22 12h-4l-3 7-6-14-3 7H2" />
+      ),
+    db: (
+      <>
+        <ellipse cx="12" cy="5" rx="8" ry="3" />
+        <path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" />
+      </>
+    ),
+    env: (
+      <>
+        <path d="M4 6h16M4 12h10M4 18h14" />
+      </>
+    ),
+    git: (
+      <>
+        <circle cx="6" cy="6" r="2" />
+        <circle cx="18" cy="18" r="2" />
+        <circle cx="6" cy="18" r="2" />
+        <path d="M6 8v8M6 12c4 0 8 2 10 4" />
+      </>
+    ),
+    globe: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+      </>
+    ),
+    actions: (
+      <>
+        <path d="M13 2 4 14h7l-1 8 10-14h-7l1-6z" />
+      </>
+    ),
+    node: (
+      <>
+        <rect x="3" y="4" width="18" height="6" rx="1.5" />
+        <rect x="3" y="14" width="18" height="6" rx="1.5" />
+        <path d="M7 7h.01M7 17h.01" />
+      </>
+    ),
+    gpu: (
+      <>
+        <rect x="4" y="4" width="16" height="16" rx="2" />
+        <rect x="9" y="9" width="6" height="6" rx="1" />
+        <path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" />
+      </>
+    ),
+    settings: (
+      <>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4M4.2 19.8l2.8-2.8M17 7l2.8-2.8" />
+      </>
+    ),
+  };
+  return (
+    <span
+      class={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${color} transition-colors`}
+    >
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        {paths[kind]}
+      </svg>
+    </span>
+  );
+}
+
+function DeploymentsPanel({
+  projectUuid,
+  initial,
+  onRefresh,
+}: {
+  projectUuid: string;
+  initial: Deployment[];
+  onRefresh: (d: Deployment[]) => void;
+}) {
+  const toast = useToast();
+  const logsRef = useRef<HTMLPreElement>(null);
+  const [items, setItems] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [selectedUuid, setSelectedUuid] = useState<string | null>(
+    () => pickCurrentDeployment(initial)?.uuid ?? null,
+  );
+  const [logs, setLogs] = useState('');
+  const [showAll, setShowAll] = useState(false);
+  /** Téléphone : le journal s'ouvre en plein écran au toucher d'un déploiement. */
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  useEffect(() => {
+    setItems(initial);
+    setSelectedUuid((prev) => {
+      if (prev && initial.some((d) => d.uuid === prev)) return prev;
+      return pickCurrentDeployment(initial)?.uuid ?? null;
+    });
+  }, [initial]);
+
+  const ordered = sortDeploymentsForDisplay(items);
+  const visible = showAll ? ordered : ordered.slice(0, DEPLOYMENTS_VISIBLE_DEFAULT);
+  const hiddenCount = Math.max(0, ordered.length - DEPLOYMENTS_VISIBLE_DEFAULT);
+  const selected = items.find((d) => d.uuid === selectedUuid) ?? null;
+  const canStop = selected ? isDeployInProgress(selected.status) : false;
+
+  useEffect(() => {
+    if (!selected) {
+      setLogs('');
+      return;
+    }
+    if (selected.logs) {
+      setLogs(selected.logs);
+      return;
+    }
+    let cancelled = false;
+    setLogs('…');
+    api
+      .deployment(selected.uuid)
+      .then((r) => {
+        if (!cancelled) setLogs(r.data.logs || '');
+      })
+      .catch(() => {
+        if (!cancelled) setLogs('(logs indisponibles)');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.uuid, selected?.logs, selected?.status]);
+
+  // Poll tant qu’un déploiement est en cours.
+  useEffect(() => {
+    const active = items.some((d) => isDeployInProgress(d.status));
+    if (!active) return;
+    const interval = setInterval(() => {
+      void reload(false);
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [items, projectUuid]);
+
+  useEffect(() => {
+    if (!logsRef.current) return;
+    logsRef.current.scrollTop = logsRef.current.scrollHeight;
+  }, [logs]);
+
+  async function reload(showToast = false) {
+    try {
+      const r = await api.deployments(projectUuid);
+      setItems(r.data ?? []);
+      onRefresh(r.data ?? []);
+    } catch (e) {
+      if (showToast) {
+        toast.push({ title: 'Refresh KO', detail: String(e), tone: 'warn' });
+      }
+    }
+  }
+
+  async function deploy() {
+    setBusy(true);
+    toast.push({ title: 'Deploy…', detail: 'Clone + build en cours', tone: 'info' });
+    try {
+      const started = await api.createDeployment(projectUuid, { git_message: 'Manual deploy' });
+      if (started.data?.uuid) {
+        setSelectedUuid(started.data.uuid);
+        await reload();
+      }
+      const r = started.data?.uuid ? await api.waitDeployment(started.data.uuid) : started;
+      toast.push({
+        title: r.ok === false || r.data.status === 'failed' ? 'Deploy échoué' : 'Deploy terminé',
+        detail: r.data.git_sha || r.data.status,
+        tone: r.data.status === 'failed' ? 'danger' : r.data.status === 'cancelled' ? 'warn' : 'ok',
+      });
+      setSelectedUuid(r.data.uuid);
+      setLogs(r.data.logs || '');
+      setShowAll(false);
+      await reload();
+    } catch (e) {
+      toast.push({ title: 'Deploy KO', detail: String(e), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function stopSelected() {
+    if (!selected || !canStop) return;
+    setCancelling(true);
+    try {
+      const r = await api.cancelDeployment(selected.uuid);
+      toast.push({
+        title: 'Déploiement arrêté',
+        detail: r.data.git_sha || r.data.status,
+        tone: 'warn',
+      });
+      setSelectedUuid(r.data.uuid);
+      setLogs(r.data.logs || '');
+      await reload();
+    } catch (e) {
+      toast.push({ title: 'Arrêt KO', detail: String(e), tone: 'danger' });
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  function selectDeployment(depUuid: string) {
+    setSelectedUuid(depUuid);
+    if (window.matchMedia('(max-width: 767px)').matches) setSheetOpen(true);
+  }
+
+  const toneDot = (tone: string) =>
+    'h-2 w-2 shrink-0 rounded-full ' +
+    (tone === 'ok'
+      ? 'bg-[var(--color-ok)]'
+      : tone === 'warn'
+        ? 'bg-[var(--color-warn)]'
+        : tone === 'danger'
+          ? 'bg-[var(--color-danger)]'
+          : 'bg-[var(--color-ink-faint)]');
+
+  const stopButton = canStop ? (
+    <Button
+      size="sm"
+      variant="danger"
+      class="max-lg:h-11"
+      disabled={cancelling}
+      onClick={stopSelected}
+      aria-label="Arrêter le déploiement"
+    >
+      {cancelling ? <Spinner /> : <Square size={12} strokeWidth={2.5} aria-hidden />}
+      Arrêter
+    </Button>
+  ) : null;
+
+  const selectedMeta = selected ? (
+    <div class="min-w-0">
+      <div class="flex flex-wrap items-center gap-2">
+        <Badge tone={deployTone(selected.status)}>{selected.status}</Badge>
+        <span class="font-mono text-xs text-[var(--color-ink-muted)]">
+          {selected.git_sha ? selected.git_sha.slice(0, 7) : '—'}
+        </span>
+        <span class="text-xs text-[var(--color-ink-faint)]">{formatWhen(selected.created_at)}</span>
+      </div>
+      {selected.git_message && (
+        <p class="mt-1 text-sm text-[var(--color-ink)] [overflow-wrap:anywhere] md:truncate">
+          {selected.git_message}
+        </p>
+      )}
+      {selected.status === 'queued' && (
+        <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
+          En attente : un autre déploiement occupe déjà ce nœud.
+        </p>
+      )}
+      {selected.error_summary && (
+        <p class="mt-1 text-sm text-[var(--color-danger)] [overflow-wrap:anywhere]">{selected.error_summary}</p>
+      )}
+    </div>
+  ) : null;
+
+  return (
+    <FadeIn>
+      <div class="flex min-h-[28rem] flex-col gap-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h2 class="text-base font-medium tracking-tight">Déploiements</h2>
+            <p class="mt-0.5 text-sm text-[var(--color-ink-muted)]">
+              {items.length === 0
+                ? 'Aucun déploiement pour l’instant'
+                : showAll || hiddenCount === 0
+                  ? `${items.length} déploiement${items.length > 1 ? 's' : ''} · en cours d’abord`
+                  : `${DEPLOYMENTS_VISIBLE_DEFAULT} visibles sur ${items.length} · en cours d’abord`}
+            </p>
+          </div>
+          <Button size="sm" variant="secondary" class="max-lg:h-11" disabled={busy} onClick={deploy}>
+            {busy ? <Spinner /> : null}
+            Déployer
+          </Button>
+        </div>
+
+        {items.length === 0 ? (
+          <Card>
+            <p class="text-sm text-[var(--color-ink-muted)]">
+              Aucun déploiement — lance un Deploy pour cloner et builder.
+            </p>
+          </Card>
+        ) : (
+          <div class="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row lg:items-stretch">
+            {/* Strip / sidebar compact — pas une grille de grosses tuiles */}
+            {/* Mobile/tablette : liste verticale (une ligne par déploiement) puis journal. */}
+            <aside class="flex min-w-0 shrink-0 flex-col gap-2 lg:w-52">
+              <div class="flex flex-col gap-2 lg:max-h-[32rem] lg:overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {visible.map((d, index) => {
+                  const tone = deployTone(d.status);
+                  const sha = d.git_sha ? d.git_sha.slice(0, 7) : '—';
+                  const selectedTile = selectedUuid === d.uuid;
+                  return (
+                    <button
+                      key={d.uuid}
+                      type="button"
+                      onClick={() => selectDeployment(d.uuid)}
+                      aria-current={selectedTile ? 'true' : undefined}
+                      class={
+                        'flex w-full min-w-0 shrink-0 flex-col gap-1 rounded-xl border px-3 py-2.5 text-left transition max-lg:min-h-[56px] max-lg:justify-center ' +
+                        (selectedTile
+                          ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+                          : 'border-[var(--color-line)] bg-[#1c1c1e] hover:border-[var(--color-line-strong)] hover:bg-[#252528]')
+                      }
+                      style={{ animationDelay: `${Math.min(index * 0.04, 0.2)}s` }}
+                    >
+                      {/* Téléphone / tablette : une ligne compacte */}
+                      <div class="flex min-w-0 items-center gap-3 lg:hidden">
+                        <span class={toneDot(tone)} aria-hidden />
+                        <div class="min-w-0 flex-1">
+                          <div class="flex min-w-0 items-center gap-2">
+                            <span class="font-mono text-xs font-medium text-white">{sha}</span>
+                            <Badge tone={tone}>{d.status}</Badge>
+                            <span class="ml-auto shrink-0 text-[11px] text-[var(--color-ink-faint)]">
+                              {formatWhen(d.created_at)}
+                            </span>
+                          </div>
+                          <div class="mt-1 truncate text-xs text-[var(--color-ink-muted)]">
+                            {d.git_message || 'Sans message'}
+                          </div>
+                        </div>
+                        <ChevronRight size={16} class="shrink-0 text-[var(--color-ink-faint)] md:hidden" aria-hidden />
+                      </div>
+                      {/* Bureau : tuile de la barre latérale */}
+                      <div class="hidden min-w-0 flex-col gap-1 lg:flex">
+                        <div class="flex items-center justify-between gap-2">
+                          <span class="font-mono text-xs font-medium text-white">{sha}</span>
+                          <span
+                            class={
+                              'h-2 w-2 shrink-0 rounded-full ' +
+                              (tone === 'ok'
+                                ? 'bg-[var(--color-ok)]'
+                                : tone === 'warn'
+                                  ? 'bg-[var(--color-warn)]'
+                                  : tone === 'danger'
+                                    ? 'bg-[var(--color-danger)]'
+                                    : 'bg-[var(--color-ink-faint)]')
+                            }
+                          />
+                        </div>
+                        <Badge tone={tone}>{d.status}</Badge>
+                        <div class="line-clamp-1 text-[11px] text-[var(--color-ink-muted)]">
+                          {d.git_message || 'Sans message'}
+                        </div>
+                        <div class="text-[10px] text-[var(--color-ink-faint)]">
+                          {formatWhen(d.created_at)}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              {hiddenCount > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  class="self-start max-lg:h-11"
+                  onClick={() => setShowAll((v) => !v)}
+                >
+                  {showAll ? 'Voir moins' : `Voir plus (${hiddenCount})`}
+                </Button>
+              )}
+            </aside>
+
+            {/* Détail + logs : espace vertical principal */}
+            {/* Détail + logs. Téléphone : feuille plein écran (DeployLogSheet). */}
+            <Card padding="none" class="hidden min-h-[22rem] min-w-0 flex-1 flex-col overflow-hidden md:flex">
+              {selected ? (
+                <>
+                  <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-line)] px-4 py-3">
+                    {selectedMeta}
+                    {stopButton}
+                  </div>
+                  <pre
+                    ref={logsRef}
+                    class="min-h-0 max-h-[70dvh] flex-1 overflow-auto overscroll-contain bg-black/40 p-4 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere] lg:max-h-none"
+                  >
+                    {logs || 'Aucun log disponible.'}
+                  </pre>
+                </>
+              ) : (
+                <div class="flex flex-1 items-center justify-center p-6 text-sm text-[var(--color-ink-muted)]">
+                  Sélectionne un déploiement pour afficher les logs
+                </div>
+              )}
+            </Card>
+          </div>
+        )}
+      </div>
+      <DeployLogSheet
+        open={sheetOpen && !!selected}
+        onClose={() => setSheetOpen(false)}
+        title={selected ? `Déploiement ${selected.git_sha ? selected.git_sha.slice(0, 7) : ''}`.trim() : ''}
+        meta={selectedMeta}
+        actions={stopButton}
+        logs={logs}
+      />
+    </FadeIn>
+  );
+}
+
+function BackupsPanel({ projectUuid }: { projectUuid: string }) {
+  const toast = useToast();
+  const [items, setItems] = useState<
+    Array<{
+      id: string;
+      kind: string;
+      status: string;
+      size_bytes: number;
+      message: string;
+      storage_key?: string | null;
+    }>
+  >([]);
+  const [busy, setBusy] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+
+  async function load() {
+    const r = await api.backups(projectUuid);
+    setItems(r.backups ?? []);
+  }
+
+  useEffect(() => {
+    load().catch((e) => toast.push({ title: 'Backups KO', detail: String(e), tone: 'warn' }));
+  }, [projectUuid]);
+
+  async function create() {
+    setBusy(true);
+    toast.push({ title: 'Backup…', detail: 'Snapshot en cours', tone: 'info' });
+    try {
+      const r = await api.createBackup(projectUuid, 'full');
+      toast.push({
+        title: r.ok ? 'Backup OK' : 'Backup échoué',
+        detail: r.backup?.message,
+        tone: r.ok ? 'ok' : 'danger',
+      });
+      await load();
+    } catch (e) {
+      toast.push({ title: 'Backup KO', detail: String(e), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function preview(id: string) {
+    const r = await api.restorePreview(projectUuid, id);
+    toast.push({
+      title: 'Restore preview',
+      detail: (r.steps ?? []).join(' → '),
+      tone: 'info',
+    });
+  }
+  const visible = showAll ? items : items.slice(0, HISTORY_VISIBLE_DEFAULT);
+  const hiddenCount = Math.max(0, items.length - HISTORY_VISIBLE_DEFAULT);
+
+  function backupTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
+    if (status === 'completed' || status === 'ok' || status === 'success') return 'ok';
+    if (status === 'failed' || status === 'error') return 'danger';
+    if (status === 'running' || status === 'pending') return 'warn';
+    return 'neutral';
+  }
+
+  function formatSize(n: number) {
+    if (!n || n < 0) return '';
+    if (n < 1024) return `${n} o`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} Ko`;
+    return `${(n / (1024 * 1024)).toFixed(1)} Mo`;
+  }
+
+  return (
+    <FadeIn>
+      <div class="space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h2 class="text-base font-medium tracking-tight">Backups</h2>
+            <p class="mt-0.5 text-sm text-[var(--color-ink-muted)]">
+              {items.length === 0
+                ? 'Aucun backup pour l’instant'
+                : showAll || hiddenCount === 0
+                  ? `${items.length} backup${items.length > 1 ? 's' : ''}`
+                  : `${HISTORY_VISIBLE_DEFAULT} plus récents sur ${items.length}`}
+            </p>
+          </div>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={create}>
+            {busy ? <Spinner /> : null}
+            Nouveau backup
+          </Button>
+        </div>
+
+        {items.length === 0 ? (
+          <Card>
+            <p class="text-sm text-[var(--color-ink-muted)]">Aucun backup.</p>
+          </Card>
+        ) : (
+          <>
+            <HubGrid cols={4}>
+              {visible.map((b, index) => {
+                const tone = backupTone(b.status);
+                const size = formatSize(b.size_bytes);
+                return (
+                  <HubTile
+                    key={b.id}
+                    index={index}
+                    title={b.kind || 'Backup'}
+                    icon={<HubIcon name="archive" />}
+                    badge={
+                      tone !== 'neutral' ? (
+                        <span
+                          class={cn(
+                            'absolute -right-1 -top-1 h-3 w-3 rounded-full ring-2 ring-[#1c1c1e]',
+                            tone === 'ok' && 'bg-[var(--color-ok)]',
+                            tone === 'warn' && 'bg-[var(--color-warn)]',
+                            tone === 'danger' && 'bg-[var(--color-danger)]',
+                          )}
+                        />
+                      ) : null
+                    }
+                    subtitle={
+                      <div class="mt-1 space-y-1">
+                        <Badge tone={tone}>{b.status}</Badge>
+                        <div class="line-clamp-2 text-[11px] leading-snug text-[var(--color-ink-muted)]">
+                          {b.message || b.id}
+                        </div>
+                        {size ? (
+                          <div class="text-[11px] text-[var(--color-ink-faint)]">{size}</div>
+                        ) : null}
+                      </div>
+                    }
+                    onClick={() => void preview(b.id)}
+                  />
+                );
+              })}
+              <HubAddTile
+                index={visible.length}
+                label="Nouveau"
+                onClick={() => {
+                  if (!busy) void create();
+                }}
+              />
+            </HubGrid>
+            {hiddenCount > 0 && (
+              <div class="flex justify-center">
+                <Button size="sm" variant="ghost" onClick={() => setShowAll((v) => !v)}>
+                  {showAll ? 'Voir moins' : `Voir plus (${hiddenCount})`}
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </FadeIn>
+  );
+}
+
+function PostgresSection({
+  uuid,
+  links,
+  busy,
+  onChanged,
+}: {
+  uuid: string;
+  links: Array<{
+    id: string;
+    resource_name: string;
+    server_id?: string;
+    meta?: Record<string, unknown>;
+  }>;
+  busy: boolean;
+  onChanged: () => Promise<void>;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState('app');
+  const [migrate, setMigrate] = useState(true);
+  const [working, setWorking] = useState(false);
+  const locked = busy || working;
+
+  async function create(e: Event) {
+    e.preventDefault();
+    setWorking(true);
+    try {
+      const r = await api.createProjectDatabase(uuid, {
+        name: name.trim() || 'app',
+        migrate_sqlite: migrate,
+      });
+      const m = r.data.migration;
+      const detail =
+        m.file != null
+          ? `${m.tables ?? 0} tables, ${m.rows ?? 0} lignes depuis ${m.file}`
+          : m.reason || 'DATABASE_URL posée, sans fichier SQLite à copier';
+      toast.push({ title: `Postgres ${r.data.database} créé`, detail, tone: 'ok' });
+      await onChanged();
+    } catch (err) {
+      toast.push({ title: 'Postgres KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function remove(id: string) {
+    if (!confirm('Supprimer cette instance PostgreSQL et son volume ?')) return;
+    setWorking(true);
+    try {
+      await api.deleteProjectDatabase(uuid, id);
+      toast.push({ title: 'Instance supprimée', tone: 'info' });
+      await onChanged();
+    } catch (err) {
+      toast.push({ title: 'Suppression KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return (
+    <section class="mb-4 rounded-xl border border-[var(--color-line)] p-4">
+      <h3 class="text-sm font-semibold text-[var(--color-ink)]">PostgreSQL</h3>
+      <p class="mt-1 text-xs text-[var(--color-ink-muted)]">
+        Une instance par base, sur le nœud du projet. La création copie le SQLite du workdir
+        (<code>data/app.db</code> ou <code>DATABASE_URL</code>) puis pose <code>DATABASE_URL</code>.
+      </p>
+      {links.length > 0 && (
+        <ul class="mt-3 divide-y divide-[var(--color-line)] rounded-xl border border-[var(--color-line)]">
+          {links.map((l) => (
+            <li key={l.id} class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <Badge tone="ok">postgres</Badge>
+                  <span class="font-medium">{l.resource_name}</span>
+                </div>
+                <p class="mt-1 truncate font-mono text-xs text-[var(--color-ink-muted)]">
+                  {String(l.meta?.container || l.meta?.database || 'instance')} · nœud {l.server_id || 'default'}
+                </p>
+              </div>
+              <Button size="sm" variant="ghost" disabled={locked} onClick={() => remove(l.id)}>
+                Supprimer
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form class="mt-3 flex flex-col gap-3" onSubmit={create}>
+        <Input
+          label="Nom de la base"
+          value={name}
+          onInput={(e) => setName((e.target as HTMLInputElement).value)}
+        />
+        <label class="flex cursor-pointer items-center gap-2 text-sm text-[var(--color-ink)] max-lg:min-h-11">
+          <input
+            type="checkbox"
+            checked={migrate}
+            onChange={(e) => setMigrate((e.target as HTMLInputElement).checked)}
+          />
+          Copier les données SQLite du projet
+        </label>
+        <div>
+          <Button type="submit" size="sm" disabled={locked}>
+            {working ? 'Création…' : 'Créer l’instance'}
+          </Button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function DatabasePanel({ uuid }: { uuid: string }) {
+  return (
+    <FadeIn>
+      <DatabaseManager uuid={uuid} />
+    </FadeIn>
+  );
+}
+
+function DatabaseManager({ uuid }: { uuid: string }) {
+  const toast = useToast();
+  const [servers, setServers] = useState<
+    Array<{ id: string; name: string; catalog_id?: string | null }>
+  >([]);
+  const [serverId, setServerId] = useState('');
+  const [dbs, setDbs] = useState<
+    Array<{ name: string; db_id?: string | null; hostname: string }>
+  >([]);
+  const [links, setLinks] = useState<
+    Array<{
+      id: string;
+      provider: string;
+      resource_name: string;
+      server_id?: string;
+      meta?: Record<string, unknown>;
+    }>
+  >([]);
+  const [busy, setBusy] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  async function refreshMeta() {
+    try {
+      const [s, l] = await Promise.all([api.mcpServers(), api.projectResources(uuid)]);
+      const turso = (s.data ?? []).filter((x) => x.catalog_id === 'turso');
+      setServers(turso);
+      setLinks(l.data ?? []);
+      if (turso[0] && !serverId) setServerId(turso[0].id);
+      else if (turso[0] && !turso.some((t) => t.id === serverId)) setServerId(turso[0].id);
+    } catch {
+      setServers([]);
+    } finally {
+      setReady(true);
+    }
+  }
+
+  useEffect(() => {
+    refreshMeta();
+  }, [uuid]);
+
+  useEffect(() => {
+    if (!open || !serverId) {
+      setDbs([]);
+      return;
+    }
+    setBusy(true);
+    setListError(null);
+    api
+      .mcpResources(serverId)
+      .then((r) => setDbs(r.data ?? []))
+      .catch((e) => {
+        setDbs([]);
+        setListError(String((e as Error).message || e));
+      })
+      .finally(() => setBusy(false));
+  }, [open, serverId]);
+
+  async function linkDb(db: { name: string; db_id?: string | null; hostname: string; organization?: string }) {
+    if (!serverId) return;
+    setBusy(true);
+    try {
+      const r = await api.linkProjectResource(uuid, {
+        server_id: serverId,
+        resource_id: db.db_id || db.name,
+        resource_name: db.name,
+        hostname: db.hostname,
+        org: db.organization,
+      });
+      toast.push({
+        title: `DB ${r.database} liée`,
+        detail: r.env_keys.join(', '),
+        tone: 'ok',
+      });
+      setOpen(false);
+      await refreshMeta();
+    } catch (err) {
+      toast.push({ title: 'Lien KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unlink(id: string) {
+    setBusy(true);
+    try {
+      await api.unlinkProjectResource(uuid, id);
+      toast.push({ title: 'Lien retiré', tone: 'info' });
+      await refreshMeta();
+    } catch (err) {
+      toast.push({ title: 'Unlink KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!ready) {
+    return (
+      <p class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)]">
+        <Spinner /> Chargement…
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <Alert tone="info" class="mb-4">
+        <p class="font-medium text-[var(--color-ink)]">Où vivent les données</p>
+        <ul class="mt-2 list-disc space-y-1 pl-4 text-[var(--color-ink-muted)]">
+          <li>
+            <strong class="text-[var(--color-ink)]">PostgreSQL</strong> — une instance Docker par base,
+            sur le nœud de la forge, joignable par les conteneurs du réseau. Déplacer la forge copie
+            les données vers le nœud cible avant le changement. Un nœud déjà hors ligne ne peut pas
+            être copié : le volume reste sur cette machine.
+          </li>
+          <li>
+            <strong class="text-[var(--color-ink)]">Turso</strong> — base cloud. Les workers et le
+            leader y accèdent via les variables d’env.
+          </li>
+          <li>
+            <strong class="text-[var(--color-ink)]">SQLite dans le conteneur</strong> — fichier local
+            sur <em>ce</em> nœud. Un redéploiement recrée le conteneur : ces données locales sont
+            perdues. Crée une instance PostgreSQL pour les reprendre.
+          </li>
+        </ul>
+      </Alert>
+      <PostgresSection uuid={uuid} links={links.filter((l) => l.provider === 'postgres')} busy={busy} onChanged={refreshMeta} />
+      {links.filter((l) => l.provider === 'turso').length > 0 && (
+        <ul class="mb-4 divide-y divide-[var(--color-line)] rounded-xl border border-[var(--color-line)]">
+          {links
+            .filter((l) => l.provider === 'turso')
+            .map((l) => (
+            <li key={l.id} class="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <Badge tone="ok">turso</Badge>
+                  <span class="font-medium">{l.resource_name}</span>
+                </div>
+                <p class="mt-1 text-xs text-[var(--color-ink-muted)]">Liée à ce projet</p>
+              </div>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => unlink(l.id)}>
+                Délier
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {servers.length > 0 && servers.some(s => s.oauth_connected) && links.length === 0 && (
+        <Alert tone="ok" class="mb-4 text-xs">
+          <p class="font-medium">✓ Turso OAuth connecté</p>
+          <p class="mt-1 text-[var(--color-ink-muted)]">
+            Tu peux maintenant lier tes bases de données Turso à ce projet via OAuth, sans Platform API token.
+          </p>
+        </Alert>
+      )}
+
+      <div class="flex flex-wrap gap-2">
+        {servers.length > 0 ? (
+          <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
+            Lier une base Turso
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" href="/app/mcp">
+            Configurer Turso (MCP)
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=env`}
+        >
+          Voir les variables d’env
+        </Button>
+      </div>
+
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Lier une base Turso"
+        description="Injecte TURSO_DATABASE_URL, TURSO_AUTH_TOKEN et DATABASE_URL."
+        size="lg"
+      >
+        {servers.length > 1 && (
+          <label class="mb-3 flex flex-col gap-1.5 text-sm">
+            <span class="font-medium">Compte Turso</span>
+            <select
+              class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
+              value={serverId}
+              onChange={(e) => setServerId((e.target as HTMLSelectElement).value)}
+            >
+              {servers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <div>
+          {listError && (
+            <Alert tone="warn" class="mb-3">
+              {listError}
+            </Alert>
+          )}
+          {busy && dbs.length === 0 && !listError ? (
+            <p class="text-sm text-[var(--color-ink-muted)]">Chargement des bases…</p>
+          ) : (
+            <ul class="divide-y divide-[var(--color-line)] text-sm">
+              {dbs.map((db) => (
+                <li key={db.name} class="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                  <div class="min-w-0">
+                    <div class="break-all font-medium">{db.name}</div>
+                    <div class="truncate font-mono text-xs text-[var(--color-ink-muted)]">
+                      {db.hostname}
+                    </div>
+                  </div>
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => linkDb(db)}>
+                    Lier
+                  </Button>
+                </li>
+              ))}
+              {!busy && dbs.length === 0 && !listError && (
+                <li class="py-2 text-[var(--color-ink-muted)]">Aucune base trouvée.</li>
+              )}
+            </ul>
+          )}
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+function EnvPanel({ uuid }: { uuid: string }) {
+  const toast = useToast();
+  const [rows, setRows] = useState<Array<{ key: string; value: string; secret: boolean }>>([]);
+  const [key, setKey] = useState('');
+  const [value, setValue] = useState('');
+  const [dotenv, setDotenv] = useState('');
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [editSecret, setEditSecret] = useState(true);
+  const [reveal, setReveal] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [devforgeOpen, setDevforgeOpen] = useState(true);
+
+  async function load() {
+    try {
+      const r = await api.envList(uuid);
+      setRows(r.data ?? []);
+      setError(null);
+    } catch (e: unknown) {
+      setError(String((e as Error).message || e));
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, [uuid]);
+
+  async function add(e: Event) {
+    e.preventDefault();
+    if (!key.trim()) return;
+    setBusy(true);
+    try {
+      await api.envUpsert(uuid, { key: key.trim(), value, secret: true });
+      setKey('');
+      setValue('');
+      setAdding(false);
+      toast.push({ title: 'Variable ajoutée', detail: key.trim(), tone: 'ok' });
+      await load();
+    } catch (err) {
+      setError(String((err as Error).message || err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(k: string) {
+    setBusy(true);
+    try {
+      await api.envDelete(uuid, k);
+      toast.push({ title: 'Supprimée', detail: k, tone: 'info' });
+      if (editKey === k) closeEdit();
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Delete KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openEdit(k: string) {
+    setEditKey(k);
+    setEditValue('');
+    setReveal(false);
+    setEditLoading(true);
+    try {
+      const r = await api.envGet(uuid, k);
+      setEditValue(r.data.value);
+      setEditSecret(r.data.secret);
+    } catch (err) {
+      toast.push({ title: 'Lecture KO', detail: String(err), tone: 'danger' });
+      setEditKey(null);
+    } finally {
+      setEditLoading(false);
+    }
+  }
+
+  function closeEdit() {
+    setEditKey(null);
+    setEditValue('');
+    setReveal(false);
+  }
+
+  async function saveEdit(e: Event) {
+    e.preventDefault();
+    if (!editKey) return;
+    setBusy(true);
+    try {
+      await api.envUpsert(uuid, {
+        key: editKey,
+        value: editValue,
+        secret: editSecret,
+      });
+      toast.push({ title: 'Variable mise à jour', detail: editKey, tone: 'ok' });
+      closeEdit();
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Save KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runImport(e?: Event) {
+    e?.preventDefault();
+    if (!dotenv.trim()) return;
+    setBusy(true);
+    try {
+      const r = await api.envImport(uuid, dotenv, true);
+      toast.push({
+        title: 'Import .env',
+        detail: `${r.imported} nouvelle(s), ${r.updated ?? 0} modifiée(s), ${r.unchanged ?? 0} inchangée(s), ${r.skipped} ignorée(s)`,
+        tone: 'ok',
+      });
+      setDotenv('');
+      setFileName(null);
+      setImportOpen(false);
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Import KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    setDotenv(text);
+    setFileName(file.name);
+  }
+
+  async function syncFromWorkdir() {
+    setBusy(true);
+    try {
+      const r = await api.envSyncWorkdir(uuid);
+      toast.push({
+        title: 'Sync workdir → projet',
+        detail:
+          r.message ||
+          `${r.imported} nouvelle(s), ${r.updated} modifiée(s), ${r.unchanged} inchangée(s)`,
+        tone: 'ok',
+      });
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Sync KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function closeImport() {
+    setImportOpen(false);
+    setDotenv('');
+    setFileName(null);
+  }
+
+  const { custom, managed, managedByGroup } = partitionEnvRows(rows);
+  let tileIndex = 0;
+
+  return (
+    <div class="space-y-4">
+      {error && (
+        <Alert tone="warn" class="mb-3">
+          {error}
+        </Alert>
+      )}
+      <FadeIn>
+        {adding ? (
+          <div class="space-y-4">
+            <button
+              type="button"
+              onClick={() => setAdding(false)}
+              class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)] hover:text-white"
+            >
+              <span aria-hidden>←</span>
+              Variables
+            </button>
+            <Card>
+            <CardHeader title="Ajouter une variable" description="Enregistrée tout de suite, marquée secrète." />
+            <form class="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={add}>
+              <div class="w-full sm:w-40 sm:shrink-0">
+                <Input
+                  label="Clé"
+                  placeholder="KEY"
+                  value={key}
+                  onInput={(ev) => setKey((ev.target as HTMLInputElement).value)}
+                />
+              </div>
+              <div class="min-w-0 w-full flex-1">
+                <Input
+                  label="Valeur"
+                  placeholder="value"
+                  value={value}
+                  onInput={(ev) => setValue((ev.target as HTMLInputElement).value)}
+                />
+              </div>
+              <Button type="submit" variant="secondary" disabled={busy}>
+              Ajouter
+            </Button>
+          </form>
+            </Card>
+          </div>
+        ) : (
+          <div class="space-y-4">
+            {custom.length > 0 && (
+              <div class="space-y-2">
+                <p class="text-xs font-medium uppercase tracking-wide text-[var(--color-ink-muted)]">
+                  Personnalisées
+                </p>
+                <HubGrid>
+                  {custom.map((r) => {
+                    const index = tileIndex++;
+                    return (
+                      <HubTile
+                        key={r.key}
+                        index={index}
+                        title={r.key}
+                        description={r.secret ? 'Secret' : r.value || 'Vide'}
+                        icon={<HubIcon name="key" />}
+                        onClick={() => openEdit(r.key)}
+                      />
+                    );
+                  })}
+                </HubGrid>
+              </div>
+            )}
+
+            <HubGrid>
+              <HubAddTile index={tileIndex++} label="Ajouter" onClick={() => setAdding(true)} />
+              <HubTile
+                index={tileIndex++}
+                title="Importer"
+                description="Fichier .env"
+                icon={<HubIcon name="folder" />}
+                onClick={() => setImportOpen(true)}
+              />
+              <HubTile
+                index={tileIndex++}
+                title="Sync"
+                description="Depuis le workdir"
+                icon={<HubIcon name="refresh" />}
+                onClick={() => {
+                  if (!busy) void syncFromWorkdir();
+                }}
+              />
+            </HubGrid>
+
+            {managed.length > 0 && (
+              <details
+                class="group overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]"
+                open={devforgeOpen}
+                onToggle={(e) => setDevforgeOpen((e.target as HTMLDetailsElement).open)}
+              >
+                <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h2 class="text-sm font-medium tracking-tight text-[var(--color-ink)]">
+                        Variables DevForge
+                      </h2>
+                      <Badge>{managed.length}</Badge>
+                    </div>
+                    <p class="mt-1 text-sm text-[var(--color-ink-muted)]">
+                      Injectées par la plateforme (SSO, base de données…)
+                    </p>
+                  </div>
+                  <ChevronDown
+                    size={18}
+                    strokeWidth={2}
+                    class="shrink-0 text-[var(--color-ink-muted)] transition-transform group-open:rotate-180"
+                    aria-hidden
+                  />
+                </summary>
+                <div class="space-y-5 border-t border-[var(--color-line)] px-4 py-4 sm:px-5">
+                  {managedByGroup.map((group) => (
+                    <div key={group.id} class="space-y-2">
+                      <div>
+                        <p class="text-xs font-medium uppercase tracking-wide text-[var(--color-ink-muted)]">
+                          {group.label}
+                        </p>
+                        <p class="text-xs text-[var(--color-ink-faint)]">{group.description}</p>
+                      </div>
+                      <HubGrid>
+                        {group.rows.map((r) => {
+                          const index = tileIndex++;
+                          return (
+                            <HubTile
+                              key={r.key}
+                              index={index}
+                              title={r.key}
+                              description={r.secret ? 'Secret' : r.value || 'Vide'}
+                              icon={<HubIcon name="key" />}
+                              onClick={() => openEdit(r.key)}
+                            />
+                          );
+                        })}
+                      </HubGrid>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            {rows.length === 0 && (
+              <p class="text-sm text-[var(--color-ink-muted)]">Aucune variable.</p>
+            )}
+          </div>
+        )}
+      </FadeIn>
+
+      <Modal
+        open={!!editKey}
+        onClose={closeEdit}
+        title={editKey ? `Variable · ${editKey}` : 'Variable'}
+        description="Valeur réelle chargée depuis le serveur."
+        size="md"
+        footer={
+          !editLoading ? (
+            <div class="flex w-full flex-wrap items-center justify-between gap-2">
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                disabled={busy}
+                onClick={() => editKey && remove(editKey)}
+              >
+                Supprimer
+              </Button>
+              <div class="flex gap-2">
+                <Button type="button" variant="ghost" onClick={closeEdit}>
+                  Annuler
+                </Button>
+                <Button type="submit" form="env-edit-form" variant="secondary" disabled={busy}>
+                  {busy ? 'Enregistrement…' : 'Enregistrer'}
+                </Button>
+              </div>
+            </div>
+          ) : null
+        }
+      >
+        {editLoading ? (
+          <p class="text-sm text-[var(--color-ink-muted)]">Chargement…</p>
+        ) : (
+          <form id="env-edit-form" class="space-y-4" onSubmit={saveEdit}>
+            <div class="relative">
+              <div class="mb-1.5 flex items-center justify-between gap-2">
+                <span class="text-sm font-medium">Valeur</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setReveal((v) => !v)}
+                >
+                  {reveal ? 'Masquer' : 'Afficher'}
+                </Button>
+              </div>
+              {reveal ? (
+                <textarea
+                  class="min-h-[120px] max-h-[40dvh] w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 font-mono text-xs"
+                  value={editValue}
+                  onInput={(ev) => setEditValue((ev.target as HTMLTextAreaElement).value)}
+                />
+              ) : (
+                <Input
+                  type="password"
+                  value={editValue}
+                  onInput={(ev) => setEditValue((ev.target as HTMLInputElement).value)}
+                  autocomplete="off"
+                />
+              )}
+            </div>
+            <label class="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={editSecret}
+                onChange={(e) => setEditSecret((e.target as HTMLInputElement).checked)}
+              />
+              Secret (masqué dans la liste)
+            </label>
+          </form>
+        )}
+      </Modal>
+
+      <Modal
+        open={importOpen}
+        onClose={closeImport}
+        title="Importer un fichier .env"
+        description="Choisis un fichier ou colle le contenu — les clés existantes seront écrasées."
+        size="lg"
+        footer={
+          <>
+            <Button type="button" variant="ghost" onClick={closeImport}>
+              Annuler
+            </Button>
+            <Button
+              type="submit"
+              form="env-import-form"
+              variant="secondary"
+              disabled={busy || !dotenv.trim()}
+            >
+              {busy ? 'Import…' : 'Importer'}
+            </Button>
+          </>
+        }
+      >
+        <form id="env-import-form" class="space-y-4" onSubmit={runImport}>
+          <label class="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-[var(--color-line)] px-3 py-2 text-sm hover:bg-white/5">
+            <input
+              type="file"
+              accept=".env,text/plain,.env.*"
+              class="hidden"
+              onChange={onFile}
+            />
+            Choisir un fichier
+          </label>
+          {fileName && (
+            <p class="text-xs text-[var(--color-ink-muted)]">Fichier : {fileName}</p>
+          )}
+          <textarea
+            class="min-h-[120px] max-h-[45dvh] w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 font-mono text-xs"
+            placeholder={'FOO=bar\nSECRET=…'}
+            value={dotenv}
+            onInput={(ev) => {
+              setDotenv((ev.target as HTMLTextAreaElement).value);
+              setFileName(null);
+            }}
+          />
+        </form>
+      </Modal>
+    </div>
+  );
+}
+
+function DomainsPanel({
+  uuid,
+  project,
+  onProjectUpdate,
+}: {
+  uuid: string;
+  project: Project | null;
+  onProjectUpdate: (p: Project) => void;
+}) {
+  const toast = useToast();
+  const [items, setItems] = useState<
+    Array<{ id: string; fqdn: string; tls: boolean; status: string; is_primary?: boolean }>
+  >([]);
+  const [primaryFqdn, setPrimaryFqdn] = useState('');
+  const [fqdn, setFqdn] = useState('');
+  const [asPrimary, setAsPrimary] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [domainView, setDomainView] = useState<string | null>(null);
+
+  async function load() {
+    const r = await api.domains(uuid);
+    const list = r.domains ?? r.data ?? [];
+    setItems(list);
+    const fromApi =
+      r.primary_fqdn ||
+      list.find((d) => d.is_primary)?.fqdn ||
+      (project?.production_url || '')
+        .replace(/^https?:\/\//, '')
+        .split('/')[0] ||
+      '';
+    setPrimaryFqdn(fromApi);
+  }
+
+  useEffect(() => {
+    load().catch((e) => toast.push({ title: 'Domains KO', detail: String(e), tone: 'warn' }));
+  }, [uuid]);
+
+  async function savePrimary(e: Event) {
+    e.preventDefault();
+    const host = primaryFqdn.trim().replace(/^https?:\/\//, '').split('/')[0];
+    if (!host || !host.includes('.')) {
+      toast.push({ title: 'FQDN invalide', detail: 'ex. app.example.com', tone: 'warn' });
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await api.setPrimaryDomainFqdn(uuid, host);
+      toast.push({ title: 'Domaine principal', detail: r.primary_fqdn, tone: 'ok' });
+      const p = await api.project(uuid);
+      onProjectUpdate(p.data);
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Principal KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function attach(e: Event) {
+    e.preventDefault();
+    if (!fqdn.trim()) return;
+    setBusy(true);
+    try {
+      await api.attachDomain(uuid, {
+        fqdn: fqdn.trim(),
+        tls: true,
+        primary: asPrimary,
+      });
+      setFqdn('');
+      setDomainView(null);
+      toast.push({
+        title: asPrimary ? 'Domaine principal défini' : 'Domaine ajouté',
+        tone: 'ok',
+      });
+      if (asPrimary) {
+        const p = await api.project(uuid);
+        onProjectUpdate(p.data);
+      }
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Attach KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function makePrimary(id: string) {
+    setBusy(true);
+    try {
+      const r = await api.setPrimaryDomain(uuid, id);
+      toast.push({ title: 'Domaine principal', detail: r.primary_fqdn, tone: 'ok' });
+      const p = await api.project(uuid);
+      onProjectUpdate(p.data);
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Principal KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function detach(id: string) {
+    setBusy(true);
+    try {
+      await api.detachDomain(uuid, id);
+      const p = await api.project(uuid);
+      onProjectUpdate(p.data);
+      setDomainView(null);
+      await load();
+    } catch (err) {
+      toast.push({ title: 'Detach KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const openDomain = items.find((d) => d.id === domainView) ?? null;
+
+  return (
+    <FadeIn>
+      <div class="space-y-4">
+        {domainView && (
+          <button
+            type="button"
+            onClick={() => setDomainView(null)}
+            class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)] hover:text-white"
+          >
+            <span aria-hidden>←</span>
+            Domaines
+          </button>
+        )}
+        {domainView === 'primary' ? (
+        <Card>
+          <CardHeader
+            title="Domaine principal"
+            description="URL publique de l’app. Un FQDN saisi ici devient le domaine principal."
+          />
+          <form class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end" onSubmit={savePrimary}>
+            <div class="min-w-0 w-full flex-1">
+              <Input
+                label="FQDN principal"
+                placeholder="app.example.com"
+                value={primaryFqdn}
+                onInput={(e) => setPrimaryFqdn((e.target as HTMLInputElement).value)}
+                hint={
+                  primaryFqdn.trim()
+                    ? `https://${primaryFqdn.trim().replace(/^https?:\/\//, '').split('/')[0]}`
+                    : undefined
+                }
+              />
+            </div>
+            <Button type="submit" size="sm" variant="secondary" disabled={busy} class="w-full sm:w-auto">
+              Enregistrer
+            </Button>
+          </form>
+        </Card>
+        ) : domainView === 'add' ? (
+        <Card>
+          <CardHeader
+            title="Ajouter un domaine"
+            description="L’ajout peut devenir le domaine principal."
+          />
+          <form class="space-y-3" onSubmit={attach}>
+            <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+              <div class="min-w-0 w-full flex-1">
+                <Input
+                  placeholder="autre.example.com"
+                  value={fqdn}
+                  onInput={(e) => setFqdn((e.target as HTMLInputElement).value)}
+                />
+              </div>
+              <Button type="submit" size="sm" variant="secondary" disabled={busy} class="w-full sm:w-auto">
+                Attacher
+              </Button>
+            </div>
+            <label class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)]">
+              <input
+                type="checkbox"
+                checked={asPrimary}
+                onChange={(e) => setAsPrimary((e.target as HTMLInputElement).checked)}
+              />
+              Définir comme domaine principal
+            </label>
+          </form>
+        </Card>
+        ) : openDomain ? (
+        <Card>
+          <CardHeader
+            title={openDomain.fqdn}
+            description={`${openDomain.tls ? 'TLS' : 'HTTP'} · ${openDomain.status}${openDomain.is_primary ? ' · principal' : ''}`}
+          />
+          <div class="flex flex-wrap gap-2">
+            {!openDomain.is_primary && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => makePrimary(openDomain.id)}
+              >
+                Définir principal
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              variant="danger"
+              disabled={busy}
+              onClick={() => detach(openDomain.id)}
+            >
+              Retirer
+            </Button>
+          </div>
+        </Card>
+        ) : (
+          <HubGrid>
+            <HubTile
+              index={0}
+              title="Principal"
+              description={primaryFqdn || 'Aucun domaine'}
+              icon={<HubIcon name="globe" />}
+              onClick={() => setDomainView('primary')}
+            />
+            {items.map((d, index) => (
+              <HubTile
+                key={d.id}
+                index={index + 1}
+                title={d.fqdn}
+                description={`${d.is_primary ? 'Principal · ' : ''}${d.tls ? 'TLS' : 'HTTP'} · ${d.status}`}
+                icon={<HubIcon name="globe" />}
+                onClick={() => setDomainView(d.id)}
+              />
+            ))}
+            <HubAddTile
+              index={items.length + 1}
+              label="Ajouter"
+              onClick={() => setDomainView('add')}
+            />
+          </HubGrid>
+        )}
+      </div>
+    </FadeIn>
+  );
+}
+
+function ssoModeFromProject(project: Project): 'auto' | 'on' | 'off' {
+  if (project.is_sso_protected === true || project.is_sso_protected === 1) return 'on';
+  if (project.is_sso_protected === false || project.is_sso_protected === 0) return 'off';
+  return 'auto';
+}
+
+function parseGithubOwnerRepo(url: string): { owner: string; repo: string } | null {
+  const cleaned = url
+    .trim()
+    .replace(/^https?:\/\/(www\.)?github\.com\//i, '')
+    .replace(/\.git$/i, '')
+    .replace(/^git@github\.com:/i, '');
+  const parts = cleaned.split('/').filter(Boolean);
+  if (parts.length < 2) return null;
+  return { owner: parts[0], repo: parts[1].replace(/\.git$/i, '') };
+}
+
+function runtimeOf(project: Project): ProjectRuntime {
+  const empty: ProjectRuntime = { ports: [], sidecars: [] };
+  const raw = project.runtime_json;
+  if (!raw) return empty;
+  try {
+    const parsed = JSON.parse(raw) as Partial<ProjectRuntime>;
+    return {
+      memory: parsed.memory || '',
+      cpus: parsed.cpus || '',
+      healthcheck: parsed.healthcheck ?? null,
+      ports: Array.isArray(parsed.ports) ? parsed.ports : [],
+      sidecars: Array.isArray(parsed.sidecars) ? parsed.sidecars : [],
+    };
+  } catch {
+    return empty;
+  }
+}
+
+function splitMount(spec: string): { host: string; target: string } {
+  const i = spec.indexOf(':/');
+  if (i < 0) return { host: spec, target: '' };
+  return { host: spec.slice(0, i), target: spec.slice(i + 1) };
+}
+
+function volumeMountsOf(project: Project): string[] {
+  const raw = project.volumes_json;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is string => typeof v === 'string' && v.includes(':'));
+  } catch {
+    return [];
+  }
+}
+
+function groupedPublishedPorts(ports: PublishedPort[]): Array<{
+  host: number;
+  container: number;
+  protocols: Array<'tcp' | 'udp'>;
+  label: string;
+}> {
+  const groups: Array<{
+    host: number;
+    container: number;
+    protocols: Array<'tcp' | 'udp'>;
+    label: string;
+  }> = [];
+  for (const port of ports) {
+    const protocol = port.protocol === 'udp' ? 'udp' : 'tcp';
+    const existing = groups.find((g) => g.host === port.host && g.container === port.container);
+    if (!existing) {
+      groups.push({ host: port.host, container: port.container, protocols: [protocol], label: protocol });
+      continue;
+    }
+    if (!existing.protocols.includes(protocol)) existing.protocols.push(protocol);
+    existing.label =
+      existing.protocols.includes('tcp') && existing.protocols.includes('udp')
+        ? 'tcp+udp'
+        : existing.protocols[0];
+  }
+  return groups;
+}
+
+type SettingsSection =
+  | 'git'
+  | 'group'
+  | 'build'
+  | 'ports'
+  | 'gpu'
+  | 'volumes'
+  | 'runtime'
+  | 'access'
+  | 'url'
+  | 'node'
+  | 'login'
+  | 'danger';
+
+const SETTINGS_SECTIONS: SettingsSection[] = [
+  'git',
+  'group',
+  'build',
+  'ports',
+  'gpu',
+  'volumes',
+  'runtime',
+  'access',
+  'url',
+  'node',
+  'login',
+  'danger',
+];
+
+function readSettingsSection(): SettingsSection | null {
+  if (typeof window === 'undefined') return null;
+  const section = new URLSearchParams(window.location.search).get('section');
+  return SETTINGS_SECTIONS.includes(section as SettingsSection)
+    ? (section as SettingsSection)
+    : null;
+}
+
+function urlOnZone(current: string, slug: string, zone: string): string {
+  if (!zone || !slug) return current;
+  try {
+    const host = new URL(current.startsWith('http') ? current : `https://${current}`).hostname;
+    if (host === zone || host.endsWith(`.${zone}`)) return current;
+  } catch {
+    /* URL vide ou invalide */
+  }
+  return `https://${slug}.${zone}`;
+}
+
+function ProjectSettingsPanel({
+  project,
+  isAdmin,
+  onSaved,
+}: {
+  project: Project;
+  isAdmin: boolean;
+  onSaved: (p: Project) => void;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState(project.name);
+  const [branch, setBranch] = useState(project.git_branch || 'main');
+  const [repo, setRepo] = useState(project.git_repository || '');
+  const [branches, setBranches] = useState<string[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [buildPack, setBuildPack] = useState(project.build_pack || 'nixpacks');
+  const [port, setPort] = useState(Number(project.port ?? 3000));
+  const [isStatic, setIsStatic] = useState(Boolean(project.is_static));
+  const [ssoProtection, setSsoProtection] = useState<'auto' | 'on' | 'off'>(() =>
+    ssoModeFromProject(project),
+  );
+  const [ownUserSystem, setOwnUserSystem] = useState(
+    project.has_own_user_system === true || project.has_own_user_system === 1,
+  );
+  const [publishDir, setPublishDir] = useState(project.publish_directory || '');
+  const [baseDir, setBaseDir] = useState(project.base_directory || '/');
+  const [composePath, setComposePath] = useState(project.docker_compose_location || '');
+  const [dockerfilePath, setDockerfilePath] = useState(project.dockerfile_path || '');
+  const [dockerBuildContext, setDockerBuildContext] = useState(project.docker_build_context || '');
+  const [workdir, setWorkdir] = useState(project.workdir || '');
+  const [serverId, setServerId] = useState(project.server_id || 'default');
+  const [clusterNodes, setClusterNodes] = useState<ClusterNode[]>([]);
+  const [prodUrl, setProdUrl] = useState(project.production_url || '');
+  const [domainApex, setDomainApex] = useState(project.domain_apex || '');
+  const [domains, setDomains] = useState<InstanceDomain[]>([]);
+  const [testCmd, setTestCmd] = useState(project.test_command || '');
+  const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [detectInfo, setDetectInfo] = useState<string | null>(null);
+  const [gpuNvidia, setGpuNvidia] = useState(project.gpu_nvidia === true || project.gpu_nvidia === 1);
+  const [gpuDri, setGpuDri] = useState(project.gpu_dri === true || project.gpu_dri === 1);
+  const [volumes, setVolumes] = useState<string[]>(() => volumeMountsOf(project));
+  const [volumeHost, setVolumeHost] = useState('');
+  const [volumeTarget, setVolumeTarget] = useState('');
+  const [runtime, setRuntime] = useState<ProjectRuntime>(() => runtimeOf(project));
+  const [portHost, setPortHost] = useState('');
+  const [portContainer, setPortContainer] = useState('');
+  const [portProto, setPortProto] = useState<'tcp' | 'udp' | 'both'>('tcp');
+  const [portView, setPortView] = useState<string | null>(null);
+  const [volumeView, setVolumeView] = useState<string | null>(null);
+  const [runtimeView, setRuntimeView] = useState<string | null>(null);
+  const [sideName, setSideName] = useState('');
+  const [sideImage, setSideImage] = useState('');
+  const [sidePort, setSidePort] = useState('');
+  const [section, setSection] = useState<SettingsSection | null>(readSettingsSection);
+
+  useEffect(() => {
+    const onPop = () => setSection(readSettingsSection());
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  function gotoSection(next: SettingsSection | null) {
+    const q = new URLSearchParams(window.location.search);
+    q.set('tab', 'settings');
+    if (next) q.set('section', next);
+    else q.delete('section');
+    window.history.pushState({}, '', `${window.location.pathname}?${q}`);
+    setPortView(null);
+    setVolumeView(null);
+    setRuntimeView(null);
+    setSection(next);
+  }
+
+  useEffect(() => {
+    setName(project.name);
+    setBranch(project.git_branch || 'main');
+    setRepo(project.git_repository || '');
+    setBranches([]);
+    setBuildPack(project.build_pack || 'nixpacks');
+    setPort(Number(project.port ?? 3000));
+    setIsStatic(Boolean(project.is_static));
+    setSsoProtection(ssoModeFromProject(project));
+    setOwnUserSystem(project.has_own_user_system === true || project.has_own_user_system === 1);
+    setPublishDir(project.publish_directory || '');
+    setBaseDir(project.base_directory || '/');
+    setComposePath(project.docker_compose_location || '');
+    setDockerfilePath(project.dockerfile_path || '');
+    setDockerBuildContext(project.docker_build_context || '');
+    setWorkdir(project.workdir || '');
+    setServerId(project.server_id || 'default');
+    setProdUrl(project.production_url || '');
+    setDomainApex(project.domain_apex || '');
+    setTestCmd(project.test_command || '');
+    setGpuNvidia(project.gpu_nvidia === true || project.gpu_nvidia === 1);
+    setGpuDri(project.gpu_dri === true || project.gpu_dri === 1);
+    setVolumes(volumeMountsOf(project));
+    setVolumeHost('');
+    setVolumeTarget('');
+    setRuntime(runtimeOf(project));
+    setPortHost('');
+    setPortContainer('');
+    setPortProto('tcp');
+    setSideName('');
+    setSideImage('');
+    setSidePort('');
+    setConfirmDelete(false);
+    setDetectInfo(null);
+  }, [project.uuid]);
+
+  useEffect(() => {
+    const parsed = parseGithubOwnerRepo(repo);
+    if (!parsed) {
+      setBranches([]);
+      setBranchesLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setBranchesLoading(true);
+      api
+        .githubBranches(parsed.owner, parsed.repo)
+        .then((r) => {
+          if (cancelled) return;
+          setBranches(r.data.map((b) => b.name));
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setBranches([]);
+        })
+        .finally(() => {
+          if (!cancelled) setBranchesLoading(false);
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [repo]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .instanceDomains()
+      .then((r) => {
+        if (!cancelled) setDomains(r.data ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setDomains([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.uuid]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    api
+      .clusterNodes()
+      .then((r) => {
+        if (!cancelled) setClusterNodes(r.nodes ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setClusterNodes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
+
+  async function save(e?: Event) {
+    e?.preventDefault();
+    setBusy(true);
+    try {
+      const r = await api.updateProject(project.uuid, {
+        name: name.trim(),
+        git_branch: branch.trim(),
+        git_repository: repo.trim() || null,
+        build_pack: buildPack,
+        port,
+        is_static: isStatic,
+        sso_protection: ssoProtection,
+        has_own_user_system: ownUserSystem,
+        publish_directory: publishDir.trim() || null,
+        base_directory: baseDir.trim() || '/',
+        docker_compose_location: composePath.trim() || null,
+        dockerfile_path: dockerfilePath.trim() || null,
+        docker_build_context: dockerBuildContext.trim() || null,
+        workdir: workdir.trim() || null,
+        ...(isAdmin ? { server_id: serverId.trim() || 'default' } : {}),
+        domain_apex: domainApex,
+        production_url: prodUrl.trim() || null,
+        test_command: testCmd.trim() || null,
+        gpu_nvidia: gpuNvidia,
+        gpu_dri: gpuDri,
+        volumes,
+        runtime: {
+          memory: runtime.memory?.trim() || null,
+          cpus: runtime.cpus?.trim() || null,
+          healthcheck: runtime.healthcheck?.cmd?.trim()
+            ? {
+                cmd: runtime.healthcheck.cmd.trim(),
+                interval: runtime.healthcheck.interval || '30s',
+                timeout: runtime.healthcheck.timeout || '10s',
+                retries: runtime.healthcheck.retries || 5,
+                start_period: runtime.healthcheck.start_period || '2m',
+              }
+            : null,
+          ports: runtime.ports,
+          sidecars: runtime.sidecars,
+        },
+      });
+      onSaved(r.data);
+      toast.push({ title: 'Settings enregistrés', tone: 'ok' });
+    } catch (err) {
+      toast.push({ title: 'Save KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runDetect() {
+    setBusy(true);
+    try {
+      const r = await api.projectDetect(project.uuid, { apply: true, from_github: true });
+      const d = r.detection;
+      setBuildPack(d.build_pack);
+      setPort(d.port);
+      setIsStatic(d.is_static);
+      setPublishDir(d.publish_directory || '');
+      setBaseDir(d.base_directory || '/');
+      setComposePath(d.docker_compose_location || '');
+      setDockerfilePath('');
+      setDockerBuildContext('');
+      if (d.test_command) setTestCmd(d.test_command);
+      mergeDetectedPorts(d.port, d.exposed_ports);
+      setDetectInfo(
+        [
+          `${d.label} (${Math.round(d.confidence * 100)}%) · ${d.build_pack} · port ${d.port}${
+            d.is_static ? ' · site statique' : ' · serveur'
+          }`,
+          ...(d.hints ?? []),
+        ].join(' — '),
+      );
+      onSaved(r.project);
+      toast.push({
+        title: 'Framework détecté',
+        detail: d.label,
+        tone: 'ok',
+      });
+    } catch (err) {
+      toast.push({ title: 'Détection KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function mergeDetectedPorts(
+    httpPort: number,
+    exposed?: Array<{ host: number; container: number; protocol: string; source: string }>,
+  ) {
+    const extras = (exposed ?? []).filter(
+      (p) => !(p.container === httpPort && (p.protocol || 'tcp') === 'tcp'),
+    );
+    setRuntime((rt) => {
+      const ports = [...rt.ports];
+      for (const p of extras) {
+        const protocol = p.protocol === 'udp' ? 'udp' : 'tcp';
+        const host = p.host || p.container;
+        if (
+          ports.some(
+            (x) => x.host === host && x.container === p.container && x.protocol === protocol,
+          )
+        ) {
+          continue;
+        }
+        ports.push({ host, container: p.container, protocol });
+      }
+      return { ...rt, ports };
+    });
+  }
+
+  async function runDetectPorts() {
+    setBusy(true);
+    try {
+      const r = await api.projectDetect(project.uuid, { apply: false, from_github: true });
+      const d = r.detection;
+      setPort(d.port);
+      mergeDetectedPorts(d.port, d.exposed_ports);
+      const extra = (d.exposed_ports ?? []).filter(
+        (p) => !(p.container === d.port && (p.protocol || 'tcp') === 'tcp'),
+      );
+      setDetectInfo(
+        extra.length
+          ? `Port HTTP ${d.port}. Aussi : ${extra
+              .map((p) => `${p.host || p.container}/${p.protocol || 'tcp'} (${p.source})`)
+              .join(', ')}. Enregistre pour publier.`
+          : `Port HTTP ${d.port}. Aucun port supplémentaire dans le dépôt.`,
+      );
+      toast.push({
+        title: extra.length ? `${extra.length} port(s) en plus` : 'Port HTTP détecté',
+        detail: `:${d.port}`,
+        tone: 'ok',
+      });
+    } catch (err) {
+      toast.push({ title: 'Détection KO', detail: String(err), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeProject() {
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.deleteProject(project.uuid);
+      toast.push({ title: 'Projet supprimé', detail: project.name, tone: 'ok' });
+      window.location.href = '/app/projects';
+    } catch (err) {
+      toast.push({ title: 'Suppression KO', detail: String(err), tone: 'danger' });
+      setBusy(false);
+      setConfirmDelete(false);
+    }
+  }
+
+  const gpuLabel = gpuNvidia && gpuDri
+    ? 'NVIDIA · /dev/dri'
+    : gpuNvidia
+      ? 'NVIDIA'
+      : gpuDri
+        ? 'Accès /dev/dri'
+        : 'Aucun accès';
+  const extraPortCount = runtime.ports.length;
+  const publishedPorts = groupedPublishedPorts(runtime.ports);
+  const openPort =
+    publishedPorts.find((p) => `${p.host}:${p.container}` === portView) ?? null;
+  const openVolume = volumeView && volumes.includes(volumeView) ? volumeView : null;
+  const openSide =
+    runtime.sidecars.find((s) => `side:${s.name}` === runtimeView) ?? null;
+  const sectionTitle: Record<SettingsSection, string> = {
+    git: 'Git',
+    group: 'Groupe',
+    build: 'Build',
+    ports: 'Ports',
+    gpu: 'GPU',
+    volumes: 'Dossiers',
+    runtime: 'Runtime',
+    access: 'Accès',
+    url: 'URL',
+    node: 'Nœud',
+    login: 'Connexion',
+    danger: 'Supprimer',
+  };
+
+  if (!section) {
+    const tiles: Array<{
+      key: SettingsSection;
+      title: string;
+      description: string;
+      icon: string;
+      admin?: boolean;
+    }> = [
+      {
+        key: 'git',
+        title: 'Git',
+        description: repo.trim()
+          ? repo.trim().replace(/^https?:\/\/(www\.)?github\.com\//, '')
+          : 'Pas de dépôt',
+        icon: 'github',
+      },
+      {
+        key: 'group',
+        title: 'Groupe',
+        description: project.group_name
+          ? `${project.group_name}${project.role ? ` · ${project.role}` : ''}`
+          : 'Aucune app liée',
+        icon: 'users',
+      },
+      { key: 'build', title: 'Build', description: buildPack, icon: 'settings' },
+      {
+        key: 'ports',
+        title: 'Ports',
+        description: extraPortCount ? `HTTP ${port} · ${extraPortCount} en plus` : `HTTP ${port}`,
+        icon: 'ports',
+      },
+      { key: 'gpu', title: 'GPU', description: gpuLabel, icon: 'cpu' },
+      {
+        key: 'volumes',
+        title: 'Dossiers',
+        description: volumes.length
+          ? `${volumes.length} montage${volumes.length > 1 ? 's' : ''}`
+          : 'Aucun montage',
+        icon: 'folder',
+      },
+      {
+        key: 'runtime',
+        title: 'Runtime',
+        description:
+          [runtime.memory, runtime.cpus ? `${runtime.cpus} cpu` : '', runtime.sidecars.length ? `${runtime.sidecars.length} service` : '']
+            .filter(Boolean)
+            .join(' · ') || 'Limites et services',
+        icon: 'server',
+      },
+      {
+        key: 'access',
+        title: 'Accès',
+        description: ownUserSystem ? 'Login propre' : `SSO ${ssoProtection}`,
+        icon: 'shield',
+      },
+      {
+        key: 'url',
+        title: 'URL',
+        description: domainApex || prodUrl.trim().replace(/^https?:\/\//, '') || 'Pas d’URL',
+        icon: 'globe',
+      },
+      { key: 'node', title: 'Nœud', description: serverId || 'default', icon: 'server', admin: true },
+      { key: 'login', title: 'Connexion', description: 'OIDC du projet', icon: 'key' },
+      { key: 'danger', title: 'Supprimer', description: 'Irréversible', icon: 'heart' },
+    ];
+    return (
+      <FadeIn>
+        <HubGrid>
+          {tiles
+            .filter((tile) => !tile.admin || isAdmin)
+            .map((tile, index) => (
+              <HubTile
+                key={tile.key}
+                index={index}
+                title={tile.title}
+                description={tile.description}
+                icon={<HubIcon name={tile.icon} />}
+                onClick={() => gotoSection(tile.key)}
+              />
+            ))}
+        </HubGrid>
+      </FadeIn>
+    );
+  }
+
+  return (
+    <FadeIn class="space-y-4">
+        <button
+          type="button"
+          onClick={() => {
+            if (section === 'ports' && portView) {
+              setPortView(null);
+              return;
+            }
+            if (section === 'volumes' && volumeView) {
+              setVolumeView(null);
+              return;
+            }
+            if (section === 'runtime' && runtimeView) {
+              setRuntimeView(null);
+              return;
+            }
+            gotoSection(null);
+          }}
+          class="mb-4 flex items-center gap-2 text-sm text-[var(--color-ink-muted)] hover:text-white"
+        >
+          <span aria-hidden>←</span>
+          {(section === 'ports' && portView) ||
+          (section === 'volumes' && volumeView) ||
+          (section === 'runtime' && runtimeView)
+            ? sectionTitle[section]
+            : 'Paramètres'}
+        </button>
+        {section !== 'login' &&
+          section !== 'danger' &&
+          section !== 'group' &&
+          section !== 'ports' &&
+          section !== 'volumes' &&
+          section !== 'runtime' && (
+        <Card>
+        <CardHeader
+          title={sectionTitle[section]}
+          description="Appliqué au prochain déploiement, sauf Git et l’URL."
+          action={
+            section === 'build' ? (
+              <Button size="sm" variant="outline" disabled={busy} onClick={runDetect}>
+                Détecter
+              </Button>
+            ) : undefined
+          }
+        />
+        {detectInfo && (
+          <Alert tone="ok" class="mb-3">
+            {detectInfo}
+          </Alert>
+        )}
+        <form class="grid gap-3 md:grid-cols-2" onSubmit={save}>
+          {section === 'git' && (
+          <>
+          <Input label="Nom" value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
+          {branches.length > 0 ? (
+            <label class="flex flex-col gap-1.5 text-sm">
+              <span class="font-medium">Branche</span>
+              <select
+                class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
+                value={branch}
+                disabled={busy || branchesLoading}
+                onChange={(e) => setBranch((e.target as HTMLSelectElement).value)}
+              >
+                {(branches.includes(branch) ? branches : [branch, ...branches]).map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <Input
+              label={branchesLoading ? 'Branche (chargement…)' : 'Branche'}
+              value={branch}
+              onInput={(e) => setBranch((e.target as HTMLInputElement).value)}
+            />
+          )}
+          <div class="md:col-span-2">
+            <Input
+              label="Repository"
+              value={repo}
+              onInput={(e) => setRepo((e.target as HTMLInputElement).value)}
+            />
+          </div>
+          </>
+          )}
+          {section === 'node' && isAdmin && (
+          <div class="md:col-span-2">
+            <NodeSelect
+              nodes={clusterNodes}
+              value={serverId}
+              onChange={setServerId}
+              hint="Un seul nœud par forge. Changer ici n’applique qu’au prochain déploiement — les conteneurs déjà lancés restent où ils sont."
+            />
+          </div>
+          )}
+          {section === 'build' && (
+          <label class="flex flex-col gap-1.5 text-sm">
+            <span class="font-medium">Build pack</span>
+            <select
+              class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
+              value={buildPack}
+              onChange={(e) => setBuildPack((e.target as HTMLSelectElement).value)}
+            >
+              {['nixpacks', 'dockerfile', 'dockercompose', 'static'].map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+          </label>
+          )}
+          {section === 'build' && (
+          <label class="flex items-center gap-2 text-sm md:col-span-2">
+            <input
+              type="checkbox"
+              checked={isStatic}
+              onChange={(e) => setIsStatic((e.target as HTMLInputElement).checked)}
+            />
+            Static site
+          </label>
+          )}
+          {section === 'gpu' && (
+          <>
+          <label class="flex items-center gap-2 text-sm md:col-span-2">
+            <input
+              type="checkbox"
+              checked={gpuNvidia}
+              onChange={(e) => setGpuNvidia((e.target as HTMLInputElement).checked)}
+            />
+            NVIDIA (--gpus all) au prochain déploiement
+          </label>
+          <label class="flex items-center gap-2 text-sm md:col-span-2">
+            <input
+              type="checkbox"
+              checked={gpuDri}
+              onChange={(e) => setGpuDri((e.target as HTMLInputElement).checked)}
+            />
+            /dev/dri (VAAPI) au prochain déploiement
+          </label>
+          </>
+          )}
+          {section === 'access' && (
+          <>
+          <label class="flex items-center gap-2 text-sm md:col-span-2">
+            <input
+              type="checkbox"
+              checked={ownUserSystem}
+              onChange={(e) => {
+                const v = (e.target as HTMLInputElement).checked;
+                setOwnUserSystem(v);
+                if (v) setSsoProtection('off');
+              }}
+            />
+            App avec son propre login (pas de barrière Traefik SSO)
+          </label>
+          <label class="flex flex-col gap-1.5 text-sm md:col-span-2">
+            <span class="font-medium">Protection SSO Traefik</span>
+            <select
+              class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
+              value={ssoProtection}
+              disabled={ownUserSystem}
+              onChange={(e) =>
+                setSsoProtection((e.target as HTMLSelectElement).value as 'auto' | 'on' | 'off')
+              }
+            >
+              <option value="auto">Auto (réglage instance)</option>
+              <option value="on">Toujours protégé</option>
+              <option value="off">Jamais protégé</option>
+            </select>
+          </label>
+          </>
+          )}
+          {section === 'build' && (
+          <>
+          <Input
+            label="Publish directory"
+            value={publishDir}
+            onInput={(e) => setPublishDir((e.target as HTMLInputElement).value)}
+          />
+          <Input
+            label="Base directory"
+            value={baseDir}
+            onInput={(e) => setBaseDir((e.target as HTMLInputElement).value)}
+          />
+          <Input
+            label="Docker compose path"
+            value={composePath}
+            onInput={(e) => setComposePath((e.target as HTMLInputElement).value)}
+          />
+          <Input
+            label="Chemin du Dockerfile"
+            hint="Relatif à la racine du dépôt. Ex. backend/Dockerfile.nvidia. Vide = Dockerfile dans le contexte de build."
+            value={dockerfilePath}
+            placeholder="backend/Dockerfile.nvidia"
+            onInput={(e) => setDockerfilePath((e.target as HTMLInputElement).value)}
+          />
+          <Input
+            label="Contexte de build Docker"
+            hint="Relatif à la racine du dépôt. / ou . ou vide = racine (ou base_directory). Séparé du chemin du Dockerfile pour les monorepos."
+            value={dockerBuildContext}
+            placeholder="/ ou . pour la racine"
+            onInput={(e) => setDockerBuildContext((e.target as HTMLInputElement).value)}
+          />
+          <Input
+            label="Workdir"
+            value={workdir}
+            onInput={(e) => setWorkdir((e.target as HTMLInputElement).value)}
+          />
+          <Input
+            label="Test command"
+            value={testCmd}
+            onInput={(e) => setTestCmd((e.target as HTMLInputElement).value)}
+          />
+          </>
+          )}
+          {section === 'url' && (
+          <>
+          <div class="md:col-span-2 space-y-3">
+            <p class="text-sm text-[var(--color-ink-muted)]">
+              Choisis la zone de cette app. Automatique reprend le groupe, puis le domaine principal.
+            </p>
+            <HubGrid>
+              <HubTile
+                index={0}
+                title="Automatique"
+                icon={<HubIcon name="globe" />}
+                class={!domainApex ? '!ring-[var(--color-accent)]' : ''}
+                subtitle={
+                  <div class={!domainApex ? 'mt-1 text-[11px] font-medium text-[var(--color-accent)]' : 'mt-1 text-[11px] text-[var(--color-ink-muted)]'}>
+                    {!domainApex ? 'Choisie' : 'Groupe, puis principal'}
+                  </div>
+                }
+                onClick={() => setDomainApex('')}
+              />
+              {domains.map((row, index) => (
+                <HubTile
+                  key={row.apex}
+                  index={index + 1}
+                  title={row.apex}
+                  icon={<HubIcon name="globe" />}
+                  class={domainApex === row.apex ? '!ring-[var(--color-accent)]' : ''}
+                  subtitle={
+                    <div class={domainApex === row.apex ? 'mt-1 text-[11px] font-medium text-[var(--color-accent)]' : 'mt-1 text-[11px] text-[var(--color-ink-muted)]'}>
+                      {domainApex === row.apex ? 'Choisie' : row.primary ? 'Principal' : 'Zone'}
+                    </div>
+                  }
+                  onClick={() => {
+                    setDomainApex(row.apex);
+                    const slug = project.slug || name.trim().toLowerCase().replace(/\s+/g, '-');
+                    setProdUrl((current) => urlOnZone(current, slug, row.apex));
+                  }}
+                />
+              ))}
+            </HubGrid>
+          </div>
+          <Input
+            label="Adresse publique"
+            value={prodUrl}
+            onInput={(e) => setProdUrl((e.target as HTMLInputElement).value)}
+          />
+          </>
+          )}
+          {section !== 'login' && section !== 'danger' && (
+          <div class="md:col-span-2">
+            <Button type="submit" disabled={busy}>
+              {busy ? 'Enregistrement…' : 'Enregistrer'}
+            </Button>
+          </div>
+          )}
+        </form>
+      </Card>
+      )}
+
+      {section === 'ports' && (portView == null || (portView !== 'http' && portView !== 'add' && !openPort)) && (
+        <div class="space-y-4">
+          {detectInfo && <Alert tone="ok">{detectInfo}</Alert>}
+          <HubGrid>
+            <HubTile
+              index={0}
+              title="HTTP"
+              description={`Port ${port} · domaine`}
+              icon={<HubIcon name="globe" />}
+              onClick={() => setPortView('http')}
+            />
+            {publishedPorts.map((p, index) => (
+              <HubTile
+                key={`${p.host}:${p.container}`}
+                index={index + 1}
+                title={`${p.host}:${p.container}`}
+                description={p.label}
+                icon={<HubIcon name="ports" />}
+                onClick={() => setPortView(`${p.host}:${p.container}`)}
+              />
+            ))}
+            <HubTile
+              index={publishedPorts.length + 1}
+              title="Détecter"
+              description="Dockerfile, compose, *_PORT"
+              icon={<HubIcon name="refresh" />}
+              onClick={() => {
+                if (!busy) void runDetectPorts();
+              }}
+            />
+            <HubAddTile
+              index={publishedPorts.length + 2}
+              label="Ajouter"
+              onClick={() => setPortView('add')}
+            />
+          </HubGrid>
+          <Button type="button" disabled={busy} onClick={() => void save()}>
+            {busy ? 'Enregistrement…' : 'Enregistrer'}
+          </Button>
+        </div>
+      )}
+
+      {section === 'ports' && portView === 'http' && (
+        <Card>
+          <CardHeader
+            title="Port HTTP"
+            description="C’est le port que Traefik utilise. Il n’est pas publié sur l’hôte."
+          />
+          <form class="grid gap-3" onSubmit={save}>
+            <Input
+              label="Port"
+              type="number"
+              value={String(port)}
+              onInput={(e) => setPort(Number((e.target as HTMLInputElement).value) || 80)}
+            />
+            <div>
+              <Button type="submit" disabled={busy}>
+                {busy ? 'Enregistrement…' : 'Enregistrer'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {section === 'ports' && portView === 'add' && (
+        <Card>
+          <CardHeader
+            title="Ajouter un port"
+            description="Publié sur l’hôte au prochain déploiement. TCP et UDP ouvrent les deux."
+          />
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <Input
+              label="Hôte"
+              placeholder="4240"
+              value={portHost}
+              onInput={(e) => setPortHost((e.target as HTMLInputElement).value)}
+            />
+            <Input
+              label="Conteneur"
+              placeholder="4240"
+              value={portContainer}
+              onInput={(e) => setPortContainer((e.target as HTMLInputElement).value)}
+            />
+            <label class="flex flex-col gap-1.5 text-sm">
+              <span class="font-medium">Protocole</span>
+              <select
+                class="h-10 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3"
+                value={portProto}
+                onChange={(e) =>
+                  setPortProto((e.target as HTMLSelectElement).value as 'tcp' | 'udp' | 'both')
+                }
+              >
+                <option value="tcp">tcp</option>
+                <option value="udp">udp</option>
+                <option value="both">tcp et udp</option>
+              </select>
+            </label>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const host = Number(portHost);
+                const container = Number(portContainer);
+                if (!host || !container || host > 65535 || container > 65535) {
+                  toast.push({ title: 'Port invalide', tone: 'warn' });
+                  return;
+                }
+                const protocols: Array<'tcp' | 'udp'> =
+                  portProto === 'both' ? ['tcp', 'udp'] : [portProto];
+                setRuntime((r) => {
+                  const ports = [...r.ports];
+                  for (const protocol of protocols) {
+                    if (
+                      ports.some(
+                        (x) =>
+                          x.host === host && x.container === container && x.protocol === protocol,
+                      )
+                    ) {
+                      continue;
+                    }
+                    ports.push({ host, container, protocol });
+                  }
+                  return { ...r, ports };
+                });
+                setPortHost('');
+                setPortContainer('');
+                setPortView(null);
+                toast.push({
+                  title: 'Port ajouté',
+                  detail: 'Enregistre pour le publier au prochain déploiement.',
+                  tone: 'ok',
+                });
+              }}
+            >
+              Ajouter
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {section === 'ports' && openPort && (
+        <Card>
+          <CardHeader
+            title={`${openPort.host}:${openPort.container}`}
+            description={`Protocole ${openPort.label}. Publié sur l’hôte au prochain déploiement.`}
+          />
+          <div class="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                const current = openPort;
+                setRuntime((r) => ({
+                  ...r,
+                  ports: r.ports.filter(
+                    (x) =>
+                      !(
+                        x.host === current.host &&
+                        x.container === current.container &&
+                        current.protocols.includes(x.protocol)
+                      ),
+                  ),
+                }));
+                setPortView(null);
+                toast.push({
+                  title: 'Port retiré',
+                  detail: 'Enregistre pour appliquer.',
+                  tone: 'ok',
+                });
+              }}
+            >
+              Retirer
+            </Button>
+            <Button type="button" disabled={busy} onClick={() => void save()}>
+              {busy ? 'Enregistrement…' : 'Enregistrer'}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {section === 'volumes' && (volumeView == null || (volumeView !== 'add' && !openVolume)) && (
+        <div class="space-y-4">
+          <HubGrid>
+            {volumes.map((spec, index) => {
+              const mount = splitMount(spec);
+              return (
+                <HubTile
+                  key={spec}
+                  index={index}
+                  title={mount.target || spec}
+                  description={mount.host}
+                  icon={<HubIcon name="folder" />}
+                  onClick={() => setVolumeView(spec)}
+                />
+              );
+            })}
+            <HubAddTile
+              index={volumes.length}
+              label="Ajouter"
+              onClick={() => setVolumeView('add')}
+            />
+          </HubGrid>
+          <Button type="button" disabled={busy} onClick={() => void save()}>
+            {busy ? 'Enregistrement…' : 'Enregistrer'}
+          </Button>
+        </div>
+      )}
+
+      {section === 'volumes' && volumeView === 'add' && (
+        <Card>
+          <CardHeader
+            title="Ajouter un dossier"
+            description="Chemin du nœud vers un chemin dans le conteneur. Les deux commencent par /."
+          />
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div class="min-w-0 flex-1">
+              <Input
+                label="Hôte"
+                placeholder="/media/Media/Popcornn/media"
+                value={volumeHost}
+                onInput={(e) => setVolumeHost((e.target as HTMLInputElement).value)}
+              />
+            </div>
+            <div class="min-w-0 flex-1">
+              <Input
+                label="Conteneur"
+                placeholder="/app/downloads"
+                value={volumeTarget}
+                onInput={(e) => setVolumeTarget((e.target as HTMLInputElement).value)}
+              />
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const host = volumeHost.trim();
+                const target = volumeTarget.trim();
+                if (!host.startsWith('/') || !target.startsWith('/')) {
+                  toast.push({
+                    title: 'Chemins absolus',
+                    detail: 'Les deux chemins commencent par /',
+                    tone: 'warn',
+                  });
+                  return;
+                }
+                const spec = `${host}:${target}`;
+                setVolumes((list) => (list.includes(spec) ? list : [...list, spec]));
+                setVolumeHost('');
+                setVolumeTarget('');
+                setVolumeView(null);
+                toast.push({
+                  title: 'Dossier ajouté',
+                  detail: 'Enregistre pour le monter au prochain déploiement.',
+                  tone: 'ok',
+                });
+              }}
+            >
+              Ajouter
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {section === 'volumes' && openVolume && (
+        <Card>
+          <CardHeader
+            title={splitMount(openVolume).target || openVolume}
+            description={splitMount(openVolume).host}
+          />
+          <div class="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                const current = openVolume;
+                setVolumes((list) => list.filter((x) => x !== current));
+                setVolumeView(null);
+                toast.push({
+                  title: 'Dossier retiré',
+                  detail: 'Enregistre pour appliquer.',
+                  tone: 'ok',
+                });
+              }}
+            >
+              Retirer
+            </Button>
+            <Button type="button" disabled={busy} onClick={() => void save()}>
+              {busy ? 'Enregistrement…' : 'Enregistrer'}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {section === 'runtime' &&
+        (runtimeView == null ||
+          (runtimeView !== 'memory' &&
+            runtimeView !== 'cpus' &&
+            runtimeView !== 'health' &&
+            runtimeView !== 'add' &&
+            !openSide)) && (
+          <div class="space-y-4">
+            <HubGrid>
+              <HubTile
+                index={0}
+                title="Mémoire"
+                description={runtime.memory?.trim() || 'Sans limite'}
+                icon={<HubIcon name="server" />}
+                onClick={() => setRuntimeView('memory')}
+              />
+              <HubTile
+                index={1}
+                title="CPUs"
+                description={runtime.cpus?.trim() || 'Sans limite'}
+                icon={<HubIcon name="cpu" />}
+                onClick={() => setRuntimeView('cpus')}
+              />
+              <HubTile
+                index={2}
+                title="Healthcheck"
+                description={runtime.healthcheck?.cmd?.trim() || 'Aucun'}
+                icon={<HubIcon name="heart" />}
+                onClick={() => setRuntimeView('health')}
+              />
+              {runtime.sidecars.map((s, index) => (
+                <HubTile
+                  key={s.name}
+                  index={index + 3}
+                  title={s.name}
+                  description={
+                    s.ports[0]
+                      ? `${s.image} · ${s.ports[0].host}`
+                      : s.image
+                  }
+                  icon={<HubIcon name="server" />}
+                  onClick={() => setRuntimeView(`side:${s.name}`)}
+                />
+              ))}
+              <HubAddTile
+                index={runtime.sidecars.length + 3}
+                label="Service"
+                onClick={() => setRuntimeView('add')}
+              />
+            </HubGrid>
+            <Button type="button" disabled={busy} onClick={() => void save()}>
+              {busy ? 'Enregistrement…' : 'Enregistrer'}
+            </Button>
+          </div>
+        )}
+
+      {section === 'runtime' && runtimeView === 'memory' && (
+        <Card>
+          <CardHeader title="Mémoire" description="Limite Docker, par exemple 20g. Vide = sans limite." />
+          <form class="grid gap-3" onSubmit={save}>
+            <Input
+              label="Mémoire"
+              placeholder="20g"
+              value={runtime.memory || ''}
+              onInput={(e) =>
+                setRuntime((r) => ({ ...r, memory: (e.target as HTMLInputElement).value }))
+              }
+            />
+            <div>
+              <Button type="submit" disabled={busy}>
+                {busy ? 'Enregistrement…' : 'Enregistrer'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {section === 'runtime' && runtimeView === 'cpus' && (
+        <Card>
+          <CardHeader title="CPUs" description="Nombre de CPU Docker. Vide = sans limite." />
+          <form class="grid gap-3" onSubmit={save}>
+            <Input
+              label="CPUs"
+              placeholder="1"
+              value={runtime.cpus || ''}
+              onInput={(e) =>
+                setRuntime((r) => ({ ...r, cpus: (e.target as HTMLInputElement).value }))
+              }
+            />
+            <div>
+              <Button type="submit" disabled={busy}>
+                {busy ? 'Enregistrement…' : 'Enregistrer'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {section === 'runtime' && runtimeView === 'health' && (
+        <Card>
+          <CardHeader
+            title="Healthcheck"
+            description="Commande exécutée dans le conteneur. Vide = pas de healthcheck Docker."
+          />
+          <form class="grid gap-3" onSubmit={save}>
+            <Input
+              label="Commande"
+              placeholder="curl -f http://localhost:3000/api/client/health || exit 1"
+              value={runtime.healthcheck?.cmd || ''}
+              onInput={(e) => {
+                const cmd = (e.target as HTMLInputElement).value;
+                setRuntime((r) => ({
+                  ...r,
+                  healthcheck: cmd.trim()
+                    ? {
+                        cmd,
+                        interval: r.healthcheck?.interval || '30s',
+                        timeout: r.healthcheck?.timeout || '10s',
+                        retries: r.healthcheck?.retries || 5,
+                        start_period: r.healthcheck?.start_period || '2m',
+                      }
+                    : null,
+                }));
+              }}
+            />
+            <div>
+              <Button type="submit" disabled={busy}>
+                {busy ? 'Enregistrement…' : 'Enregistrer'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {section === 'runtime' && runtimeView === 'add' && (
+        <Card>
+          <CardHeader
+            title="Service à côté"
+            description="Le nom est le DNS sur le réseau du projet. FlareSolverr : flaresolverr, image flaresolverr/flaresolverr:latest, port 9191."
+          />
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <Input
+              label="Nom DNS"
+              placeholder="flaresolverr"
+              value={sideName}
+              onInput={(e) => setSideName((e.target as HTMLInputElement).value)}
+            />
+            <Input
+              label="Image"
+              placeholder="flaresolverr/flaresolverr:latest"
+              value={sideImage}
+              onInput={(e) => setSideImage((e.target as HTMLInputElement).value)}
+            />
+            <Input
+              label="Port"
+              placeholder="9191"
+              value={sidePort}
+              onInput={(e) => setSidePort((e.target as HTMLInputElement).value)}
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const name = sideName.trim().toLowerCase();
+                const image = sideImage.trim();
+                const port = Number(sidePort);
+                if (!name || !image) {
+                  toast.push({ title: 'Nom et image requis', tone: 'warn' });
+                  return;
+                }
+                const ports: PublishedPort[] =
+                  port > 0 && port <= 65535
+                    ? [{ host: port, container: port, protocol: 'tcp' }]
+                    : [];
+                setRuntime((r) => ({
+                  ...r,
+                  sidecars: [
+                    ...r.sidecars.filter((x) => x.name !== name),
+                    { name, image, ports },
+                  ],
+                }));
+                setSideName('');
+                setSideImage('');
+                setSidePort('');
+                setRuntimeView(null);
+                toast.push({
+                  title: 'Service ajouté',
+                  detail: 'Enregistre pour le lancer au prochain déploiement.',
+                  tone: 'ok',
+                });
+              }}
+            >
+              Ajouter
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {section === 'runtime' && openSide && (
+        <Card>
+          <CardHeader
+            title={openSide.name}
+            description={
+              openSide.ports[0]
+                ? `${openSide.image} · port ${openSide.ports[0].host}`
+                : openSide.image
+            }
+          />
+          <div class="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                const name = openSide.name;
+                setRuntime((r) => ({
+                  ...r,
+                  sidecars: r.sidecars.filter((x) => x.name !== name),
+                }));
+                setRuntimeView(null);
+                toast.push({
+                  title: 'Service retiré',
+                  detail: 'Enregistre pour appliquer.',
+                  tone: 'ok',
+                });
+              }}
+            >
+              Retirer
+            </Button>
+            <Button type="button" disabled={busy} onClick={() => void save()}>
+              {busy ? 'Enregistrement…' : 'Enregistrer'}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {section === 'group' && <ProjectGroupPanel project={project} onChanged={onSaved} />}
+
+      {section === 'login' && <ProjectOidcPanel projectUuid={project.uuid} />}
+
+      {section === 'danger' && (
+      <Card class="mt-4 border-[var(--color-danger)]/30">
+        <CardHeader
+          title="Zone dangereuse"
+          description="Supprime le projet, ses env, agents et déploiements. Irréversible."
+        />
+        {confirmDelete && (
+          <Alert tone="danger" class="mb-3">
+            Confirme la suppression de « {project.name} ».
+          </Alert>
+        )}
+        <div class="flex flex-wrap gap-2">
+          <Button variant="danger" size="sm" disabled={busy} onClick={removeProject}>
+            {confirmDelete ? 'Confirmer la suppression' : 'Supprimer le projet'}
+          </Button>
+          {confirmDelete && (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => setConfirmDelete(false)}
+            >
+              Annuler
+            </Button>
+          )}
+        </div>
+      </Card>
+      )}
+    </FadeIn>
+  );
+}
+
+
+function CronsPanel({ projectUuid }: { projectUuid: string }) {
+  const toast = useToast();
+  const [crons, setCrons] = useState<import('../lib/api').ProjectCron[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [cronExpr, setCronExpr] = useState('');
+  const [command, setCommand] = useState('');
+  const [enabled, setEnabled] = useState(true);
+  const [runsOpen, setRunsOpen] = useState<string | null>(null);
+  const [runs, setRuns] = useState<import('../lib/api').CronRun[]>([]);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState('');
+
+  async function load() {
+    try {
+      const r = await api.cronsList(projectUuid);
+      setCrons(r.data);
+    } catch (e) {
+      toast.push({ title: 'Erreur chargement crons', detail: String(e), tone: 'warn' });
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, [projectUuid]);
+
+  function openCreate() {
+    setEditingId(null);
+    setName('');
+    setCronExpr('');
+    setCommand('');
+    setEnabled(true);
+    setSelectedPreset('');
+    setShowAdvanced(false);
+    setFormOpen(true);
+  }
+
+  async function openEdit(cron: import('../lib/api').ProjectCron) {
+    setEditingId(cron.id);
+    setName(cron.name);
+    setCronExpr(cron.cron_expression);
+    setCommand(cron.command);
+    setEnabled(cron.enabled === 1);
+    
+    // Check if it matches a preset
+    const { CRON_PRESETS } = await import('../lib/cron-utils');
+    const matchingPreset = CRON_PRESETS.find(p => p.value === cron.cron_expression);
+    setSelectedPreset(matchingPreset ? cron.cron_expression : '');
+    setShowAdvanced(!matchingPreset || matchingPreset.value === '');
+    
+    setFormOpen(true);
+  }
+
+  async function save(e: Event) {
+    e.preventDefault();
+    if (!name.trim() || !cronExpr.trim() || !command.trim()) return;
+    setBusy(true);
+    try {
+      if (editingId) {
+        await api.cronUpdate(projectUuid, editingId, {
+          name: name.trim(),
+          cron_expression: cronExpr.trim(),
+          command: command.trim(),
+          enabled,
+        });
+        toast.push({ title: 'Cron mis à jour', tone: 'ok' });
+      } else {
+        await api.cronCreate(projectUuid, {
+          name: name.trim(),
+          cron_expression: cronExpr.trim(),
+          command: command.trim(),
+          enabled,
+        });
+        toast.push({ title: 'Cron créé', tone: 'ok' });
+      }
+      setFormOpen(false);
+      await load();
+    } catch (e) {
+      toast.push({ title: 'Erreur', detail: String(e), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(id: string) {
+    setBusy(true);
+    try {
+      await api.cronDelete(projectUuid, id);
+      toast.push({ title: 'Cron supprimé', tone: 'info' });
+      await load();
+    } catch (e) {
+      toast.push({ title: 'Erreur suppression', detail: String(e), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggle(cron: import('../lib/api').ProjectCron) {
+    setBusy(true);
+    try {
+      if (cron.enabled) {
+        await api.cronDisable(projectUuid, cron.id);
+      } else {
+        await api.cronEnable(projectUuid, cron.id);
+      }
+      await load();
+    } catch (e) {
+      toast.push({ title: 'Erreur', detail: String(e), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runNow(id: string) {
+    setBusy(true);
+    try {
+      const r = await api.cronRunNow(projectUuid, id);
+      toast.push({ title: r.message, tone: 'info' });
+    } catch (e) {
+      toast.push({ title: 'Erreur', detail: String(e), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function showRuns(cronId: string) {
+    setRunsOpen(cronId);
+    try {
+      const r = await api.cronRuns(projectUuid, cronId);
+      setRuns(r.data);
+    } catch {
+      setRuns([]);
+    }
+  }
+
+  return (
+    <FadeIn>
+      <Card>
+        <CardHeader
+          title="Tâches planifiées"
+          description="Commandes exécutées automatiquement dans le conteneur du projet."
+          action={
+            <Button size="sm" variant="secondary" onClick={openCreate}>
+              Nouveau cron
+            </Button>
+          }
+        />
+        {crons.length === 0 ? (
+          <p class="text-sm text-[var(--color-ink-muted)]">Aucune tâche planifiée.</p>
+        ) : (
+          <Table headers={['Nom', 'Planification', 'Commande', 'Statut', '']}>
+            {crons.map((c) => {
+              const { cronToFrench } = require('../lib/cron-utils');
+              const schedule = cronToFrench(c.cron_expression);
+              return (
+              <Tr key={c.id}>
+                <Td class="font-medium">{c.name}</Td>
+                <Td>
+                  <div class="flex flex-col gap-0.5">
+                    <span class="text-sm">{schedule}</span>
+                    <span class="font-mono text-xs text-[var(--color-ink-faint)]" title={c.cron_expression}>
+                      {c.cron_expression}
+                    </span>
+                  </div>
+                </Td>
+                <Td class="truncate max-w-xs font-mono text-xs" title={c.command}>
+                  {c.command}
+                </Td>
+                <Td>
+                  <div class="flex items-center gap-2">
+                    <Badge tone={c.enabled ? 'ok' : 'neutral'}>
+                      {c.enabled ? 'Activé' : 'Désactivé'}
+                    </Badge>
+                    {c.last_status && (
+                      <Badge tone={c.last_status === 'success' ? 'ok' : 'danger'}>
+                        {c.last_status}
+                      </Badge>
+                    )}
+                  </div>
+                </Td>
+                <Td>
+                  <div class="flex gap-1">
+                    <Button size="sm" variant="ghost" onClick={() => toggle(c)} disabled={busy}>
+                      {c.enabled ? 'Désactiver' : 'Activer'}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => runNow(c.id)} disabled={busy}>
+                      Lancer
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => showRuns(c.id)}>
+                      Historique
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => openEdit(c)} disabled={busy}>
+                      Modifier
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => remove(c.id)} disabled={busy}>
+                      Supprimer
+                    </Button>
+                  </div>
+                </Td>
+              </Tr>
+              );
+            })}
+          </Table>
+        )}
+      </Card>
+
+      <Modal
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        title={editingId ? 'Modifier la tâche' : 'Nouvelle tâche planifiée'}
+        size="lg"
+        footer={
+          <>
+            <Button type="button" variant="ghost" onClick={() => setFormOpen(false)}>
+              Annuler
+            </Button>
+            <Button type="submit" form="cron-form" variant="secondary" disabled={busy}>
+              {busy ? 'Enregistrement…' : 'Enregistrer'}
+            </Button>
+          </>
+        }
+      >
+        <form id="cron-form" class="space-y-4" onSubmit={save}>
+          <Input
+            label="Nom"
+            placeholder="Nettoyage cache"
+            value={name}
+            onInput={(e) => setName((e.target as HTMLInputElement).value)}
+          />
+          
+          <div>
+            <label class="mb-1.5 block text-sm font-medium">Planification</label>
+            <select
+              class="w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-sm"
+              value={selectedPreset}
+              onChange={(e) => {
+                const value = (e.target as HTMLSelectElement).value;
+                setSelectedPreset(value);
+                if (value === '') {
+                  setShowAdvanced(true);
+                } else {
+                  setCronExpr(value);
+                  setShowAdvanced(false);
+                }
+              }}
+            >
+              {(() => {
+                const { CRON_PRESETS } = require('../lib/cron-utils');
+                return CRON_PRESETS.map((preset: any) => (
+                  <option key={preset.label} value={preset.value}>
+                    {preset.label}
+                  </option>
+                ));
+              })()}
+            </select>
+            {selectedPreset && selectedPreset !== '' && (
+              <p class="mt-1.5 text-xs text-[var(--color-ink-muted)]">
+                Expression : <code class="font-mono">{selectedPreset}</code>
+              </p>
+            )}
+          </div>
+
+          {(showAdvanced || selectedPreset === '') && (
+            <div>
+              <div class="mb-1.5 flex items-center justify-between">
+                <label class="block text-sm font-medium">Expression cron personnalisée</label>
+                {!showAdvanced && (
+                  <button
+                    type="button"
+                    class="text-xs text-[var(--color-ink-faint)] hover:underline"
+                    onClick={() => setShowAdvanced(true)}
+                  >
+                    Avancé
+                  </button>
+                )}
+              </div>
+              <Input
+                placeholder="*/5 * * * *"
+                value={cronExpr}
+                onInput={(e) => {
+                  const val = (e.target as HTMLInputElement).value;
+                  setCronExpr(val);
+                  setSelectedPreset('');
+                }}
+                hint="Format Unix 5 champs : minute heure jour mois jour-semaine"
+              />
+              {cronExpr && (
+                <p class="mt-1.5 text-xs text-[var(--color-ink-muted)]">
+                  Aperçu : {(() => {
+                    const { cronToFrench } = require('../lib/cron-utils');
+                    return cronToFrench(cronExpr);
+                  })()}
+                </p>
+              )}
+            </div>
+          )}
+          
+          <div>
+            <label class="mb-1.5 block text-sm font-medium">Commande</label>
+            <textarea
+              class="min-h-[80px] w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 font-mono text-xs"
+              placeholder="npm run cleanup"
+              value={command}
+              onInput={(e) => setCommand((e.target as HTMLTextAreaElement).value)}
+            />
+          </div>
+          
+          <label class="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled((e.target as HTMLInputElement).checked)}
+            />
+            Activé
+          </label>
+        </form>
+      </Modal>
+
+      <Modal
+        open={!!runsOpen}
+        onClose={() => setRunsOpen(null)}
+        title="Historique d'exécution"
+        size="lg"
+        padded={false}
+      >
+        {runs.length === 0 ? (
+          <p class="px-4 py-8 text-sm text-[var(--color-ink-muted)] sm:px-5">Aucune exécution.</p>
+        ) : (
+          <ul class="divide-y divide-[var(--color-line)]">
+            {runs.slice(0, HISTORY_VISIBLE_DEFAULT).map((r) => (
+              <li key={r.id} class="px-4 py-3.5 sm:px-5">
+                <div class="flex flex-wrap items-center gap-2">
+                  <Badge tone={r.status === 'success' ? 'ok' : r.status === 'running' ? 'warn' : 'danger'}>
+                    {r.status}
+                  </Badge>
+                  <span class="text-xs text-[var(--color-ink-faint)]">
+                    {formatWhen(r.started_at)}
+                  </span>
+                  {r.exit_code != null && (
+                    <span class="font-mono text-xs text-[var(--color-ink-muted)]">
+                      exit {r.exit_code}
+                    </span>
+                  )}
+                </div>
+                {r.output && (
+                  <pre class="mt-2 max-h-40 overflow-auto rounded border border-[var(--color-line)] bg-black/20 p-2 font-mono text-xs">
+                    {r.output}
+                  </pre>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
+    </FadeIn>
+  );
+}
+
+/** Échec du chargement de l'app : message clair sur la page, jamais de redirection silencieuse. */
+function ProjectLoadError({ error, onRetry }: { error: string; onRetry: () => void }) {
+  const e = error.toLowerCase();
+  const reason = /not found|introuvable|404|no rows/.test(e)
+    ? 'Cette app n’existe pas ou a été supprimée.'
+    : /forbidden|unauthori|401|403|accès|access/.test(e)
+      ? 'Tu n’as pas accès à cette app avec ce compte.'
+      : /failed to fetch|network|injoignable|load failed/.test(e)
+        ? 'Le serveur DevForge ne répond pas pour l’instant.'
+        : /lien incomplet/.test(e)
+          ? 'Le lien est incomplet.'
+          : 'Le serveur a renvoyé une erreur.';
+  return (
+    <div class="mx-auto mt-6 max-w-lg rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-5 text-center sm:mt-12 sm:p-6" role="alert">
+      <div class="text-3xl" aria-hidden>
+        🧭
+      </div>
+      <h1 class="mt-2 text-xl font-semibold tracking-tight">Impossible d’ouvrir cette app</h1>
+      <p class="mt-2 text-sm text-[var(--color-ink-muted)]">{reason}</p>
+      <p class="mt-3 break-words rounded-lg bg-black/20 px-3 py-2 font-mono text-[11px] text-[var(--color-ink-faint)] [overflow-wrap:anywhere]">
+        {error}
+      </p>
+      <div class="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
+        <Button class="max-lg:h-11" onClick={onRetry}>
+          Réessayer
+        </Button>
+        <Button class="max-lg:h-11" variant="secondary" href="/app">
+          Retour aux apps
+        </Button>
+      </div>
+    </div>
+  );
+}
