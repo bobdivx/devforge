@@ -4,7 +4,6 @@ import { api, type AppGroupMember, type ClusterNode, type Deployment, type Insta
 import { nodeShortLabel, resolveNode } from '../lib/cluster-display';
 import { cn } from '../lib/cn';
 import { partitionEnvRows } from '../lib/env-groups';
-import { projectNavMore, projectNavPrimary } from '../lib/nav';
 import { projectStatusMeta, projectSyncMeta } from '../lib/status';
 import { AppIcon, statusDotClass } from './AppIcon';
 import { AppShell } from './AppShell';
@@ -24,6 +23,7 @@ import { NodeSelect } from './NodeSelect';
 import {
   ChevronDown,
   Check,
+  ChevronLeft,
   ChevronRight,
   Copy,
   ExternalLink,
@@ -262,7 +262,6 @@ export function ProjectDetailPage(props: Props) {
     settings: 'Paramètres',
   };
 
-  const navOpts = { workspace: workspaceBeta };
   const isHome = tab === 'home';
 
   if (isHome) {
@@ -316,29 +315,38 @@ export function ProjectDetailPage(props: Props) {
     <AppShell
       hideHeaderOnMobile
       active="projects"
-      projectNav={projectNavPrimary(uuid, navOpts)}
-      projectNavMore={projectNavMore(uuid, navOpts)}
-      sideNavLabel=""
+      // Pas de sous-nav projet : les tuiles du tableau de bord sont la navigation.
+      wide
       title={
-        tab === 'workspace'
-          ? undefined
-          : (
-              <span class="flex flex-wrap items-center gap-2.5 sm:gap-3">
-                <span class="min-w-0 break-words">{titles[tab]}</span>
-                {project?.group_uuid ? (
-                  <GroupSiblingSwitcher
-                    projectUuid={uuid}
-                    groupUuid={project.group_uuid}
-                    groupName={project.group_name}
-                    // Tableau de bord : le titre est déjà le nom de l'app, la pastille montre le groupe.
-                    currentName={tab === 'overview' ? undefined : project.name}
-                    tab={tab}
-                  />
-                ) : project && tab !== 'overview' ? (
-                  <CurrentAppChip projectUuid={uuid} name={project.name} />
-                ) : null}
-              </span>
-            )
+        tab === 'workspace' ? undefined : tab === 'overview' ? (
+          <span class="flex flex-wrap items-center gap-2.5 sm:gap-3">
+            <span class="min-w-0 break-words">{titles[tab]}</span>
+            {project?.group_uuid ? (
+              <GroupSiblingSwitcher
+                projectUuid={uuid}
+                groupUuid={project.group_uuid}
+                groupName={project.group_name}
+                tab={tab}
+              />
+            ) : null}
+          </span>
+        ) : (
+          <span class="flex flex-col gap-1.5">
+            <ProjectBackLink uuid={uuid} name={project?.name} />
+            <span class="flex flex-wrap items-center gap-2.5 sm:gap-3">
+              <span class="min-w-0 break-words">{titles[tab]}</span>
+              {project?.group_uuid ? (
+                <GroupSiblingSwitcher
+                  projectUuid={uuid}
+                  groupUuid={project.group_uuid}
+                  groupName={project.group_name}
+                  currentName={project.name}
+                  tab={tab}
+                />
+              ) : null}
+            </span>
+          </span>
+        )
       }
       description={
         tab === 'agents'
@@ -348,7 +356,11 @@ export function ProjectDetailPage(props: Props) {
       actions={<StatusBadge compact class="lg:hidden" />}
       belowTitle={
         // Le tableau de bord porte déjà le statut : pas de pastille en double.
-        tab === 'overview' ? undefined : (
+        tab === 'overview' ? undefined : tab === 'workspace' ? (
+          <div class="mb-3">
+            <ProjectBackLink uuid={uuid} name={project?.name} />
+          </div>
+        ) : (
           <ProjectActivityStrip
             uuid={uuid}
             deployments={deployments}
@@ -547,16 +559,16 @@ function ProjectActivityStrip({
   );
 }
 
-/** Pastille « app courante » (apps sans groupe) : toujours le nom de l'app ouverte. */
-function CurrentAppChip({ projectUuid, name }: { projectUuid: string; name: string }) {
+/** Retour au tableau de bord de l'app (fil d'Ariane des sous-pages). */
+function ProjectBackLink({ uuid, name }: { uuid: string; name?: string | null }) {
   return (
     <a
-      href={`/app/projects/view?uuid=${encodeURIComponent(projectUuid)}`}
-      class="df-hit inline-flex max-w-[14rem] items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-2.5 py-1 text-xs font-medium text-[var(--color-ink)] hover:bg-white/5"
-      title={`App : ${name}`}
-      aria-label={`App : ${name}. Revenir à l’app`}
+      href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}`}
+      class="df-hit inline-flex max-w-full items-center gap-1.5 self-start text-sm font-normal text-[var(--color-ink-muted)] transition-colors hover:text-[var(--color-ink)]"
+      aria-label={`Retour au tableau de bord${name ? ` de ${name}` : ''}`}
     >
-      <span class="truncate">{name}</span>
+      <ChevronLeft size={16} class="shrink-0" aria-hidden />
+      <span class="truncate">{name || 'Tableau de bord'}</span>
     </a>
   );
 }
@@ -725,7 +737,7 @@ type HealthItem = {
 };
 
 /** Tuiles rangées dans « Plus » (modal) : utiles mais rares. */
-const SECONDARY_TILE_KEYS = new Set(['git', 'actions', 'gpu', 'node']);
+const SECONDARY_TILE_KEYS = new Set(['domains', 'git', 'actions', 'backups', 'crons', 'gpu', 'node']);
 
 /** Vrai SHA Git (pas le placeholder « pending » d'un déploiement qui démarre). */
 function isGitSha(sha?: string | null): boolean {
@@ -878,7 +890,7 @@ function ProjectOverview({
         ? 'Accès /dev/dri'
         : 'Aucun accès';
 
-  const health: Array<HealthItem & { icon: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu' | 'settings' }> = [
+  const health: Array<HealthItem & { icon: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu' | 'settings' | 'archive' | 'clock' }> = [
     {
       // Une seule entrée Déploiements : statut du déploiement courant (en cours, échec, OK).
       key: 'deploy',
@@ -965,6 +977,30 @@ function ProjectOverview({
       };
     })(),
     {
+      key: 'domains',
+      icon: 'globe',
+      label: 'Domaines',
+      detail: domainCount ? `${domainCount} domaine${domainCount > 1 ? 's' : ''}` : 'Domaine par défaut',
+      tone: 'neutral',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=domains`,
+    },
+    {
+      key: 'backups',
+      icon: 'archive',
+      label: 'Sauvegardes',
+      detail: 'Snapshots et restauration',
+      tone: 'neutral',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=backups`,
+    },
+    {
+      key: 'crons',
+      icon: 'clock',
+      label: 'Crons',
+      detail: 'Tâches planifiées',
+      tone: 'neutral',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=crons`,
+    },
+    {
       key: 'gpu',
       icon: 'gpu',
       label: gpuNvidia ? 'GPU' : gpuDri ? 'Accès /dev/dri' : 'GPU',
@@ -976,7 +1012,7 @@ function ProjectOverview({
       key: 'settings',
       icon: 'settings',
       label: 'Paramètres',
-      detail: 'Domaines, nœud, GPU',
+      detail: 'Nœud, GPU, volumes',
       tone: 'neutral',
       href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=settings`,
     },
@@ -1148,7 +1184,7 @@ function ProjectOverview({
           {
             key: 'more',
             title: 'Plus',
-            description: secondaryTiles.map((h) => h.label).join(' · '),
+            description: 'Domaines, Git, Sauvegardes, Crons…',
             onClick: () => setMoreOpen(true),
             icon: <HealthIcon kind="more" tone="neutral" />,
           },
@@ -1497,7 +1533,7 @@ function HealthIcon({
   kind,
   tone,
 }: {
-  kind: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu' | 'settings' | 'chat' | 'more';
+  kind: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu' | 'settings' | 'chat' | 'more' | 'archive' | 'clock';
   tone: 'ok' | 'warn' | 'danger' | 'neutral';
 }) {
   const color =
@@ -1511,6 +1547,18 @@ function HealthIcon({
   const paths: Record<string, ComponentChildren> = {
     deploy: <path d="M12 2v14M7 11l5 5 5-5M5 20h14" />,
     chat: <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z" />,
+    archive: (
+      <>
+        <rect x="3" y="4" width="18" height="4" rx="1" />
+        <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4" />
+      </>
+    ),
+    clock: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </>
+    ),
     more: (
       <>
         <circle cx="5" cy="12" r="1.5" />
@@ -2015,31 +2063,6 @@ function BackupsPanel({ projectUuid }: { projectUuid: string }) {
 
   return (
     <FadeIn>
-      <HubGrid cols={3}>
-        <HubTile
-          index={0}
-          title="Sauvegardes"
-          description={`${items.length} backup${items.length > 1 ? 's' : ''}`}
-          icon={<HealthIcon kind="deploy" tone={items.length ? 'ok' : 'neutral'} />}
-          iconClass="!bg-transparent"
-        />
-        <HubTile
-          index={1}
-          title="Nouveau"
-          description="Créer un snapshot"
-          icon={<HealthIcon kind="deploy" tone="ok" />}
-          iconClass="!bg-transparent"
-          onClick={create}
-        />
-        <HubTile
-          index={2}
-          title="Historique"
-          description={showAll ? 'Tout affiché' : `${visible.length} visibles`}
-          icon={<HealthIcon kind="settings" tone="neutral" />}
-          iconClass="!bg-transparent"
-          onClick={() => setShowAll((v) => !v)}
-        />
-      </HubGrid>
 
       <div class="space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
@@ -2649,56 +2672,7 @@ function EnvPanel({ uuid }: { uuid: string }) {
         </Alert>
       )}
       <FadeIn>
-      <HubGrid cols={3}>
-        <HubTile
-          index={0}
-          title="Bases"
-          description={`${links.length} liée${links.length > 1 ? 's' : ''}`}
-          icon={<HealthIcon kind="db" tone={links.length ? 'ok' : 'neutral'} />}
-          iconClass="!bg-transparent"
-        />
-        <HubTile
-          index={1}
-          title="Serveurs"
-          description={`${servers.length} serveur${servers.length > 1 ? 's' : ''}`}
-          icon={<HealthIcon kind="settings" tone={servers.length ? 'ok' : 'warn'} />}
-          iconClass="!bg-transparent"
-        />
-        <HubTile
-          index={2}
-          title="Lier"
-          description="Nouvelle base"
-          icon={<HealthIcon kind="db" tone="ok" />}
-          iconClass="!bg-transparent"
-          onClick={() => setOpen(true)}
-        />
-      </HubGrid>
 
-      <HubGrid cols={3}>
-        <HubTile
-          index={0}
-          title="Variables"
-          description={`${rows.length} variable${rows.length > 1 ? 's' : ''}`}
-          icon={<HealthIcon kind="env" tone={rows.length ? 'ok' : 'warn'} />}
-          iconClass="!bg-transparent"
-        />
-        <HubTile
-          index={1}
-          title="Ajouter"
-          description="Nouvelle variable"
-          icon={<HealthIcon kind="settings" tone="ok" />}
-          iconClass="!bg-transparent"
-          onClick={() => setAdding(true)}
-        />
-        <HubTile
-          index={2}
-          title="Importer"
-          description=".env ou fichier"
-          icon={<HealthIcon kind="git" tone="neutral" />}
-          iconClass="!bg-transparent"
-          onClick={() => setImportOpen(true)}
-        />
-      </HubGrid>
 
         {adding ? (
           <div class="space-y-4">
@@ -3085,30 +3059,6 @@ function DomainsPanel({
 
   return (
     <FadeIn>
-      <HubGrid cols={3}>
-        <HubTile
-          index={0}
-          title="Domaines"
-          description={`${items.length} domaine${items.length > 1 ? 's' : ''}`}
-          icon={<HealthIcon kind="globe" tone={items.length ? 'ok' : 'neutral'} />}
-          iconClass="!bg-transparent"
-        />
-        <HubTile
-          index={1}
-          title="Principal"
-          description={primaryFqdn || 'Non défini'}
-          icon={<HealthIcon kind="globe" tone={primaryFqdn ? 'ok' : 'warn'} />}
-          iconClass="!bg-transparent"
-        />
-        <HubTile
-          index={2}
-          title="Ajouter"
-          description="Nouveau domaine"
-          icon={<HealthIcon kind="settings" tone="ok" />}
-          iconClass="!bg-transparent"
-          onClick={() => setDomainView('add')}
-        />
-      </HubGrid>
 
       <div class="space-y-4">
         {domainView && (
@@ -3761,37 +3711,6 @@ function ProjectSettingsPanel({
     ];
     return (
       <FadeIn>
-      <HubGrid cols={4}>
-        <HubTile
-          index={0}
-          title="Général"
-          description={name || 'Nom, repo, branche'}
-          icon={<HealthIcon kind="settings" tone="neutral" />}
-          iconClass="!bg-transparent"
-        />
-        <HubTile
-          index={1}
-          title="Build"
-          description={buildPack || 'Pack de build'}
-          icon={<HealthIcon kind="deploy" tone="neutral" />}
-          iconClass="!bg-transparent"
-        />
-        <HubTile
-          index={2}
-          title="Runtime"
-          description={`Port ${port}`}
-          icon={<HealthIcon kind="pulse" tone="neutral" />}
-          iconClass="!bg-transparent"
-        />
-        <HubTile
-          index={3}
-          title="Danger"
-          description="Supprimer l'app"
-          icon={<HealthIcon kind="pulse" tone="danger" />}
-          iconClass="!bg-transparent"
-          onClick={() => setConfirmDelete(true)}
-        />
-      </HubGrid>
 
         <HubGrid>
           {tiles
