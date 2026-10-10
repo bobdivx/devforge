@@ -427,7 +427,7 @@ export function HomePage() {
                 index={groups.length + solo.length}
                 label="Nouvelle application"
                 lines={3}
-                onClick={() => openWizard(agentBuilder ? 'builder' : 'choice')}
+                onClick={() => openWizard('choice')}
               />
             )}
           </HubGrid>
