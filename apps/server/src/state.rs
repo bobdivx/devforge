@@ -367,7 +367,6 @@ impl ProjectStore for SqliteProjectStore {
         };
 
         // L'agent ne publie pas tout seul : accord humain (grant court) requis.
-        let now = chrono::Utc::now().to_rfc3339();
         let grant: Option<(String,)> = sqlx::query_as(
             "SELECT expires_at FROM project_publish_grants WHERE project_uuid = $1",
         )
@@ -377,7 +376,7 @@ impl ProjectStore for SqliteProjectStore {
         .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
         let allowed = grant
             .as_ref()
-            .map(|(exp,)| exp.as_str() > now.as_str())
+            .map(|(exp,)| devforge_agent::guard::grant_still_valid(exp, chrono::Utc::now()))
             .unwrap_or(false);
         if !allowed {
             return Ok(json!({
@@ -1053,8 +1052,10 @@ async fn resolve_spec_worker_provider(
     }
     tracing::info!(used = %labels.join(" > "), "spec : modèles appelés");
     if entries.len() == 1 {
+        // Chaîne d'un seul modèle : on garde ResilientLlmProvider pour les nouveaux essais (429/5xx).
         let label = labels.remove(0);
-        return Some((entries.remove(0).provider, label));
+        let single = Arc::new(devforge_llm::ResilientLlmProvider::new(entries));
+        return Some((single, label));
     }
     let mode = devforge_agent::sdd::provider_label_for_user(&format!(
         "chain:{}",
@@ -1200,8 +1201,9 @@ async fn resolve_llm_provider(
         chain.push(entry);
     }
     if chain.len() == 1 {
+        // Un seul modèle : nouveaux essais sur 429/5xx/timeout quand même (P1-09).
         let label = labels[0].clone();
-        return (chain.remove(0).provider, label);
+        return (Arc::new(devforge_llm::ResilientLlmProvider::new(chain)), label);
     }
     if chain.len() > 1 {
         let mode = format!("chain:{}", labels.join(">"));

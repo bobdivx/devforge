@@ -792,6 +792,7 @@ dependencies = [
  "once_cell",
  "png",
  "qrcode",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

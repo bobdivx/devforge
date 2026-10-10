@@ -17,11 +17,11 @@ pub use catalog::{
     catalog, catalog_as_json, find_preset, xai_api_key, CatalogField, CatalogPreset, XAI_BASE_URL,
     XAI_DEFAULT_MODEL,
 };
-pub use errors::humanize_llm_error;
+pub use errors::{classify, classify_message, humanize_llm_error, LlmErrorKind};
 pub use health::{probe, ProbeRequest, ProbeResult};
 pub use openai::OpenAiCompatibleProvider;
-pub use resilient::{ChainEntry, ResilientLlmProvider};
-pub use stub::StubLlmProvider;
+pub use resilient::{with_retry_notifier, ChainEntry, ResilientLlmProvider, RetryNotifier, RetryPolicy};
+pub use stub::{ScriptedLlmProvider, StubLlmProvider};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

@@ -28,11 +28,13 @@ pub use env::{ListEnvVarsTool, UpsertEnvVarsTool};
 pub use github::{GitHubListPrsTool, GitHubWorkflowRunsTool};
 pub use github_ops::{CreateGitHubFixTool, ReadGitHubFileTool};
 pub use github_repo::CreateGitHubRepoTool;
-pub use http::HttpSmokeTool;
+pub use http::{post_deploy_verdict, smoke_url, HttpSmokeTool};
 pub use mcp::{McpCallTool, McpListRemoteToolsTool, McpListServersTool};
 pub use plan::ProposePlanTool;
 pub use preview::{LocalPreviewStatusTool, StartLocalPreviewTool, StopLocalPreviewTool};
 pub use project_files::{ListProjectFilesTool, ReadProjectFileTool, WriteProjectFileTool};
+#[cfg(test)]
+pub(crate) use project_files::read_line_window;
 pub use projects::{GetProjectTool, ListProjectsTool};
 pub use publish::PublishToGitHubTool;
 pub use sdd::SddLoopTool;

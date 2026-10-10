@@ -343,34 +343,5 @@ fn should_exclude(name: &str) -> bool {
 }
 
 async fn publish_approval_refusal(pool: &PgPool, project_uuid: &str) -> Option<Value> {
-    if project_uuid.is_empty() {
-        return Some(json!({
-            "ok": false,
-            "error": "Accord explicite requis avant publication.",
-            "code": "publish_approval_required"
-        }));
-    }
-    let now = chrono::Utc::now().to_rfc3339();
-    let grant: Option<(String,)> = sqlx::query_as(
-        "SELECT expires_at FROM project_publish_grants WHERE project_uuid = $1",
-    )
-    .bind(project_uuid)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten();
-    let allowed = grant
-        .as_ref()
-        .map(|(exp,)| exp.as_str() > now.as_str())
-        .unwrap_or(false);
-    if allowed {
-        None
-    } else {
-        Some(json!({
-            "ok": false,
-            "error": "Accord explicite requis avant publication.",
-            "hint": "POST /api/v1/projects/{uuid}/publish-approval",
-            "code": "publish_approval_required"
-        }))
-    }
+    crate::guard::publish_approval_refusal(pool, project_uuid).await
 }

@@ -439,7 +439,8 @@ impl Tool for ReadProjectFileTool {
         "Lit un fichier dans le workdir LOCAL du projet (dossier de l'app).\n\
          Préfère cet outil à read_github_file pour travailler sur les fichiers en cours.\n\
          \n\
-         Paramètres : project_uuid (injecté), path (relatif, ex: src/pages/index.astro)."
+         Paramètres : project_uuid (injecté), path (relatif, ex: src/pages/index.astro).\n\
+         Fichier long : offset (1re ligne, à partir de 1) et limit (nombre de lignes) pour lire un extrait."
     }
 
     fn parameters(&self) -> Value {
@@ -453,6 +454,14 @@ impl Tool for ReadProjectFileTool {
                 "path": {
                     "type": "string",
                     "description": "Chemin relatif dans le workdir"
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Optionnel : première ligne à lire (1 = début)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Optionnel : nombre de lignes à lire"
                 }
             },
             "required": ["project_uuid", "path"]
@@ -497,6 +506,13 @@ impl Tool for ReadProjectFileTool {
             }));
         }
 
+        let offset = arguments.get("offset").and_then(|v| v.as_u64()).filter(|n| *n > 0);
+        let limit = arguments.get("limit").and_then(|v| v.as_u64()).filter(|n| *n > 0);
+        if offset.is_some() || limit.is_some() {
+            let full = String::from_utf8_lossy(&bytes).into_owned();
+            return Ok(read_line_window(path, &full, offset, limit));
+        }
+
         if bytes.len() > MAX_READ_BYTES {
             let preview = String::from_utf8_lossy(&bytes[..MAX_READ_BYTES]).into_owned();
             return Ok(json!({
@@ -517,6 +533,26 @@ impl Tool for ReadProjectFileTool {
             "content": content
         }))
     }
+}
+
+/// Extrait de lignes `[offset, offset+limit)` (offset à partir de 1).
+pub(crate) fn read_line_window(path: &str, full: &str, offset: Option<u64>, limit: Option<u64>) -> Value {
+    let lines: Vec<&str> = full.lines().collect();
+    let total = lines.len();
+    let start = offset.map(|o| (o as usize).saturating_sub(1)).unwrap_or(0).min(total);
+    let count = limit.map(|l| l as usize).unwrap_or(400).min(2_000);
+    let end = (start + count).min(total);
+    let content = lines[start..end].join("\n");
+    json!({
+        "ok": true,
+        "path": path,
+        "bytes": full.len(),
+        "total_lines": total,
+        "line_start": start + 1,
+        "line_end": end,
+        "has_more": end < total,
+        "content": content
+    })
 }
 
 /// Liste les fichiers du workdir local.

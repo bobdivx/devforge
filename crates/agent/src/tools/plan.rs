@@ -50,6 +50,8 @@ impl Tool for ProposePlanTool {
     }
 
     async fn execute(&self, arguments: Value) -> Result<Value> {
+        // Défense en profondeur : `steps` en chaîne (« [a, b] », lignes…) → tableau.
+        let arguments = crate::coerce::coerce_with(&self.parameters(), arguments);
         let title = arguments
             .get("title")
             .and_then(|v| v.as_str())

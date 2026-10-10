@@ -691,7 +691,7 @@ async fn fetch_headers(url: &str) -> std::result::Result<Vec<(String, String)>, 
         .user_agent("DevForge-Agent/2.0")
         .build()
         .map_err(|e| e.to_string())?;
-    let response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    let response = super::http::get_with_retry(&client, url).await.map_err(|e| e.to_string())?;
     let status = response.status();
     if status.is_redirection() {
         return Err("redirection non suivie — en-têtes non évalués".into());

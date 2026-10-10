@@ -615,7 +615,7 @@ async fn public_preview_health(url: &str) -> (bool, Option<u16>, String) {
         Ok(c) => c,
         Err(e) => return (false, None, e.to_string()),
     };
-    match client.get(url).send().await {
+    match super::http::get_with_retry(&client, url).await {
         Ok(r) => {
             let status = r.status().as_u16();
             // 404 Traefik / 502 bad gateway = preview publique KO

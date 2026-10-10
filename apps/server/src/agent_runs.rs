@@ -245,6 +245,14 @@ pub fn deploy_repair_followup(user_message: &str, tools_json: &str) -> Option<St
         return None;
     }
     let calls: Vec<Value> = serde_json::from_str(tools_json).unwrap_or_default();
+    // Publication verrouillée : l'agent attend la validation, pas de relance automatique.
+    let awaiting_approval = calls.iter().any(|call| {
+        call.get("result").and_then(|r| r.get("code")).and_then(|v| v.as_str())
+            == Some("publish_approval_required")
+    });
+    if awaiting_approval {
+        return None;
+    }
     let ran_install = calls.iter().any(|call| {
         call.get("name").and_then(|v| v.as_str()) == Some("run_workdir_command")
             && call
@@ -529,5 +537,10 @@ mod tests {
         assert!(deploy_repair_followup(&next, installed).is_none());
         let done = r#"[{"name":"run_workdir_command","arguments":{"command":"npm install"},"result":{"ok":true}},{"name":"trigger_deploy","arguments":{},"result":{"ok":true}}]"#;
         assert!(deploy_repair_followup("AUTO-RÉPARATION", done).is_none());
+        let blocked = r#"[{"name":"run_workdir_command","arguments":{"command":"npm install"},"result":{"ok":true}},{"name":"sync_workdir_to_github","arguments":{},"result":{"ok":false,"code":"publish_approval_required"}}]"#;
+        assert!(
+            deploy_repair_followup("AUTO-RÉPARATION DÉPLOIEMENT\npackage-lock", blocked).is_none(),
+            "en attente de validation : pas de relance"
+        );
     }
 }
