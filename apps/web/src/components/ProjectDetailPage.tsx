@@ -2517,6 +2517,32 @@ function EnvPanel({ uuid }: { uuid: string }) {
         </Alert>
       )}
       <FadeIn>
+      <HubGrid cols={3}>
+        <HubTile
+          index={0}
+          title="Variables"
+          description={`${rows.length} variable${rows.length > 1 ? 's' : ''}`}
+          icon={<HealthIcon kind="env" tone={rows.length ? 'ok' : 'warn'} />}
+          iconClass="!bg-transparent"
+        />
+        <HubTile
+          index={1}
+          title="Ajouter"
+          description="Nouvelle variable"
+          icon={<HealthIcon kind="settings" tone="ok" />}
+          iconClass="!bg-transparent"
+          onClick={() => setAdding(true)}
+        />
+        <HubTile
+          index={2}
+          title="Importer"
+          description=".env ou fichier"
+          icon={<HealthIcon kind="git" tone="neutral" />}
+          iconClass="!bg-transparent"
+          onClick={() => setImportOpen(true)}
+        />
+      </HubGrid>
+
         {adding ? (
           <div class="space-y-4">
             <button
@@ -2902,6 +2928,31 @@ function DomainsPanel({
 
   return (
     <FadeIn>
+      <HubGrid cols={3}>
+        <HubTile
+          index={0}
+          title="Domaines"
+          description={`${items.length} domaine${items.length > 1 ? 's' : ''}`}
+          icon={<HealthIcon kind="globe" tone={items.length ? 'ok' : 'neutral'} />}
+          iconClass="!bg-transparent"
+        />
+        <HubTile
+          index={1}
+          title="Principal"
+          description={primaryFqdn || 'Non défini'}
+          icon={<HealthIcon kind="globe" tone={primaryFqdn ? 'ok' : 'warn'} />}
+          iconClass="!bg-transparent"
+        />
+        <HubTile
+          index={2}
+          title="Ajouter"
+          description="Nouveau domaine"
+          icon={<HealthIcon kind="settings" tone="ok" />}
+          iconClass="!bg-transparent"
+          onClick={() => setDomainView('add')}
+        />
+      </HubGrid>
+
       <div class="space-y-4">
         {domainView && (
           <button
