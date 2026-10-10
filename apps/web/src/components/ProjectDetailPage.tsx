@@ -1154,12 +1154,51 @@ function ProjectOverview({
           />
         )}
 
-        {/* Tuiles importantes */}
+        {/* Tuiles d'action principales */}
+        <HubGrid cols={4}>
+          <HubTile
+            index={0}
+            title="Chat"
+            description="Parler à l'agent"
+            href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=workspace`}
+            icon={<HealthIcon kind="pulse" tone="ok" />}
+            iconClass="!bg-transparent"
+          />
+          <HubTile
+            index={1}
+            title="Agents"
+            description="Agents autonomes"
+            href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=agents`}
+            icon={<HealthIcon kind="settings" tone="ok" />}
+            iconClass="!bg-transparent"
+          />
+          <HubTile
+            index={2}
+            title="Nouveau brouillon"
+            description="Créer une fonctionnalité"
+            icon={<HealthIcon kind="git" tone="ok" />}
+            iconClass="!bg-transparent"
+            onClick={() => {
+              // Trigger the feature modal via parent if available, else navigate
+              window.location.href = `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=workspace&spec=1`;
+            }}
+          />
+          <HubTile
+            index={3}
+            title="Déploiements"
+            description={`${deployments.length} déploiement${deployments.length > 1 ? 's' : ''}`}
+            href={`/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`}
+            icon={<HealthIcon kind="deploy" tone="neutral" />}
+            iconClass="!bg-transparent"
+          />
+        </HubGrid>
+
+        {/* Tuiles d'état */}
         <HubGrid cols={4}>
           {primaryTiles.map((h, i) => (
             <HubTile
               key={h.key}
-              index={i}
+              index={i + 4}
               title={h.label}
               description={h.detail}
               href={h.href}
@@ -1168,14 +1207,6 @@ function ProjectOverview({
               badge={tileBadge(h.tone)}
             />
           ))}
-          <HubTile
-            index={primaryTiles.length}
-            title="Historique"
-            description={`${deployments.length} déploiement${deployments.length > 1 ? 's' : ''}`}
-            icon={<HealthIcon kind="deploy" tone="neutral" />}
-            iconClass="!bg-transparent"
-            onClick={() => setHistoryOpen(true)}
-          />
         </HubGrid>
 
         {secondaryTiles.length > 0 && (

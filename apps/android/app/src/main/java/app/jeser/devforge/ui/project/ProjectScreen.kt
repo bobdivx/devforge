@@ -200,7 +200,7 @@ fun ProjectScreen(
                             ChatPane(state, input, { input = it }, actions, onNewFeature = { sheet = ProjectSheet.NewFeature }, modifier = Modifier.weight(1f))
                         }
                     } else {
-                        // Mobile : Overview par défaut, chat ouvrable en sheet.
+                        // Mobile : Overview en tuiles + chat ouvrable.
                         val side = if (maxWidth >= 600.dp) 24.dp else 12.dp
                         Box(Modifier.fillMaxSize()) {
                             Column(
@@ -209,6 +209,15 @@ fun ProjectScreen(
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
                                 StatusStrip(state, onClick = { sheet = ProjectSheet.Details })
+                                // Tuiles d'action
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TileButton("Chat", onClick = { sheet = ProjectSheet.Chat }, modifier = Modifier.weight(1f))
+                                    TileButton("Agents", onClick = { /* TODO: navigate to agents */ }, modifier = Modifier.weight(1f))
+                                }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TileButton("Nouveau brouillon", onClick = { sheet = ProjectSheet.NewFeature }, modifier = Modifier.weight(1f))
+                                    TileButton("Déploiements", onClick = { sheet = ProjectSheet.Deploys }, modifier = Modifier.weight(1f))
+                                }
                                 DeployBanner(state, onDeploy = { sheet = ProjectSheet.Deploy }, onLogs = { state.latest?.let(actions.onOpenLogs) ?: actions.onOpenRuntimeLogs() })
                                 DraftBanner(state.draft, onClick = openDraft)
                                 RecentDeploys(state, onOpen = actions.onOpenLogs)
@@ -318,6 +327,20 @@ fun ProjectScreen(
         state.logs?.let { LogsSheet(it, onDismiss = actions.onCloseLogs, onAskRepair = askRepair) }
     }
     state.spec?.let { SpecSheet(it, onDismiss = actions.onCloseSpec, onDecide = actions.onDecideSpec) }
+}
+
+@Composable
+private fun TileButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        onClick = onClick,
+        color = TileBg,
+        shape = RoundedCornerShape(14.dp),
+        modifier = modifier.height(72.dp),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = DfColors.Ink)
+        }
+    }
 }
 
 /* ---------------- Bande d'état ---------------- */

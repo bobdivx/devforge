@@ -56,7 +56,7 @@ export function mobileAvatarNav(role?: string | null): NavItem[] {
   return globalNavForRole(role).filter((item) => !hidden.has(item.key));
 }
 
-const PROJECT_PRIMARY_KEYS = ['overview', 'workspace', 'deployments', 'agents', 'domains'] as const;
+const PROJECT_PRIMARY_KEYS = ['overview', 'workspace', 'agents', 'deployments'] as const;
 const PROJECT_MORE_KEYS = ['git', 'actions', 'database', 'env', 'backups', 'settings', 'home'] as const;
 
 function projectNavItems(uuid: string, opts?: { workspace?: boolean }): NavItem[] {
