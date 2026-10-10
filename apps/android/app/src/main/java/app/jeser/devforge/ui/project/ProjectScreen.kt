@@ -3,6 +3,7 @@ package app.jeser.devforge.ui.project
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -20,6 +21,15 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Subject
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.MoreVert
@@ -35,7 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
@@ -43,22 +53,26 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.jeser.devforge.data.AppStatus
+import app.jeser.devforge.data.ContainerState
 import app.jeser.devforge.data.DeployPlan
 import app.jeser.devforge.data.Deployment
 import app.jeser.devforge.data.SpecFeature
 import app.jeser.devforge.ui.apps.hostOf
 import app.jeser.devforge.ui.components.AppIcon
 import app.jeser.devforge.ui.components.ConfirmActionSheet
+import app.jeser.devforge.ui.components.DfTile
 import app.jeser.devforge.ui.components.Persona
 import app.jeser.devforge.ui.components.PersonaAvatar
 import app.jeser.devforge.ui.components.PersonaMessage
@@ -99,7 +113,7 @@ data class ProjectActions(
 )
 
 /** Feuilles de la page app (une seule ouverte à la fois). */
-enum class ProjectSheet { None, Details, More, Deploys, Stop, Restart, Deploy, NewFeature, Draft, DraftFile, DraftValidate, DraftDiscard, Chat }
+enum class ProjectSheet { None, Details, Deploys, Stop, Restart, Deploy, NewFeature, Draft, DraftFile, DraftValidate, DraftDiscard, Chat }
 
 private data class Chip(val key: String, val label: String, val danger: Boolean = false)
 
@@ -137,24 +151,17 @@ fun ProjectScreen(
     }
 
     val project = state.project
-    val onSheet: (ProjectSheet) -> Unit = { sheet = it }
     val openDraft = { actions.onOpenDraft(); sheet = ProjectSheet.Draft }
     Scaffold(
         modifier = modifier,
         containerColor = DfColors.Bg,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
+            // Barre du haut épurée : retour + app. Les actions vivent dans la barre d'actions sous le statut.
             TopAppBar(
                 title = {
                     if (project != null) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // Petit écran : on garde la place pour le nom et les actions.
-                            if (LocalConfiguration.current.screenWidthDp >= 400) {
-                                AppIcon(project.name, project.productionUrl, project.gitRepository, status = null, size = 28.dp)
-                                Spacer(Modifier.width(8.dp))
-                            }
-                            Text(project.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                        }
+                        Text(project.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                     }
                 },
                 navigationIcon = {
@@ -162,7 +169,6 @@ fun ProjectScreen(
                         IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour aux apps") }
                     }
                 },
-                actions = { if (project != null) TopActions(state, actions, onSheet) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DfColors.Bg),
             )
         },
@@ -184,52 +190,55 @@ fun ProjectScreen(
                 )
                 else -> BoxWithConstraints(Modifier.fillMaxSize()) {
                     val wide = maxWidth >= 900.dp
+                    // Colonne gauche du grand écran (400 dp) : icônes seules, comme sur téléphone.
+                    val labels = maxWidth >= 600.dp && !wide
+                    val narrowCols = if (maxWidth >= 600.dp) 4 else 2
+                    val overview: @Composable (Int, Boolean) -> Unit = { cols, showBraise ->
+                        StatusCard(state)
+                        ActionBar(
+                            state,
+                            labels = labels,
+                            onDeploy = {
+                                if (state.deployPlan.kind == DeployPlan.Kind.InProgress) {
+                                    state.latest?.let(actions.onOpenLogs) ?: actions.onOpenRuntimeLogs()
+                                } else {
+                                    sheet = ProjectSheet.Deploy
+                                }
+                            },
+                            onRestart = { sheet = ProjectSheet.Restart },
+                            onStop = { sheet = ProjectSheet.Stop },
+                            onStart = { actions.onLifecycle("start") },
+                            onLogs = actions.onOpenRuntimeLogs,
+                        )
+                        ProjectTiles(
+                            state,
+                            cols = cols,
+                            showBraise = showBraise,
+                            onBraise = { sheet = ProjectSheet.Chat },
+                            onWorkspace = openDraft,
+                            onDeploys = { sheet = ProjectSheet.Deploys },
+                            onSettings = { sheet = ProjectSheet.Details },
+                        )
+                    }
                     if (wide) {
+                        // Grand écran : vue d'ensemble à gauche, Braise toujours visible à droite.
                         Row(Modifier.fillMaxSize()) {
                             Column(
-                                Modifier.width(380.dp).fillMaxHeight().verticalScroll(rememberScrollState())
+                                Modifier.width(400.dp).fillMaxHeight().verticalScroll(rememberScrollState())
                                     .padding(start = 20.dp, end = 16.dp, bottom = 16.dp),
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                StatusStrip(state, onClick = { sheet = ProjectSheet.Details })
-                                DeployBanner(state, onDeploy = { sheet = ProjectSheet.Deploy }, onLogs = { state.latest?.let(actions.onOpenLogs) ?: actions.onOpenRuntimeLogs() })
-                                DraftBanner(state.draft, onClick = openDraft)
-                                RecentDeploys(state, onOpen = actions.onOpenLogs)
-                            }
+                            ) { overview(3, false) }
                             VerticalDivider(color = DfColors.Line)
                             ChatPane(state, input, { input = it }, actions, onNewFeature = { sheet = ProjectSheet.NewFeature }, modifier = Modifier.weight(1f))
                         }
                     } else {
-                        // Mobile : Overview en tuiles + chat ouvrable.
-                        val side = if (maxWidth >= 600.dp) 24.dp else 12.dp
-                        Box(Modifier.fillMaxSize()) {
-                            Column(
-                                Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-                                    .padding(horizontal = side).padding(bottom = 80.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                StatusStrip(state, onClick = { sheet = ProjectSheet.Details })
-                                // Tuiles d'action
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    TileButton("Chat", onClick = { sheet = ProjectSheet.Chat }, modifier = Modifier.weight(1f))
-                                    TileButton("Agents", onClick = { sheet = ProjectSheet.More }, modifier = Modifier.weight(1f))
-                                }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    TileButton("Nouveau brouillon", onClick = { sheet = ProjectSheet.NewFeature }, modifier = Modifier.weight(1f))
-                                    TileButton("Déploiements", onClick = { sheet = ProjectSheet.Deploys }, modifier = Modifier.weight(1f))
-                                }
-                                DeployBanner(state, onDeploy = { sheet = ProjectSheet.Deploy }, onLogs = { state.latest?.let(actions.onOpenLogs) ?: actions.onOpenRuntimeLogs() })
-                                DraftBanner(state.draft, onClick = openDraft)
-                                RecentDeploys(state, onOpen = actions.onOpenLogs)
-                            }
-                            FloatingActionButton(
-                                onClick = { sheet = ProjectSheet.Chat },
-                                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-                                containerColor = DfColors.Accent,
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.Subject, contentDescription = "Discuter")
-                            }
-                        }
+                        // Téléphone / tablette : statut, barre d'actions, tuiles. Chaque tuile ouvre une feuille.
+                        val side = if (maxWidth >= 600.dp) 24.dp else 16.dp
+                        Column(
+                            Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                                .padding(horizontal = side).padding(bottom = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) { overview(narrowCols, true) }
                     }
                 }
             }
@@ -245,7 +254,6 @@ fun ProjectScreen(
                 onOpenLogs = { d -> sheet = ProjectSheet.None; actions.onOpenLogs(d) },
                 onHistory = { sheet = ProjectSheet.Deploys },
             )
-            ProjectSheet.More -> MoreSheet(state, actions, onDismiss = close, onSheet = onSheet)
             ProjectSheet.Deploys -> DeploysSheet(state, onDismiss = close, onOpen = { d -> sheet = ProjectSheet.None; actions.onOpenLogs(d) })
             ProjectSheet.Stop -> ConfirmActionSheet(
                 stopConfirm(project.name, hostOf(project.productionUrl)),
@@ -312,7 +320,7 @@ fun ProjectScreen(
                 ChatPane(
                     state, input, { input = it }, actions,
                     onNewFeature = { sheet = ProjectSheet.NewFeature },
-                    modifier = Modifier.fillMaxHeight(0.9f).padding(16.dp),
+                    modifier = Modifier.fillMaxHeight(0.92f).imePadding().padding(horizontal = 4.dp),
                 )
             }
             ProjectSheet.None -> Unit
@@ -329,184 +337,244 @@ fun ProjectScreen(
     state.spec?.let { SpecSheet(it, onDismiss = actions.onCloseSpec, onDecide = actions.onDecideSpec) }
 }
 
-@Composable
-private fun TileButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Surface(
-        onClick = onClick,
-        color = TileBg,
-        shape = RoundedCornerShape(14.dp),
-        modifier = modifier.height(72.dp),
-    ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = DfColors.Ink)
-        }
-    }
-}
+/* ---------------- Statut unique ---------------- */
 
-/* ---------------- Bande d'état ---------------- */
+/** Un seul statut : mise en ligne en cours / échouée d'abord, sinon l'état réel de l'app. */
+data class Headline(val label: String, val detail: String?, val color: Color)
 
-/** « ● En ligne · 25 h · Santé OK · jeser.app › » : un toucher ouvre tout le détail. */
-@Composable
-fun StatusStrip(state: ProjectUiState, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val project = state.project ?: return
+fun headlineOf(state: ProjectUiState): Headline {
     val s = state.summary
     val latest = state.latest
-    val host = hostOf(project.productionUrl)
-    val alert = s.status in setOf(AppStatus.Failed, AppStatus.Down) || latest?.isFailed == true
-    val text = buildAnnotatedString {
-        withStyle(SpanStyle(color = s.status.color(), fontWeight = FontWeight.SemiBold)) { append(s.status.label) }
-        val parts = buildList<Pair<String, Color>> {
-            s.since?.let { add(it.removePrefix("depuis ") to DfColors.InkMuted) }
-            when {
-                latest?.isRunning == true -> add("mise en ligne en cours" to DfColors.Warn)
-                latest?.isFailed == true -> add("mise en ligne échouée" to DfColors.Danger)
-            }
-            when (s.healthOk) {
-                true -> add("Santé OK" to DfColors.InkMuted)
-                false -> add("ne répond pas" to DfColors.Danger)
-                null -> Unit
-            }
-            add((host ?: "brouillon local") to DfColors.InkFaint)
-        }
-        parts.forEach { (t, c) ->
-            withStyle(SpanStyle(color = DfColors.InkFaint)) { append(" · ") }
-            withStyle(SpanStyle(color = c)) { append(t) }
-        }
+    val plan = state.deployPlan
+    return when {
+        plan.kind == DeployPlan.Kind.InProgress -> Headline("Mise en ligne en cours", plan.summary, DfColors.Warn)
+        latest?.isFailed == true -> Headline(
+            "Échec de la mise en ligne",
+            if (s.status == AppStatus.Live) "L'ancienne version reste en ligne" else latest.errorSummary?.lineSequence()?.firstOrNull(),
+            DfColors.Danger,
+        )
+        else -> Headline(
+            s.status.label,
+            if (plan.primary) plan.summary
+            else listOfNotNull(s.since, s.healthOk?.let { if (it) "santé OK" else "ne répond pas" }).joinToString(" · ").ifBlank { null },
+            s.status.color(),
+        )
     }
+}
+
+/** Icône + statut + pastille URL (ouvrir / copier). Pas de répétition : rien d'autre ne redit le statut. */
+@Composable
+fun StatusCard(state: ProjectUiState, modifier: Modifier = Modifier) {
+    val project = state.project ?: return
+    val h = headlineOf(state)
+    val uri = LocalUriHandler.current
+    val clip = LocalClipboardManager.current
+    val url = project.productionUrl?.split(',')?.firstOrNull()?.trim()?.takeIf { it.isNotBlank() }
+        ?.let { if (it.startsWith("http")) it else "https://$it" }
     Surface(
-        onClick = onClick,
         color = TileBg,
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, if (alert) DfColors.Danger.copy(alpha = .35f) else Color.Transparent),
-        modifier = modifier.fillMaxWidth().heightIn(min = 48.dp).semantics {
-            contentDescription = "État de l'app : ${text.text}. Toucher pour le détail."
-            role = Role.Button
-        },
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, if (h.color == DfColors.Danger) DfColors.Danger.copy(alpha = .35f) else Color.Transparent),
+        modifier = modifier.fillMaxWidth().testTag("status"),
     ) {
-        Row(Modifier.padding(start = 14.dp, end = 8.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp).background(s.status.color(), CircleShape))
-            Spacer(Modifier.width(8.dp))
-            Text(text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Icon(Icons.Filled.ExpandMore, contentDescription = null, tint = DfColors.InkFaint, modifier = Modifier.padding(start = 4.dp).size(20.dp))
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AppIcon(project.name, project.productionUrl, project.gitRepository, status = state.summary.status, size = 44.dp)
+                Column(Modifier.weight(1f).padding(start = 12.dp).semantics(mergeDescendants = true) {}) {
+                    Text(h.label, color = h.color, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    h.detail?.let { Text(it, color = DfColors.InkMuted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                }
+            }
+            if (url != null) {
+                Surface(
+                    color = DfColors.Card,
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(1.dp, DfColors.Line),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            Modifier.weight(1f).heightIn(min = 48.dp)
+                                .clickable(role = Role.Button, onClickLabel = "Ouvrir le site") { runCatching { uri.openUri(url) } }
+                                .padding(start = 14.dp, end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Public, contentDescription = null, tint = DfColors.InkMuted, modifier = Modifier.size(18.dp))
+                            Text(
+                                hostOf(url).orEmpty(), color = DfColors.Ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false).padding(horizontal = 8.dp),
+                            )
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = DfColors.InkFaint, modifier = Modifier.size(16.dp))
+                        }
+                        VerticalDivider(Modifier.height(28.dp), color = DfColors.Line)
+                        IconButton(onClick = { clip.setText(AnnotatedString(url)) }, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.Filled.ContentCopy, contentDescription = "Copier l'adresse", tint = DfColors.InkMuted, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
-/* ---------------- Bandeau de mise en ligne ---------------- */
+/* ---------------- Barre d'actions ---------------- */
 
 /**
- * N'apparaît que s'il y a quelque chose à faire : changements à publier, échec à réessayer,
- * première publication, ou mise en ligne en cours. App à jour → rien (« Reconstruire » est dans « Plus »).
+ * Mettre en ligne (principal), Redémarrer, Arrêter / Démarrer, Logs.
+ * Téléphone : icônes 48 dp sauf l'action principale ; tablette : icône + libellé.
+ * Mettre en ligne / Reconstruire, Redémarrer et Arrêter ouvrent toujours une confirmation.
  */
 @Composable
-fun DeployBanner(state: ProjectUiState, onDeploy: () -> Unit, onLogs: () -> Unit) {
+fun ActionBar(
+    state: ProjectUiState,
+    labels: Boolean,
+    onDeploy: () -> Unit,
+    onRestart: () -> Unit,
+    onStop: () -> Unit,
+    onStart: () -> Unit,
+    onLogs: () -> Unit,
+) {
     val plan = state.deployPlan
-    if (!plan.primary && plan.kind != DeployPlan.Kind.InProgress) return
-    val tone = when (plan.kind) {
-        DeployPlan.Kind.Retry -> DfColors.Danger
-        DeployPlan.Kind.InProgress -> DfColors.Warn
-        else -> DfColors.Accent
+    val running = state.containerState.running
+    val inProgress = plan.kind == DeployPlan.Kind.InProgress
+    val primaryLabel = when {
+        inProgress -> "En cours…"
+        plan.primary -> plan.shortLabel
+        plan.kind == DeployPlan.Kind.Rebuild -> "Reconstruire"
+        else -> "Mettre en ligne"
     }
-    Surface(
-        color = tone.copy(alpha = .08f),
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, tone.copy(alpha = .3f)),
-        modifier = Modifier.fillMaxWidth(),
+    val danger = plan.kind == DeployPlan.Kind.Retry
+    Row(
+        Modifier.fillMaxWidth().testTag("actions"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(Modifier.padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (plan.kind == DeployPlan.Kind.InProgress) {
-                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = tone)
+        Button(
+            onClick = onDeploy,
+            enabled = inProgress || state.canDeploy,
+            shape = RoundedCornerShape(50),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (danger) DfColors.Danger else DfColors.Accent,
+                contentColor = if (danger) Color.White else DfColors.OnAccent,
+            ),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+        ) {
+            if (inProgress || state.deploying) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = DfColors.OnAccent)
             } else {
-                Icon(
-                    if (plan.kind == DeployPlan.Kind.Retry) Icons.Filled.Refresh else Icons.Filled.CloudUpload,
-                    contentDescription = null, tint = tone, modifier = Modifier.size(20.dp),
-                )
+                Icon(if (danger) Icons.Filled.Refresh else Icons.Filled.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
             }
-            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                Text(plan.label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(plan.summary, color = DfColors.InkMuted, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            if (plan.kind == DeployPlan.Kind.InProgress) {
-                TextButton(onClick = onLogs, modifier = Modifier.heightIn(min = 48.dp)) { Text("Logs") }
-            } else {
-                Button(
-                    onClick = onDeploy,
-                    enabled = state.canDeploy,
-                    colors = ButtonDefaults.buttonColors(containerColor = tone, contentColor = if (plan.kind == DeployPlan.Kind.Retry) Color.White else DfColors.OnAccent),
-                    contentPadding = PaddingValues(horizontal = 14.dp),
-                    modifier = Modifier.heightIn(min = 40.dp),
-                ) { Text(plan.shortLabel, fontWeight = FontWeight.SemiBold) }
-            }
+            Spacer(Modifier.width(8.dp))
+            Text(primaryLabel, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        BarButton(Icons.Filled.RestartAlt, "Redémarrer", labels, onRestart, enabled = state.canControl && running, busy = state.lifecycleBusy == "restart")
+        if (running || state.lifecycleBusy == "stop") {
+            BarButton(Icons.Filled.Stop, "Arrêter", labels, onStop, enabled = state.canControl, busy = state.lifecycleBusy == "stop", tint = DfColors.Danger)
+        } else {
+            BarButton(
+                Icons.Filled.PlayArrow, "Démarrer", labels, onStart,
+                enabled = state.canControl && state.containerState.kind != ContainerState.Kind.Missing,
+                busy = state.lifecycleBusy == "start", tint = DfColors.Ok,
+            )
+        }
+        BarButton(Icons.AutoMirrored.Filled.Subject, "Logs", labels, onLogs)
     }
 }
 
-/* ---------------- Actions ---------------- */
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TopAction(
+private fun BarButton(
     icon: ImageVector,
-    tooltip: String,
+    label: String,
+    showLabel: Boolean,
     onClick: () -> Unit,
     enabled: Boolean = true,
     busy: Boolean = false,
-    filled: Boolean = false,
+    tint: Color = DfColors.Ink,
 ) {
-    TooltipBox(
-        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
-        tooltip = { PlainTooltip { Text(tooltip) } },
-        state = rememberTooltipState(),
+    val a = if (enabled) 1f else .4f
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled && !busy,
+        shape = RoundedCornerShape(50),
+        border = BorderStroke(1.dp, DfColors.LineStrong.copy(alpha = a)),
+        contentPadding = PaddingValues(horizontal = if (showLabel) 14.dp else 0.dp),
+        modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 48.dp).semantics { contentDescription = label },
     ) {
-        val content: @Composable () -> Unit = {
-            if (busy) {
-                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = if (filled) DfColors.OnAccent else DfColors.Accent)
-            } else {
-                Icon(icon, contentDescription = tooltip, modifier = Modifier.size(22.dp))
-            }
-        }
-        if (filled) {
-            FilledIconButton(
-                onClick = onClick,
-                enabled = enabled && !busy,
-                shape = RoundedCornerShape(14.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = DfColors.Accent, contentColor = DfColors.OnAccent),
-                modifier = Modifier.size(48.dp).padding(4.dp),
-                content = content,
-            )
+        if (busy) {
+            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = tint)
         } else {
-            IconButton(onClick = onClick, enabled = enabled && !busy, modifier = Modifier.size(48.dp), content = content)
+            Icon(icon, contentDescription = null, tint = tint.copy(alpha = a), modifier = Modifier.size(20.dp))
+        }
+        if (showLabel) {
+            Spacer(Modifier.width(8.dp))
+            Text(label, color = DfColors.Ink.copy(alpha = a), maxLines = 1)
         }
     }
 }
 
-/** Barre du haut : Ouvrir, Logs et « Plus » (aperçu, redémarrer, arrêter, reconstruire…). La publication vit dans le bandeau. */
-@Composable
-private fun TopActions(state: ProjectUiState, actions: ProjectActions, onSheet: (ProjectSheet) -> Unit) {
-    val project = state.project ?: return
-    val uri = LocalUriHandler.current
-    val url = project.productionUrl?.split(',')?.firstOrNull()?.trim()
-    TopAction(
-        Icons.AutoMirrored.Filled.OpenInNew, "Ouvrir le site en ligne",
-        onClick = { url?.let { runCatching { uri.openUri(if (it.startsWith("http")) it else "https://$it") } } },
-        enabled = !url.isNullOrBlank(),
-    )
-    TopAction(Icons.AutoMirrored.Filled.Subject, "Logs de l'app et de la dernière mise en ligne", onClick = actions.onOpenRuntimeLogs)
-    TopAction(
-        Icons.Filled.MoreVert, "Plus : aperçu, redémarrer, arrêter, détails",
-        onClick = { onSheet(ProjectSheet.More) },
-        busy = state.lifecycleBusy != null || state.previewStarting,
-    )
-}
+/* ---------------- Tuiles ---------------- */
 
+private data class TileSpec(
+    val key: String,
+    val title: String,
+    val sub: String,
+    val icon: ImageVector,
+    val tone: Color,
+    val alert: Boolean,
+    val onClick: () -> Unit,
+)
+
+/** Braise, Workspace, Déploiements, Paramètres : chaque tuile ouvre sa feuille (jamais de détail sous la grille). */
 @Composable
-private fun RecentDeploys(state: ProjectUiState, onOpen: (Deployment) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Dernières mises en ligne", style = MaterialTheme.typography.titleSmall, color = DfColors.InkMuted)
-        if (state.deployments.isEmpty()) {
-            Text("Pas encore de mise en ligne. Le brouillon reste local.", color = DfColors.InkFaint, style = MaterialTheme.typography.bodyMedium)
+fun ProjectTiles(
+    state: ProjectUiState,
+    cols: Int,
+    showBraise: Boolean,
+    onBraise: () -> Unit,
+    onWorkspace: () -> Unit,
+    onDeploys: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    val draft = state.draft
+    val latest = state.latest
+    val tiles = buildList {
+        if (showBraise) {
+            val waiting = state.waitingSpecs.isNotEmpty()
+            add(TileSpec("braise", "Braise", if (waiting) "Attend ton OK" else "Discuter, faire évoluer", Icons.Filled.LocalFireDepartment,
+                if (waiting) DfColors.Warn else DfColors.Accent, waiting, onBraise))
         }
-        state.deployments.take(6).forEach { d -> DeployRow(d, onClick = { onOpen(d) }) }
+        val dirty = draft?.dirty == true
+        add(TileSpec("workspace", "Workspace", if (dirty) "Brouillon · ${filesLabel(draft!!.count)}" else "Brouillon et aperçu", Icons.Filled.Description,
+            if (dirty) DfColors.Warn else DfColors.InkMuted, dirty, onWorkspace))
+        val (dl, dc) = latest?.let { deployLabel(it) } ?: ("Aucune" to DfColors.InkFaint)
+        val when_ = latest?.let { relativeTime(it.createdAt) }?.takeIf { it.isNotEmpty() }
+        add(TileSpec("deploys", "Déploiements", listOfNotNull(dl, when_).joinToString(" · "), Icons.Filled.History,
+            dc, latest?.isFailed == true, onDeploys))
+        add(TileSpec("settings", "Paramètres", "Domaine, GitHub, équipe", Icons.Filled.Settings, DfColors.InkMuted, false, onSettings))
+    }
+    Column(Modifier.fillMaxWidth().testTag("tiles"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        tiles.chunked(cols).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { t ->
+                    DfTile(
+                        onClick = t.onClick,
+                        tone = if (t.alert) t.tone else null,
+                        minHeight = 116.dp,
+                        contentDescription = "${t.title} : ${t.sub}",
+                        modifier = Modifier.weight(1f).testTag("tile-${t.key}"),
+                    ) {
+                        Box(Modifier.size(44.dp).background(t.tone.copy(alpha = .14f), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+                            Icon(t.icon, contentDescription = null, tint = t.tone, modifier = Modifier.size(22.dp))
+                        }
+                        Text(t.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(t.sub, color = if (t.alert) t.tone else DfColors.InkMuted, fontSize = 12.sp, maxLines = 2,
+                            overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                    }
+                }
+                repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
     }
 }
 
@@ -560,7 +628,6 @@ private fun ChatPane(
 
     val chips = buildList {
         if (state.lastFailed) add(Chip("repair", "🩹 Réparer", danger = true))
-        add(Chip("feature", "✨ Nouveauté"))
         add(Chip("health", "🩺 Ça va ?"))
         add(Chip("design", "🎨 Design"))
     }
@@ -647,7 +714,7 @@ private fun ChatPane(
                     unfocusedContainerColor = DfColors.Surface,
                     disabledContainerColor = DfColors.Surface,
                 ),
-                modifier = Modifier.weight(1f).heightIn(min = 52.dp),
+                modifier = Modifier.weight(1f).heightIn(min = 52.dp).testTag("chat-input"),
             )
             FilledIconButton(
                 onClick = {
