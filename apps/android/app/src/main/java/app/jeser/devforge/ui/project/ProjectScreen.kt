@@ -212,7 +212,7 @@ fun ProjectScreen(
                                 // Tuiles d'action
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     TileButton("Chat", onClick = { sheet = ProjectSheet.Chat }, modifier = Modifier.weight(1f))
-                                    TileButton("Agents", onClick = { /* TODO: navigate to agents */ }, modifier = Modifier.weight(1f))
+                                    TileButton("Agents", onClick = { sheet = ProjectSheet.More }, modifier = Modifier.weight(1f))
                                 }
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     TileButton("Nouveau brouillon", onClick = { sheet = ProjectSheet.NewFeature }, modifier = Modifier.weight(1f))

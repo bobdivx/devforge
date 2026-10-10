@@ -184,6 +184,12 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
 
   return (
     <FadeIn>
+      <HubGrid cols={4} class="mb-3">
+        <HubTile index={0} title="Overview" description="Retour au tableau" href={`/app/projects/view?uuid=${projectUuid}&tab=overview`} />
+        <HubTile index={1} title="Déploiements" description="Statut et logs" href={`/app/projects/view?uuid=${projectUuid}&tab=deployments`} />
+        <HubTile index={2} title="Agents" description="Agents autonomes" href={`/app/projects/view?uuid=${projectUuid}&tab=agents`} />
+        <HubTile index={3} title="Nouveau brouillon" description="Créer une fonctionnalité" onClick={() => window.location.href = `/app/projects/view?uuid=${projectUuid}&tab=workspace&spec=1`} />
+      </HubGrid>
       <div
         class={cn(
           'flex flex-col overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-card)] shadow-[0_16px_48px_rgb(0_0_0/0.28)]',
