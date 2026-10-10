@@ -404,7 +404,14 @@ export function ProjectAgentsHub({
                   key={agent.uuid}
                   index={i + 1}
                   title={agent.name || roleLabel(agent.role)}
-                  onClick={() => setDetailUuid(agent.uuid)}
+                  onClick={() => {
+                    if (isCoord) {
+                      remember(agent);
+                      setOpenChat(agent);
+                    } else {
+                      setDetailUuid(agent.uuid);
+                    }
+                  }}
                   icon={agentIcon(agent)}
                   badge={
                     <span
@@ -413,7 +420,7 @@ export function ProjectAgentsHub({
                         statusDotClass(status.tone),
                         status.tone === 'warn' ? 'animate-pulse' : '',
                       )}
-                      title={status.label}
+                      title={status.tone === "warn" ? "Au travail…" : status.label}
                       aria-hidden
                     />
                   }

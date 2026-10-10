@@ -1065,12 +1065,21 @@ export function ProjectAgentsPanel({
                 </div>
               </div>
             )}
-            {messages.map((m, i) => (
+            {messages.map((m, i) => {
+              const isWake = m.role === 'user' && /COORD-WAKE|Événement projet|Déploiement :/.test(m.content);
+              const wakeSummary = isWake ? m.content.split('\n').slice(0, 3).join(' ').slice(0, 180) + (m.content.length > 180 ? '…' : '') : '';
+              return (
               <div key={i} class="space-y-2">
                 {m.role === 'user' ? (
+                  isWake ? (
+                    <div class="mx-auto max-w-[92%] rounded-lg border border-[var(--color-warn)]/40 bg-[var(--color-warn)]/10 px-3 py-2 text-xs text-[var(--color-ink-muted)]">
+                      <span class="font-medium text-[var(--color-warn)]">Événement</span> · {wakeSummary}
+                    </div>
+                  ) : (
                   <div class="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-[var(--color-accent)] px-3 py-2 text-sm text-white">
                     {m.content}
                   </div>
+                  )
                 ) : (
                   <div class={cn(persona && 'flex items-start gap-2.5')}>
                     {persona && <div class="pt-0.5">{persona.smallAvatar}</div>}
@@ -1157,7 +1166,8 @@ export function ProjectAgentsPanel({
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
             {busy && liveReflections.length > 0 && (
               <AgentReflectionList items={liveReflections} />
             )}
