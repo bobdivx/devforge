@@ -207,6 +207,26 @@ export function ProjectActionsPanel({
     <div class="space-y-6">
       {lastResult && (
         <FadeIn>
+      <HubGrid cols={3}>
+        <HubTile
+          index={0}
+          title="Actions"
+          description={data?.workflows?.length ? `${data.workflows.length} workflows` : 'Aucun'}
+        />
+        <HubTile
+          index={1}
+          title="Runner"
+          description="Assurer le runner"
+          onClick={ensureRunner}
+        />
+        <HubTile
+          index={2}
+          title="Rafraîchir"
+          description="Recharger l'état"
+          onClick={() => void load()}
+        />
+      </HubGrid>
+
           <Alert tone={lastResult.tone === 'ok' ? 'ok' : lastResult.tone === 'warn' ? 'warn' : 'info'}>
             <div class="font-medium">{lastResult.title}</div>
             <pre class="mt-2 whitespace-pre-wrap font-sans text-xs leading-relaxed opacity-90">

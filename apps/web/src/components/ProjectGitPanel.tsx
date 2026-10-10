@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { api, type ProjectSync } from '../lib/api';
 import { projectSyncMeta } from '../lib/status';
 import { DiffViewer, type DiffFile } from './DiffViewer';
+import { HubGrid, HubTile } from './ui';
 import {
   Badge,
   Button,
@@ -253,6 +254,26 @@ export function ProjectGitPanel({
       />
 
       <FadeIn>
+      <HubGrid cols={3}>
+        <HubTile
+          index={0}
+          title="Sync"
+          description={data?.sync?.state || 'Inconnu'}
+                  />
+        <HubTile
+          index={1}
+          title="Auto-deploy"
+          description={autoDeployEnabled ? 'Activé' : 'Désactivé'}
+                    onClick={toggleAutoDeploy}
+        />
+        <HubTile
+          index={2}
+          title="Diff"
+          description="Voir les changements"
+                    onClick={() => setDiffOpen(true)}
+        />
+      </HubGrid>
+
         <Card padding="lg" class="space-y-6">
           {/* Auto-Deploy Toggle */}
           <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-line)] pb-5">

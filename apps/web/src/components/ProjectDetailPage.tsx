@@ -1909,6 +1909,32 @@ function BackupsPanel({ projectUuid }: { projectUuid: string }) {
 
   return (
     <FadeIn>
+      <HubGrid cols={3}>
+        <HubTile
+          index={0}
+          title="Sauvegardes"
+          description={`${items.length} backup${items.length > 1 ? 's' : ''}`}
+          icon={<HealthIcon kind="deploy" tone={items.length ? 'ok' : 'neutral'} />}
+          iconClass="!bg-transparent"
+        />
+        <HubTile
+          index={1}
+          title="Nouveau"
+          description="Créer un snapshot"
+          icon={<HealthIcon kind="deploy" tone="ok" />}
+          iconClass="!bg-transparent"
+          onClick={create}
+        />
+        <HubTile
+          index={2}
+          title="Historique"
+          description={showAll ? 'Tout affiché' : `${visible.length} visibles`}
+          icon={<HealthIcon kind="settings" tone="neutral" />}
+          iconClass="!bg-transparent"
+          onClick={() => setShowAll((v) => !v)}
+        />
+      </HubGrid>
+
       <div class="space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="min-w-0">
