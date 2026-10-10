@@ -25,7 +25,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.0.217"
+version = "2.0.218"
 edition = "2021"
 license = "proprietary"
 authors = ["DevForge"]
