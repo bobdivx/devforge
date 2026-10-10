@@ -180,6 +180,9 @@ pub fn build_core_registry(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallRecord {
+    /// Identifiant de l'appel (id du tool call LLM) — clé stable côté UI.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
     pub name: String,
     pub arguments: Value,
     pub result: Value,
@@ -203,8 +206,16 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         detail: String,
     },
-    ToolStart { name: String, arguments: Value },
+    ToolStart {
+        /// Id du tool call (LLM) — relie `tool_start` et `tool_done`, clé stable côté UI.
+        #[serde(default)]
+        id: String,
+        name: String,
+        arguments: Value,
+    },
     ToolDone {
+        #[serde(default)]
+        id: String,
         name: String,
         ok: bool,
         arguments: Value,
@@ -340,7 +351,8 @@ impl AgentRunner {
             );
             let mut args = force_args.unwrap_or_else(|| json!({}));
             inject_tool_defaults(&mut args, &ctx);
-            emit(&progress, AgentEvent::ToolStart { name: tool.to_string(), arguments: args.clone() });
+            let call_id = format!("forced-{tool}");
+            emit(&progress, AgentEvent::ToolStart { id: call_id.clone(), name: tool.to_string(), arguments: args.clone() });
             let result = if let Some(blocked) = refuse_bare_spec_approval(tool, &args, message) {
                 blocked
             } else if let Some(blocked) = refuse_spec_publish(tool, message) {
@@ -349,10 +361,10 @@ impl AgentRunner {
                 self.registry.execute(tool, args.clone()).await?
             };
             let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
-            emit(&progress, AgentEvent::ToolDone { name: tool.to_string(), ok, arguments: args.clone(), result: result.clone() });
+            emit(&progress, AgentEvent::ToolDone { id: call_id.clone(), name: tool.to_string(), ok, arguments: args.clone(), result: result.clone() });
             return Ok(AgentReply {
                 reply: summarize(tool, &result),
-                tool_calls: vec![ToolCallRecord { name: tool.to_string(), arguments: args, result }],
+                tool_calls: vec![ToolCallRecord { id: call_id, name: tool.to_string(), arguments: args, result }],
                 provider,
             });
         }
@@ -449,7 +461,7 @@ impl AgentRunner {
             for call in turn.tool_calls {
                 let mut args = call.arguments.clone();
                 inject_tool_defaults(&mut args, &ctx);
-                emit(&progress, AgentEvent::ToolStart { name: call.name.clone(), arguments: args.clone() });
+                emit(&progress, AgentEvent::ToolStart { id: call.id.clone(), name: call.name.clone(), arguments: args.clone() });
                 let result = if let Some(blocked) = refuse_bare_spec_approval(&call.name, &args, message) {
                     blocked
                 } else if let Some(blocked) = refuse_spec_publish(&call.name, message) {
@@ -466,7 +478,7 @@ impl AgentRunner {
                     }
                 };
                 let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
-                emit(&progress, AgentEvent::ToolDone { name: call.name.clone(), ok, arguments: args.clone(), result: result.clone() });
+                emit(&progress, AgentEvent::ToolDone { id: call.id.clone(), name: call.name.clone(), ok, arguments: args.clone(), result: result.clone() });
                 if call.name == "propose_plan" {
                     if let Some(plan) = result.get("plan") {
                         emit(&progress, AgentEvent::Plan {
@@ -478,7 +490,7 @@ impl AgentRunner {
                         });
                     }
                 }
-                records.push(ToolCallRecord { name: call.name.clone(), arguments: args, result: result.clone() });
+                records.push(ToolCallRecord { id: call.id.clone(), name: call.name.clone(), arguments: args, result: result.clone() });
                 let content = serde_json::to_string(&result).unwrap_or_else(|_| "{}".into());
                 messages.push(ChatMessage::tool_result(&call.id, &call.name, content));
             }
@@ -792,5 +804,55 @@ fn summarize(tool: &str, result: &Value) -> String {
     } else {
         let err = result.get("error").or_else(|| result.get("reason")).and_then(|v| v.as_str()).unwrap_or("échec");
         format!("✗ {tool} : {err}\n{pretty}")
+    }
+}
+
+#[cfg(test)]
+mod event_serde_tests {
+    use super::*;
+
+    #[test]
+    fn tool_start_serializes_snake_case_with_id() {
+        let ev = AgentEvent::ToolStart {
+            id: "call_42".into(),
+            name: "read_project_file".into(),
+            arguments: json!({ "path": "README.md" }),
+        };
+        let v = serde_json::to_value(&ev).unwrap();
+        assert_eq!(v["type"], "tool_start");
+        assert_eq!(v["id"], "call_42");
+        assert_eq!(v["name"], "read_project_file");
+        assert_eq!(v["arguments"]["path"], "README.md");
+    }
+
+    #[test]
+    fn tool_done_serializes_id_and_legacy_payload_still_parses() {
+        let ev = AgentEvent::ToolDone {
+            id: "call_42".into(),
+            name: "http_smoke".into(),
+            ok: true,
+            arguments: json!({}),
+            result: json!({ "ok": true }),
+        };
+        let v = serde_json::to_value(&ev).unwrap();
+        assert_eq!(v["type"], "tool_done");
+        assert_eq!(v["id"], "call_42");
+        // Ancien format sans `id` : toujours accepté (id vide).
+        let legacy: AgentEvent =
+            serde_json::from_value(json!({ "type": "tool_start", "name": "x", "arguments": {} })).unwrap();
+        match legacy {
+            AgentEvent::ToolStart { id, .. } => assert!(id.is_empty()),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_call_record_id_is_optional() {
+        let rec = ToolCallRecord { id: String::new(), name: "x".into(), arguments: json!({}), result: json!({}) };
+        let v = serde_json::to_value(&rec).unwrap();
+        assert!(v.get("id").is_none());
+        let rec: ToolCallRecord =
+            serde_json::from_value(json!({ "name": "x", "arguments": {}, "result": {} })).unwrap();
+        assert!(rec.id.is_empty());
     }
 }

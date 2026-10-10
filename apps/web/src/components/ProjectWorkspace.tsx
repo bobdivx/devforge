@@ -187,7 +187,8 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
       <div
         class={cn(
           'flex flex-col overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-card)] shadow-[0_16px_48px_rgb(0_0_0/0.28)]',
-          'h-[calc(100dvh-8.5rem)] lg:h-[calc(100dvh-6rem)]',
+          // Mobile : laisser la place du dock bas (4,5 rem + safe area) pour que le composer reste visible.
+          'h-[calc(100dvh-13rem-env(safe-area-inset-bottom,0px))] lg:h-[calc(100dvh-6rem)]',
         )}
       >
         <WorkspaceTopBar

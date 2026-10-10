@@ -74,6 +74,18 @@ export function enterUp(delay = 0): AnimateLifecycleProps | undefined {
   };
 }
 
+/**
+ * Entrée d'un message du chat (220 ms). Bulle utilisateur : léger scale depuis le coin
+ * bas-droit ; réponse agent : simple glissé vers le haut. Rien sous reduced-motion.
+ */
+export function messageIn(from: 'user' | 'assistant'): AnimateLifecycleProps | undefined {
+  if (prefersReducedMotion()) return undefined;
+  return {
+    initial: { opacity: '0', transform: from === 'user' ? 'translateY(8px) scale(0.98)' : 'translateY(6px)' },
+    enter: { opacity: 1, transform: 'translateY(0px) scale(1)', duration: 0.22, ease: EASE_OUT },
+  };
+}
+
 /** Lift au survol + press — pour tuiles / cards. */
 export function interactiveLift(): AnimateLifecycleProps | undefined {
   if (prefersReducedMotion()) return undefined;

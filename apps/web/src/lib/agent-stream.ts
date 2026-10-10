@@ -6,6 +6,8 @@ const SERVER_BASE =
   'http://127.0.0.1:8000/api/v1';
 
 export type AgentToolCall = {
+  /** Id de l'appel (tool call LLM) — clé React stable des cartes d'outils. */
+  call_id?: string;
   name: string;
   arguments?: Record<string, unknown>;
   result?: {
@@ -55,6 +57,27 @@ type StreamHandlers = {
   onToolDone?: (call: AgentToolCall, ok: boolean) => void;
   onPlan?: (plan: AgentPlan) => void;
 };
+
+/**
+ * Normalise les tool calls venant du serveur (`ToolCallRecord` : champ `id`)
+ * vers `AgentToolCall` (`call_id`). Tolère l'ancien format sans id.
+ */
+export function normalizeToolCalls(raw: unknown): AgentToolCall[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((t): t is Record<string, unknown> => !!t && typeof t === 'object')
+    .map((t) => {
+      const { id, ...rest } = t as { id?: unknown } & Record<string, unknown>;
+      const call = rest as unknown as AgentToolCall;
+      const callId = typeof call.call_id === 'string' && call.call_id ? call.call_id : typeof id === 'string' && id ? id : undefined;
+      return callId ? { ...call, call_id: callId } : call;
+    });
+}
+
+/** Clé React d'une carte d'outil : id de l'appel, sinon nom + position. */
+export function toolCallKey(call: Pick<AgentToolCall, 'call_id' | 'name'>, index: number): string {
+  return call.call_id || `${call.name}-${index}`;
+}
 
 export function notifyPreviewRefresh(detail?: { url?: string; reason?: string }) {
   if (typeof window === 'undefined') return;
@@ -133,10 +156,12 @@ export async function streamAgentChat(
     agent_uuid?: string;
   },
   handlers: StreamHandlers = {},
+  signal?: AbortSignal,
 ): Promise<AgentChatResult> {
   const token = getToken();
   const res = await fetch(`${SERVER_BASE}/agent/chat`, {
     method: 'POST',
+    signal,
     headers: {
       Accept: 'text/event-stream',
       'Content-Type': 'application/json',
@@ -154,6 +179,7 @@ export async function streamAgentChat(
   if (!ctype.includes('text/event-stream')) {
     const json = (await res.json()) as { data?: AgentChatResult };
     const data = json.data ?? { reply: '', tool_calls: [] };
+    data.tool_calls = normalizeToolCalls(data.tool_calls);
     const plan = planFromToolCalls(data.tool_calls ?? []);
     if (plan) handlers.onPlan?.(plan);
     const preview = previewUrlFromTools(data.tool_calls ?? []);
@@ -205,6 +231,7 @@ export async function streamAgentChat(
         handlers.onThinking?.(label, round, detail || undefined);
       } else if (type === 'tool_start') {
         const call: AgentToolCall = {
+          call_id: payload.id ? String(payload.id) : undefined,
           name: String(payload.name || '?'),
           arguments: (payload.arguments as Record<string, unknown>) || {},
         };
@@ -213,6 +240,7 @@ export async function streamAgentChat(
       } else if (type === 'tool_done') {
         const ok = payload.ok !== false;
         const call: AgentToolCall = {
+          call_id: payload.id ? String(payload.id) : undefined,
           name: String(payload.name || '?'),
           arguments: (payload.arguments as Record<string, unknown>) || {},
           result: (payload.result as AgentToolCall['result']) || { ok },
@@ -220,7 +248,9 @@ export async function streamAgentChat(
         const idx = [...liveTools]
           .map((t, i) => ({ t, i }))
           .reverse()
-          .find((x) => x.t.name === call.name && !x.t.result)?.i;
+          .find((x) =>
+            call.call_id && x.t.call_id ? x.t.call_id === call.call_id : x.t.name === call.name && !x.t.result,
+          )?.i;
         if (idx != null) liveTools[idx] = call;
         else liveTools.push(call);
         handlers.onToolDone?.(call, ok);
@@ -236,7 +266,7 @@ export async function streamAgentChat(
         reply = String(payload.content || '');
         provider = payload.provider ? String(payload.provider) : undefined;
         toolCalls = Array.isArray(payload.tool_calls)
-          ? (payload.tool_calls as AgentToolCall[])
+          ? normalizeToolCalls(payload.tool_calls)
           : [...liveTools];
         if (!plan) plan = planFromToolCalls(toolCalls);
       } else if (type === 'error') {

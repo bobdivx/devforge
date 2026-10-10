@@ -1,4 +1,5 @@
 import type { ComponentChildren, VNode } from 'preact';
+import { CodeBlock } from '../components/chat/CodeBlock';
 
 /*
  * Rendu Markdown minimal et sûr pour les messages d'agents.
@@ -7,6 +8,10 @@ import type { ComponentChildren, VNode } from 'preact';
  * Gère : paragraphes, titres, listes, citations, blocs de code, tableaux simples,
  * **gras**, *italique*, `code`, [liens](https://…) et URL nues.
  */
+
+/** Classe commune des réponses d'agents (Workspace, Agents, /app/agent, partage). */
+export const MD_MESSAGE_CLASS =
+  'min-w-0 max-w-full space-y-2 break-words text-sm leading-relaxed text-[var(--color-ink)] [overflow-wrap:anywhere]';
 
 const SAFE_URL = /^(https?:\/\/|mailto:)/i;
 
@@ -97,14 +102,7 @@ export function Markdown({ text, class: className }: { text: string; class?: str
       i++;
       while (i < lines.length && !lines[i].trim().startsWith(fence[1])) body.push(lines[i++]);
       i++;
-      blocks.push(
-        <pre
-          key={key}
-          class="max-w-full whitespace-pre-wrap rounded-lg border border-[var(--color-line)] bg-black/30 px-3 py-2 font-mono text-[12.5px] leading-relaxed [overflow-wrap:anywhere]"
-        >
-          <code>{body.join('\n')}</code>
-        </pre>,
-      );
+      blocks.push(<CodeBlock key={key} code={body.join('\n')} lang={fence[2] || undefined} />);
       continue;
     }
     if (!line.trim()) {
