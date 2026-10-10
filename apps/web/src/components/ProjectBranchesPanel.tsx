@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
+import { shortSha } from '../lib/deployStatus';
 import { GitBranch, FlaskConical, ExternalLink, Search } from 'lucide-preact';
 import { api, type Deployment, type ProjectBranches } from '../lib/api';
 import { cn } from '../lib/cn';
@@ -335,7 +336,7 @@ export function ProjectBranchesPanel({
                 {last && (
                   <Badge tone={statusTone(last.status)}>
                     {STATUS_WORD[last.status] || last.status}
-                    {last.git_sha && last.git_sha !== 'pending' ? ` · ${last.git_sha.slice(0, 7)}` : ''}
+                    {shortSha(last.git_sha) ? ` · ${shortSha(last.git_sha)}` : ''}
                   </Badge>
                 )}
               </div>

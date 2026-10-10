@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { deployProgressDetail, deployStatusLabel, deployStatusShort, isDeployInProgress, shortSha } from '../lib/deployStatus';
 import type { ComponentChildren } from 'preact';
 import { api, type AppGroupMember, type ClusterNode, type Deployment, type InstanceDomain, type Project, type ProjectRuntime, type PublishedPort } from '../lib/api';
 import { nodeShortLabel, resolveNode } from '../lib/cluster-display';
@@ -118,9 +119,6 @@ function deployTone(status: string): 'ok' | 'warn' | 'danger' | 'neutral' {
 }
 
 
-function isDeployInProgress(status: string): boolean {
-  return ['queued', 'running', 'building', 'pending', 'deploying'].includes(status);
-}
 
 /** Prefers any in-progress deploy over a stale last-success (Overview + list). */
 function pickCurrentDeployment(deployments: Deployment[]): Deployment | null {
@@ -490,8 +488,8 @@ function ProjectActivityStrip({
     items.push({
       key: `deploy-${d.uuid}`,
       tone: 'warn',
-      label: `Déploiement ${d.status}`,
-      detail: d.git_sha ? d.git_sha.slice(0, 7) : formatWhen(d.created_at),
+      label: deployStatusLabel(d.status),
+      detail: shortSha(d.git_sha) ?? formatWhen(d.created_at),
       href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=deployments`,
     });
   }
@@ -739,10 +737,6 @@ type HealthItem = {
 /** Tuiles rangées dans « Plus » (modal) : utiles mais rares. */
 const SECONDARY_TILE_KEYS = new Set(['domains', 'git', 'actions', 'backups', 'crons', 'gpu', 'node']);
 
-/** Vrai SHA Git (pas le placeholder « pending » d'un déploiement qui démarre). */
-function isGitSha(sha?: string | null): boolean {
-  return !!sha && /^[0-9a-f]{7,40}$/i.test(sha);
-}
 
 function deployWord(status: string): string {
   if (isDeployInProgress(status)) return 'En cours';
@@ -1087,8 +1081,8 @@ function ProjectOverview({
   const inProgress = !!latest && isDeployInProgress(latest.status);
   const headline: { label: string; detail: string; tone: HealthItem['tone'] } = inProgress
     ? {
-        label: 'Déploiement en cours',
-        detail: isGitSha(latest!.git_sha) ? `Version ${latest!.git_sha!.slice(0, 7)}` : 'Clone et build…',
+        label: deployStatusLabel(latest!.status),
+        detail: deployProgressDetail(latest!.git_sha),
         tone: 'warn',
       }
     : latestFailed
@@ -1108,7 +1102,7 @@ function ProjectOverview({
               : project.status === 'unhealthy'
                 ? `Pas de réponse sur le port ${project.port || 3000}`
                 : latest
-                  ? `Déployé ${formatWhen(latest.created_at)}${isGitSha(latest.git_sha) ? ` · ${latest.git_sha!.slice(0, 7)}` : ''}`
+                  ? `Déployé ${formatWhen(latest.created_at)}${shortSha(latest.git_sha) ? ` · ${shortSha(latest.git_sha)}` : ''}`
                   : 'Pas encore déployé',
           tone: statusMeta.tone,
         };
@@ -1400,9 +1394,9 @@ function ProjectOverview({
                 <li key={d.uuid} class="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 sm:px-5">
                   <div class="min-w-0">
                     <div class="flex flex-wrap items-center gap-2">
-                      <Badge tone={deployTone(d.status)}>{d.status}</Badge>
+                      <Badge tone={deployTone(d.status)}>{deployStatusShort(d.status)}</Badge>
                       <span class="font-mono text-xs text-[var(--color-ink-muted)]">
-                        {d.git_sha ? d.git_sha.slice(0, 7) : '—'}
+                        {shortSha(d.git_sha) ?? '—'}
                       </span>
                       <span class="text-xs text-[var(--color-ink-faint)]">
                         {formatWhen(d.created_at)}
@@ -1811,9 +1805,9 @@ function DeploymentsPanel({
     <div class="min-w-0">
       <div class="flex flex-wrap items-center gap-2">
         {showEnv && <EnvBadge deployment={selected} />}
-        <Badge tone={deployTone(selected.status)}>{selected.status}</Badge>
+        <Badge tone={deployTone(selected.status)}>{deployStatusShort(selected.status)}</Badge>
         <span class="font-mono text-xs text-[var(--color-ink-muted)]">
-          {selected.git_sha ? selected.git_sha.slice(0, 7) : '—'}
+          {shortSha(selected.git_sha) ?? '—'}
         </span>
         <span class="text-xs text-[var(--color-ink-faint)]">{formatWhen(selected.created_at)}</span>
       </div>
@@ -1879,7 +1873,7 @@ function DeploymentsPanel({
               <div class="flex flex-col gap-2 lg:max-h-[32rem] lg:overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {visible.map((d, index) => {
                   const tone = deployTone(d.status);
-                  const sha = d.git_sha ? d.git_sha.slice(0, 7) : '—';
+                  const sha = shortSha(d.git_sha) ?? '—';
                   const selectedTile = selectedUuid === d.uuid;
                   return (
                     <button
@@ -1985,7 +1979,7 @@ function DeploymentsPanel({
       <DeployLogSheet
         open={sheetOpen && !!selected}
         onClose={() => setSheetOpen(false)}
-        title={selected ? `Déploiement ${selected.git_sha ? selected.git_sha.slice(0, 7) : ''}`.trim() : ''}
+        title={selected ? `Déploiement ${shortSha(selected.git_sha) ?? ''}`.trim() : ''}
         meta={selectedMeta}
         actions={stopButton}
         logs={logs}
