@@ -2520,6 +2520,31 @@ function EnvPanel({ uuid }: { uuid: string }) {
       <HubGrid cols={3}>
         <HubTile
           index={0}
+          title="Bases"
+          description={`${links.length} liée${links.length > 1 ? 's' : ''}`}
+          icon={<HealthIcon kind="db" tone={links.length ? 'ok' : 'neutral'} />}
+          iconClass="!bg-transparent"
+        />
+        <HubTile
+          index={1}
+          title="Serveurs"
+          description={`${servers.length} serveur${servers.length > 1 ? 's' : ''}`}
+          icon={<HealthIcon kind="settings" tone={servers.length ? 'ok' : 'warn'} />}
+          iconClass="!bg-transparent"
+        />
+        <HubTile
+          index={2}
+          title="Lier"
+          description="Nouvelle base"
+          icon={<HealthIcon kind="db" tone="ok" />}
+          iconClass="!bg-transparent"
+          onClick={() => setOpen(true)}
+        />
+      </HubGrid>
+
+      <HubGrid cols={3}>
+        <HubTile
+          index={0}
           title="Variables"
           description={`${rows.length} variable${rows.length > 1 ? 's' : ''}`}
           icon={<HealthIcon kind="env" tone={rows.length ? 'ok' : 'warn'} />}
@@ -3632,6 +3657,38 @@ function ProjectSettingsPanel({
     ];
     return (
       <FadeIn>
+      <HubGrid cols={4}>
+        <HubTile
+          index={0}
+          title="Général"
+          description={name || 'Nom, repo, branche'}
+          icon={<HealthIcon kind="settings" tone="neutral" />}
+          iconClass="!bg-transparent"
+        />
+        <HubTile
+          index={1}
+          title="Build"
+          description={buildPack || 'Pack de build'}
+          icon={<HealthIcon kind="deploy" tone="neutral" />}
+          iconClass="!bg-transparent"
+        />
+        <HubTile
+          index={2}
+          title="Runtime"
+          description={`Port ${port}`}
+          icon={<HealthIcon kind="pulse" tone="neutral" />}
+          iconClass="!bg-transparent"
+        />
+        <HubTile
+          index={3}
+          title="Danger"
+          description="Supprimer l'app"
+          icon={<HealthIcon kind="pulse" tone="danger" />}
+          iconClass="!bg-transparent"
+          onClick={() => setConfirmDelete(true)}
+        />
+      </HubGrid>
+
         <HubGrid>
           {tiles
             .filter((tile) => !tile.admin || isAdmin)
