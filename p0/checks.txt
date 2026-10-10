@@ -1,0 +1,30 @@
+PASS P0-01 viewport meta width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content
+PASS P0-01 theme-color 
+PASS P0-07 historique non animé static=14
+PASS P0-03 markdown table rendu 
+PASS P0-03 lien javascript refusé 
+PASS P0-04 code block lang 
+PASS P0-04 code non replié, défilement horizontal {"ws":"pre","sw":1397,"cw":286}
+PASS P0-06 textarea ≥16px mobile, ≥44px {"fs":16,"h":44}
+PASS P0-10 pas de jargon llmMode 
+PASS P0-04 copier → Copié 
+PASS P0-06 focus conservé après envoi TEXTAREA
+PASS P0-06 textarea éditable pendant run 
+PASS P0-07 nouveau message animé animated=1
+PASS P0-06 puce En attente 
+PASS P0-09 bouton Nouveaux messages 
+PASS P0-09 retour en bas 
+PASS P0-06 message en file envoyé à la fin 
+PASS P0-02 composer au-dessus du clavier simulé {"before":717,"kbVar":"222px","taBottom":495,"vvBottom":508}
+PASS P0-02 retour sans clavier {"kb":"0px"}
+PASS P0-11 carte erreur + Réessayer 
+PASS Android 412 pas de débordement horizontal 
+PASS P0-10 point vert « Modèle prêt » 
+PASS P0-06 Maj+Entrée saut de ligne "ligne 1\nligne 2"
+PASS P0-06 hauteur max 160 px 160
+PASS P0-06 Stop sans carte erreur 
+PASS P0-06 Stop → bouton Envoyer revient 
+PASS P0-03 /share/agent markdown 
+PASS P0-08 reduced-motion : points statiques {"an":"none","op":"0.6"}
+PASS P0-07 reduced-motion : pas de transform ["none"]
+PAGE ERRORS: none
