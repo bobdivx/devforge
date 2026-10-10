@@ -22,7 +22,7 @@ pub use agent_threads::{
     CreateProjectAgentTool, ListAgentMessagesTool, ListAgentToolFailuresTool,
     ListProjectAgentsTool,
 };
-pub use deploy::TriggerDeployTool;
+pub use deploy::{CancelDeploymentTool, ListDeploymentsTool, TriggerDeployTool};
 pub use deploy_logs::GetDeploymentLogsTool;
 pub use env::{ListEnvVarsTool, UpsertEnvVarsTool};
 pub use github::{GitHubListPrsTool, GitHubWorkflowRunsTool};

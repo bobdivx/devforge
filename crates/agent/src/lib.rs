@@ -22,7 +22,7 @@ use tools::{
     McpListServersTool, ProposePlanTool, PublishToGitHubTool, ReadGitHubFileTool,
     ReadProjectFileTool, ReviewProjectSecurityTool, RunApplicationTestsTool, RunWorkdirCommandTool,
     SddLoopTool, StartLocalPreviewTool,
-    StopLocalPreviewTool, SyncWorkdirToGitHubTool, TriggerDeployTool, UpsertEnvVarsTool,
+    StopLocalPreviewTool, SyncWorkdirToGitHubTool, TriggerDeployTool, ListDeploymentsTool, CancelDeploymentTool, UpsertEnvVarsTool,
     WriteProjectFileTool,
 };
 
@@ -72,6 +72,8 @@ pub trait ProjectStore: Send + Sync {
     async fn get_project(&self, uuid: &str) -> Result<Option<Value>>;
     async fn resolve_project(&self, uuid: &str) -> Result<Option<ProjectTestContext>>;
     async fn deployment_logs(&self, uuid: &str) -> Result<Value>;
+    async fn list_deployments(&self, project_uuid: &str) -> Result<Value>;
+    async fn cancel_deployment(&self, deployment_uuid: &str) -> Result<Value>;
     async fn trigger_deploy(
         &self,
         project_uuid: &str,
@@ -100,6 +102,12 @@ pub fn build_core_registry(
         store: store.clone(),
     }));
     registry.register(Arc::new(GetDeploymentLogsTool {
+        store: store.clone(),
+    }));
+    registry.register(Arc::new(ListDeploymentsTool {
+        store: store.clone(),
+    }));
+    registry.register(Arc::new(CancelDeploymentTool {
         store: store.clone(),
     }));
     registry.register(Arc::new(TriggerDeployTool {

@@ -101,3 +101,63 @@ impl Tool for TriggerDeployTool {
             .await
     }
 }
+
+pub struct ListDeploymentsTool {
+    pub store: Arc<dyn ProjectStore>,
+}
+
+#[async_trait]
+impl Tool for ListDeploymentsTool {
+    fn name(&self) -> &str {
+        "list_deployments"
+    }
+    fn description(&self) -> &str {
+        "Liste les déploiements d’un projet DevForge (uuid, status, sha, message, created_at). Utilise le project_uuid du contexte si omis."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "project_uuid": { "type": "string", "description": "UUID du projet (injecté automatiquement si dans le contexte)" },
+                "limit": { "type": "integer", "description": "Nombre max de déploiements (défaut 10)" }
+            }
+        })
+    }
+    async fn execute(&self, arguments: Value) -> Result<Value> {
+        let project_uuid = arguments.get("project_uuid").and_then(|v| v.as_str()).unwrap_or("").trim();
+        if project_uuid.is_empty() {
+            return Ok(json!({"ok": false, "error": "project_uuid requis"}));
+        }
+        self.store.list_deployments(project_uuid).await
+    }
+}
+
+pub struct CancelDeploymentTool {
+    pub store: Arc<dyn ProjectStore>,
+}
+
+#[async_trait]
+impl Tool for CancelDeploymentTool {
+    fn name(&self) -> &str {
+        "cancel_deployment"
+    }
+    fn description(&self) -> &str {
+        "Annule un déploiement en cours (marque cancelled et remet le projet en idle si c’était le déploiement courant)."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "deployment_uuid": { "type": "string" }
+            },
+            "required": ["deployment_uuid"]
+        })
+    }
+    async fn execute(&self, arguments: Value) -> Result<Value> {
+        let uuid = arguments.get("deployment_uuid").and_then(|v| v.as_str()).unwrap_or("").trim();
+        if uuid.is_empty() {
+            return Ok(json!({"ok": false, "error": "deployment_uuid requis"}));
+        }
+        self.store.cancel_deployment(uuid).await
+    }
+}

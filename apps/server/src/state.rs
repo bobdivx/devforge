@@ -282,6 +282,60 @@ impl ProjectStore for SqliteProjectStore {
         }
     }
 
+    async fn list_deployments(&self, project_uuid: &str) -> DfResult<Value> {
+        let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1")
+            .bind(project_uuid)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let Some(p) = project else {
+            return Ok(json!({"ok": false, "error": format!("projet introuvable: {project_uuid}")}));
+        };
+        let deps: Vec<(String, String, Option<String>, Option<String>, String)> = sqlx::query_as(
+            r#"SELECT uuid, status, git_sha, git_message, created_at
+               FROM deployments
+               WHERE project_id = $1
+               ORDER BY id DESC LIMIT 15"#
+        )
+        .bind(p.id)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+        let deployments: Vec<Value> = deps.into_iter().map(|(uuid, status, sha, msg, created)| {
+            json!({
+                "uuid": uuid,
+                "status": status,
+                "git_sha": sha,
+                "git_message": msg,
+                "created_at": created,
+            })
+        }).collect();
+        Ok(json!({"ok": true, "project_uuid": project_uuid, "deployments": deployments, "count": deployments.len()}))
+    }
+
+    async fn cancel_deployment(&self, deployment_uuid: &str) -> DfResult<Value> {
+        let now = now_str();
+        let updated = sqlx::query(
+            "UPDATE deployments SET status = 'cancelled', finished_at = $1, updated_at = $1 WHERE uuid = $2 AND status IN ('queued', 'running', 'deploying')"
+        )
+        .bind(&now)
+        .bind(deployment_uuid)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        if updated.rows_affected() == 0 {
+            return Ok(json!({"ok": false, "error": "déploiement introuvable ou déjà terminé"}));
+        }
+        let _ = sqlx::query(
+            "UPDATE projects SET status = 'idle', updated_at = $1 WHERE id = (SELECT project_id FROM deployments WHERE uuid = $2)"
+        )
+        .bind(&now)
+        .bind(deployment_uuid)
+        .execute(&self.pool)
+        .await;
+        Ok(json!({"ok": true, "deployment_uuid": deployment_uuid, "status": "cancelled"}))
+    }
+
     async fn trigger_deploy(
         &self,
         project_uuid: &str,
