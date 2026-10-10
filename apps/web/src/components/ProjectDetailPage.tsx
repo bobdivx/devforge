@@ -727,6 +727,11 @@ type HealthItem = {
 /** Tuiles rangées dans « Plus » (modal) : utiles mais rares. */
 const SECONDARY_TILE_KEYS = new Set(['git', 'actions', 'gpu', 'node']);
 
+/** Vrai SHA Git (pas le placeholder « pending » d'un déploiement qui démarre). */
+function isGitSha(sha?: string | null): boolean {
+  return !!sha && /^[0-9a-f]{7,40}$/i.test(sha);
+}
+
 function deployWord(status: string): string {
   if (isDeployInProgress(status)) return 'En cours';
   const tone = deployTone(status);
@@ -1047,7 +1052,7 @@ function ProjectOverview({
   const headline: { label: string; detail: string; tone: HealthItem['tone'] } = inProgress
     ? {
         label: 'Déploiement en cours',
-        detail: latest!.git_sha ? `Version ${latest!.git_sha.slice(0, 7)}` : 'Clone et build…',
+        detail: isGitSha(latest!.git_sha) ? `Version ${latest!.git_sha!.slice(0, 7)}` : 'Clone et build…',
         tone: 'warn',
       }
     : latestFailed
@@ -1067,7 +1072,7 @@ function ProjectOverview({
               : project.status === 'unhealthy'
                 ? `Pas de réponse sur le port ${project.port || 3000}`
                 : latest
-                  ? `Déployé ${formatWhen(latest.created_at)}${latest.git_sha ? ` · ${latest.git_sha.slice(0, 7)}` : ''}`
+                  ? `Déployé ${formatWhen(latest.created_at)}${isGitSha(latest.git_sha) ? ` · ${latest.git_sha!.slice(0, 7)}` : ''}`
                   : 'Pas encore déployé',
           tone: statusMeta.tone,
         };
@@ -1215,8 +1220,14 @@ function ProjectOverview({
                   primary
                   label="Déployer"
                   icon={deployBusy ? <Spinner /> : <Rocket size={18} aria-hidden />}
-                  disabled={deployBusy || !!lifeBusy || !project.git_repository}
-                  title={project.git_repository ? 'Déployer la dernière version' : 'Repo GitHub requis'}
+                  disabled={deployBusy || inProgress || !!lifeBusy || !project.git_repository}
+                  title={
+                    inProgress
+                      ? 'Déploiement déjà en cours'
+                      : project.git_repository
+                        ? 'Déployer la dernière version'
+                        : 'Repo GitHub requis'
+                  }
                   onClick={deployNow}
                 />
                 <ActionButton
