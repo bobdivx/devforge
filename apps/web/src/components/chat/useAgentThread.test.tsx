@@ -60,8 +60,8 @@ describe('useAgentThread (P5-00)', () => {
     expect(result.current.busy).toBe(true);
     act(() => {
       h!.onAck?.('C’est noté');
-      h!.onDelta?.('Tout ');
-      h!.onDelta?.('va bien');
+      h!.onDelta?.('Tout ', 1);
+      h!.onDelta?.('va bien', 1);
     });
     expect(result.current.messages[1]).toMatchObject({ id: draft.id, content: 'Tout va bien', ack: 'C’est noté' });
     await act(async () => done.resolve(reply('Tout va bien.')));
@@ -127,7 +127,7 @@ describe('useAgentThread (P5-00)', () => {
     const onRunEnd = vi.fn();
     const { result } = renderHook(() => useAgentThread({ projectUuid: 'p', agentUuid: 'ag', client: c, onRunEnd }));
     await waitFor(() => expect(result.current.following).toBe(true));
-    act(() => h!.onDelta?.('en cours'));
+    act(() => h!.onDelta?.('en cours', 1));
     expect(result.current.messages.at(-1)).toMatchObject({ streaming: true, content: 'en cours' });
     act(() => result.current.stop());
     expect(c.cancelAgentRun).toHaveBeenCalledWith('run-9');

@@ -13,7 +13,18 @@ export function SharedAgentConversation({ token: tokenProp }: { token?: string }
   const [projectName, setProjectName] = useState<string | null>(null);
   const [raw, setRaw] = useState<ServerMessage[]>([]);
   const [token, setToken] = useState(tokenProp || '');
-  const messages = useMemo(() => fromServerMessages(raw).map((m) => ({ ...m, needsUserAction: undefined })), [raw]);
+  const messages = useMemo(() => {
+    const list = fromServerMessages(raw);
+    // Instantané : une délégation déjà suivie de son résultat n'affiche que la carte de résultat.
+    const finished = new Set(
+      list.flatMap((m) => (m.toolCalls ?? []).filter((t) => t.name === 'job_result').map((t) => String(t.result?.run_uuid ?? ''))),
+    );
+    return list.map((m) => ({
+      ...m,
+      needsUserAction: undefined,
+      toolCalls: (m.toolCalls ?? []).filter((t) => !(t.name === 'delegate_task' && finished.has(String(t.result?.run_uuid ?? '')))),
+    }));
+  }, [raw]);
   const historyIds = useMemo(() => new Set(messages.map((m) => m.id)), [messages]);
   const stick = useStickToBottom([], token);
 
