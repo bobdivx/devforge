@@ -1,5 +1,6 @@
 package app.jeser.devforge.ui.project
 
+import app.jeser.devforge.ui.components.NavSheet
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -340,14 +341,12 @@ fun ProjectScreen(
                 onDismiss = { sheet = ProjectSheet.Draft },
                 onConfirm = { actions.onDraftDiscard { sheet = ProjectSheet.None } },
             )
-            ProjectSheet.Chat -> ModalBottomSheet(
-                onDismissRequest = close,
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            ) {
+            // Braise dans la zone de contenu : la barre du bas reste visible, la saisie juste au-dessus.
+            ProjectSheet.Chat -> NavSheet(onDismissRequest = close) {
                 ChatPane(
                     state, input, { input = it }, actions,
                     onNewFeature = { sheet = ProjectSheet.NewFeature },
-                    modifier = Modifier.fillMaxHeight(0.92f).imePadding().padding(horizontal = 4.dp),
+                    modifier = Modifier.fillMaxHeight().padding(horizontal = 4.dp),
                 )
             }
             ProjectSheet.None -> Unit

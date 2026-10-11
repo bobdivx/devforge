@@ -1,5 +1,6 @@
 package app.jeser.devforge.ui.project
 
+import app.jeser.devforge.ui.components.NavSheet
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -185,8 +186,7 @@ fun WorkspaceSheet(
     onPreview: () -> Unit,
     onBraise: () -> Unit,
 ) {
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = DfColors.Surface) {
+    NavSheet(onDismissRequest = onDismiss) {
         BoxWithConstraints(Modifier.fillMaxWidth().testTag("workspace-sheet")) {
             val cols = if (maxWidth >= 600.dp) 3 else 2
             Column(
@@ -242,14 +242,20 @@ fun WorkspaceSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DraftSheetFrame(onDismiss: () -> Unit, busy: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, sheetState = sheet, containerColor = DfColors.Surface) {
+private fun DraftSheetFrame(onDismiss: () -> Unit, busy: Boolean = false, modal: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    val body: @Composable ColumnScope.() -> Unit = {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             content = content,
         )
+    }
+    if (modal) {
+        // Confirmations (valider / jeter) : feuille modale au-dessus de tout.
+        val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, sheetState = sheet, containerColor = DfColors.Surface, content = body)
+    } else {
+        NavSheet(onDismissRequest = { if (!busy) onDismiss() }, content = body)
     }
 }
 
@@ -473,7 +479,7 @@ fun DraftValidateSheet(state: ProjectUiState, canDeploy: Boolean, onDismiss: () 
     val done = state.draftValidated
     var message by rememberSaveable { mutableStateOf(draft?.suggestedMessage.orEmpty()) }
     val busy = state.draftBusy
-    DraftSheetFrame(onDismiss, busy = busy != null) {
+    DraftSheetFrame(onDismiss, busy = busy != null, modal = true) {
         if (done == null) {
             Text("Valider le brouillon ?", style = MaterialTheme.typography.titleLarge)
             Text(
@@ -528,7 +534,7 @@ fun DraftValidateSheet(state: ProjectUiState, canDeploy: Boolean, onDismiss: () 
 fun DraftDiscardSheet(state: ProjectUiState, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     val files = state.draft?.files.orEmpty()
     val busy = state.draftBusy
-    DraftSheetFrame(onDismiss, busy = busy != null) {
+    DraftSheetFrame(onDismiss, busy = busy != null, modal = true) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("🗑️", fontSize = 28.sp)
             Spacer(Modifier.width(12.dp))

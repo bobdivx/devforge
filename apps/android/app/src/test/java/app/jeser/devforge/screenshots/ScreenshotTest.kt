@@ -17,6 +17,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import app.jeser.devforge.ui.theme.DevForgeTheme
 import app.jeser.devforge.ui.HomeRootPreview
 import app.jeser.devforge.ui.HomeTab
+import app.jeser.devforge.ui.MainNavFrame
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import androidx.compose.ui.test.getBoundsInRoot
@@ -65,28 +69,63 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
         RuntimeEnvironment.setQualifiers(qualifiers)
     }
 
-    private fun shot(name: String) {
+    private fun shot(name: String, nav: Boolean = true) {
         compose.waitForIdle()
         captureScreenRoboImage("$dir/$name-$device.png")
+        if (nav) assertMainNav(name)
     }
 
+    /** La navigation Apps / Braise / Réglages reste visible sur chaque écran (barre en bas ou rail). */
+    private fun assertMainNav(what: String) {
+        val nav = compose.onNodeWithTag("main-nav")
+        nav.assertExists("navigation absente ($what)")
+        nav.assertIsDisplayed()
+        val b = nav.getBoundsInRoot()
+        val root = compose.onAllNodes(isRoot()).onFirst().getBoundsInRoot()
+        if (device.startsWith("phone")) {
+            assertTrue("barre du bas pas en bas ($what) : ${b.bottom} vs ${root.bottom}", b.bottom.value >= root.bottom.value - 1f)
+            assertTrue("barre du bas trop basse ($what) : ${b.bottom - b.top}", (b.bottom - b.top).value >= 48f)
+        } else {
+            assertTrue("rail pas à gauche ($what) : ${b.left}", b.left.value <= 1f)
+        }
+        listOf("Apps", "Braise", "Réglages").forEach { compose.onAllNodesWithText(it).onFirst().assertExists() }
+        // Feuilles de navigation (Braise, Workspace, brouillon, déploiements, logs…) : elles ne recouvrent pas la barre.
+        val sheets = compose.onAllNodesWithTag("nav-sheet").fetchSemanticsNodes()
+        sheets.forEach { n ->
+            val r = n.boundsInRoot
+            if (device.startsWith("phone")) {
+                assertTrue("feuille sur la barre ($what) : ${r.bottom} > ${b.top.value}", r.bottom <= b.top.value * n.layoutInfo.density.density + 1f)
+            } else {
+                assertTrue("feuille sur le rail ($what) : ${r.left} < ${b.right.value}", r.left + 1f >= b.right.value * n.layoutInfo.density.density)
+            }
+        }
+    }
+
+    /**
+     * Chaque écran est rendu dans la vraie coque de navigation (comme dans l'app) ;
+     * `nav = false` pour l'accueil (qui l'inclut déjà) et la connexion.
+     */
     @Composable
-    private fun Shot(content: @Composable () -> Unit) {
-        DevForgeTheme { CompositionLocalProvider(LocalLoadRemoteIcons provides false) { content() } }
+    private fun Shot(nav: Boolean = true, tab: HomeTab = HomeTab.Apps, content: @Composable () -> Unit) {
+        DevForgeTheme {
+            CompositionLocalProvider(LocalLoadRemoteIcons provides false) {
+                if (nav) MainNavFrame(tab = tab, onTab = {}) { m -> Box(m) { content() } } else content()
+            }
+        }
     }
 
     @Test fun login() {
-        compose.setContent { Shot { LoginScreen(LoginUiState(), {}, {}, {}) } }
-        shot("login")
+        compose.setContent { Shot(nav = false) { LoginScreen(LoginUiState(), {}, {}, {}) } }
+        shot("login", nav = false)
     }
 
     @Test fun apps() {
-        compose.setContent { Shot { HomeRootPreview(SampleData.apps, hub = SampleData.hub) } }
+        compose.setContent { Shot(nav = false) { HomeRootPreview(SampleData.apps, hub = SampleData.hub) } }
         shot("apps")
     }
 
     @Test fun appsInbox() {
-        compose.setContent { Shot { HomeRootPreview(SampleData.apps, initialInboxOpen = true, hub = SampleData.hub) } }
+        compose.setContent { Shot(nav = false) { HomeRootPreview(SampleData.apps, initialInboxOpen = true, hub = SampleData.hub) } }
         shot("apps-inbox-sheet")
     }
 
@@ -215,12 +254,12 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
     }
 
     @Test fun tabBraise() {
-        compose.setContent { Shot { HomeRootPreview(SampleData.apps, tab = HomeTab.Braise, hub = SampleData.hub) } }
+        compose.setContent { Shot(nav = false) { HomeRootPreview(SampleData.apps, tab = HomeTab.Braise, hub = SampleData.hub) } }
         shot("tab-braise")
     }
 
     @Test fun tabSettings() {
-        compose.setContent { Shot { HomeRootPreview(SampleData.apps, tab = HomeTab.Settings, hub = SampleData.hub) } }
+        compose.setContent { Shot(nav = false) { HomeRootPreview(SampleData.apps, tab = HomeTab.Settings, hub = SampleData.hub) } }
         shot("tab-settings")
     }
 
@@ -260,7 +299,7 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
 
     @Test fun notificationPrompt() {
         compose.setContent {
-            Shot {
+            Shot(nav = false) {
                 HomeRootPreview(SampleData.apps, hub = SampleData.hub)
                 app.jeser.devforge.ui.components.NotificationPrompt({}, {})
             }
@@ -270,7 +309,7 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
 
     /* Réglages → Mémoire (écran natif). */
     @Test fun memoryProfile() {
-        compose.setContent { Shot { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memory, app.jeser.devforge.ui.memory.MemoryActions()) } }
+        compose.setContent { Shot(tab = HomeTab.Settings) { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memory, app.jeser.devforge.ui.memory.MemoryActions()) } }
         shot("memory-profile")
         // Onglets : cibles tactiles ≥ 48 dp.
         val tab = compose.onNodeWithTag("memory-tab-log").getBoundsInRoot()
@@ -278,32 +317,32 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
     }
 
     @Test fun memoryNotes() {
-        compose.setContent { Shot { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memoryNotes, app.jeser.devforge.ui.memory.MemoryActions()) } }
+        compose.setContent { Shot(tab = HomeTab.Settings) { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memoryNotes, app.jeser.devforge.ui.memory.MemoryActions()) } }
         shot("memory-notes")
     }
 
     @Test fun memoryEmpty() {
-        compose.setContent { Shot { app.jeser.devforge.ui.memory.MemoryScreen(app.jeser.devforge.ui.memory.MemoryUiState(tab = app.jeser.devforge.ui.memory.MemoryTab.Log, loading = false), app.jeser.devforge.ui.memory.MemoryActions()) } }
+        compose.setContent { Shot(tab = HomeTab.Settings) { app.jeser.devforge.ui.memory.MemoryScreen(app.jeser.devforge.ui.memory.MemoryUiState(tab = app.jeser.devforge.ui.memory.MemoryTab.Log, loading = false), app.jeser.devforge.ui.memory.MemoryActions()) } }
         shot("memory-empty")
     }
 
     @Test fun memoryForgetConfirm() {
         compose.setContent {
-            Shot { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memory, app.jeser.devforge.ui.memory.MemoryActions(), initialSheet = app.jeser.devforge.ui.memory.MemorySheet.Forget(SampleData.memoryProfile[1])) }
+            Shot(tab = HomeTab.Settings) { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memory, app.jeser.devforge.ui.memory.MemoryActions(), initialSheet = app.jeser.devforge.ui.memory.MemorySheet.Forget(SampleData.memoryProfile[1])) }
         }
         shot("memory-forget-confirm")
     }
 
     @Test fun memoryPinConfirm() {
         compose.setContent {
-            Shot { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memory, app.jeser.devforge.ui.memory.MemoryActions(), initialSheet = app.jeser.devforge.ui.memory.MemorySheet.Pin(SampleData.memoryProfile[2])) }
+            Shot(tab = HomeTab.Settings) { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memory, app.jeser.devforge.ui.memory.MemoryActions(), initialSheet = app.jeser.devforge.ui.memory.MemorySheet.Pin(SampleData.memoryProfile[2])) }
         }
         shot("memory-pin-confirm")
     }
 
     @Test fun memoryEdit() {
         compose.setContent {
-            Shot { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memory, app.jeser.devforge.ui.memory.MemoryActions(), initialSheet = app.jeser.devforge.ui.memory.MemorySheet.Edit(SampleData.memoryProfile[0])) }
+            Shot(tab = HomeTab.Settings) { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memory, app.jeser.devforge.ui.memory.MemoryActions(), initialSheet = app.jeser.devforge.ui.memory.MemorySheet.Edit(SampleData.memoryProfile[0])) }
         }
         shot("memory-edit")
     }
