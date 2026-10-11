@@ -104,7 +104,8 @@ async fn latest_success_sha(state: &AppState, project_id: i64) -> Option<String>
     row.and_then(|(sha,)| sha.filter(|s| !s.is_empty() && s != "pending" && s != "unknown"))
 }
 
-async fn project_is_behind(state: &AppState, project: &Project) -> Option<(u64, String)> {
+/// `(commits en avance, message du dernier commit, SHA du dernier commit)`.
+async fn project_is_behind(state: &AppState, project: &Project) -> Option<(u64, String, String)> {
     let repo_url = project.git_repository.as_deref()?.trim();
     if repo_url.is_empty() {
         return None;
@@ -134,7 +135,13 @@ async fn project_is_behind(state: &AppState, project: &Project) -> Option<(u64, 
                         .to_string()
                 })
                 .unwrap_or_else(|| "Auto-deploy (poll)".into());
-            Some((c.ahead_by, tip))
+            let tip_sha = c
+                .commits
+                .last()
+                .map(|c| c.sha.clone())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| c.head_sha.clone());
+            Some((c.ahead_by, tip, tip_sha))
         }
         Ok(_) => None,
         Err(e) => {
@@ -148,7 +155,7 @@ async fn project_is_behind(state: &AppState, project: &Project) -> Option<(u64, 
     }
 }
 
-pub(crate) async fn deploy_project(state: &AppState, project: &Project, message: &str) {
+pub(crate) async fn deploy_project(state: &AppState, project: &Project, message: &str, target_sha: Option<&str>) {
     let dep_uuid = new_uuid();
     let now = now_str();
 
@@ -170,6 +177,11 @@ pub(crate) async fn deploy_project(state: &AppState, project: &Project, message:
         tracing::error!(error = %e, project = %project.uuid, "auto-deploy: insert deployment failed");
         return;
     }
+    if let Some(sha) = target_sha {
+        crate::auto_deploy_guard::set_target_sha(&state.pool, &dep_uuid, sha).await;
+    }
+    // Le déploiement fait un `reset --hard` du workdir : le brouillon en cours est sauvegardé.
+    crate::auto_deploy_guard::backup_draft_before_reset(state, project).await;
 
     let _ = sqlx::query("UPDATE projects SET status = 'deploying', updated_at = $1 WHERE id = $2")
         .bind(&now)
@@ -278,9 +290,16 @@ async fn tick(state: &AppState, ensure_webhooks: bool) {
         if has_recent_active_deployment(state, project.id).await {
             continue;
         }
-        let Some((behind_by, tip_msg)) = project_is_behind(state, &project).await else {
+        let Some((behind_by, tip_msg, tip_sha)) = project_is_behind(state, &project).await else {
             continue;
         };
+        // Incident 2026-10-11 (devforge-esp) : un commit cassé était relancé à chaque tick.
+        // Jamais deux fois le même SHA en échec ; backoff après échecs consécutifs.
+        if crate::auto_deploy_guard::gate(state, &project, "production", &tip_sha).await
+            != crate::auto_deploy_guard::Gate::Go
+        {
+            continue;
+        }
 
         let message = format!(
             "Auto-deploy ({behind_by} commit{}) — {tip_msg}",
@@ -288,7 +307,7 @@ async fn tick(state: &AppState, ensure_webhooks: bool) {
         );
         let st = state.clone();
         tokio::spawn(async move {
-            deploy_project(&st, &project, &message).await;
+            deploy_project(&st, &project, &message, Some(&tip_sha)).await;
         });
     }
 }

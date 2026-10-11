@@ -1313,7 +1313,7 @@ async fn evacuate_stale_nodes(state: &AppState) {
                 "nœud muet : application replacée"
             );
             let message = format!("Reprise : le nœud {} ne répond plus", node.name);
-            crate::auto_deploy::deploy_project(state, &project, &message).await;
+            crate::auto_deploy::deploy_project(state, &project, &message, None).await;
         }
     }
 }

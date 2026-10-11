@@ -8,6 +8,7 @@ mod actions_routes;
 mod agent_runs;
 mod auth_routes;
 mod auto_deploy;
+mod auto_deploy_guard;
 mod backup_routes;
 mod cluster_routes;
 mod cluster_store;
