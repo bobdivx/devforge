@@ -1,54 +1,39 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import { api } from '../lib/api';
-import {
-  AgentActionList,
-  toLiveActions,
-  type LiveAction,
-} from './agents/AgentActionCards';
-import type { AgentToolCall } from '../lib/agent-stream';
-import { Markdown, MD_MESSAGE_CLASS } from '../lib/markdown';
+import { ChatThread, useStickToBottom } from './chat/ChatThread';
+import { MessageItem } from './chat/MessageItem';
+import { fromServerMessages, type ServerMessage } from './chat/messages';
 import { Alert, Badge, Card, FadeIn, Spinner } from './ui';
 
-type SharedMsg = {
-  uuid: string;
-  role: string;
-  content: string;
-  provider?: string;
-  tool_calls_json?: string;
-  created_at: string;
-};
-
-function parseTools(raw?: string): AgentToolCall[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((t) => ({
-      call_id: typeof t.id === 'string' && t.id ? t.id : undefined,
-      name: String(t.name || ''),
-      arguments: t.arguments || {},
-      result: t.result,
-    }));
-  } catch {
-    return [];
-  }
-}
-
+/** Conversation partagée en lecture seule : mêmes bulles que le chat, sans aucune action. */
 export function SharedAgentConversation({ token: tokenProp }: { token?: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState('Conversation partagée');
   const [projectName, setProjectName] = useState<string | null>(null);
-  const [messages, setMessages] = useState<SharedMsg[]>([]);
+  const [raw, setRaw] = useState<ServerMessage[]>([]);
   const [token, setToken] = useState(tokenProp || '');
+  const messages = useMemo(() => {
+    const list = fromServerMessages(raw);
+    // Instantané : une délégation déjà suivie de son résultat n'affiche que la carte de résultat.
+    const finished = new Set(
+      list.flatMap((m) => (m.toolCalls ?? []).filter((t) => t.name === 'job_result').map((t) => String(t.result?.run_uuid ?? ''))),
+    );
+    return list.map((m) => ({
+      ...m,
+      needsUserAction: undefined,
+      toolCalls: (m.toolCalls ?? []).filter((t) => !(t.name === 'delegate_task' && finished.has(String(t.result?.run_uuid ?? '')))),
+    }));
+  }, [raw]);
+  const historyIds = useMemo(() => new Set(messages.map((m) => m.id)), [messages]);
+  const stick = useStickToBottom([], token);
 
   useEffect(() => {
     if (tokenProp) {
       setToken(tokenProp);
       return;
     }
-    const params = new URLSearchParams(window.location.search);
-    let t = params.get('token') || '';
+    let t = new URLSearchParams(window.location.search).get('token') || '';
     if (!t) {
       const m = window.location.pathname.match(/\/share\/agent\/([^/?#]+)/);
       if (m) t = decodeURIComponent(m[1]);
@@ -67,16 +52,13 @@ export function SharedAgentConversation({ token: tokenProp }: { token?: string }
       setLoading(true);
       setError(null);
       try {
-        const r = await api.sharedAgentConversation(token);
+        const d = (await api.sharedAgentConversation(token)).data;
         if (cancelled) return;
-        const d = r.data;
         setTitle(d.agent_name || 'Conversation');
         setProjectName(d.project_name || null);
-        setMessages(d.messages || []);
+        setRaw(d.messages || []);
       } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Impossible de charger le partage');
-        }
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Impossible de charger le partage');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -93,7 +75,6 @@ export function SharedAgentConversation({ token: tokenProp }: { token?: string }
       </div>
     );
   }
-
   if (error) {
     return (
       <div class="mx-auto max-w-lg p-6">
@@ -101,60 +82,24 @@ export function SharedAgentConversation({ token: tokenProp }: { token?: string }
       </div>
     );
   }
-
   return (
     <FadeIn>
       <div class="mx-auto flex min-h-dvh max-w-2xl flex-col px-4 py-8">
         <header class="mb-6">
-          <p class="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
-            DevForge · partage
-          </p>
-          <h1 class="mt-1 text-2xl font-semibold tracking-tight text-[var(--color-ink)]">
-            {title}
-          </h1>
-          {projectName && (
-            <p class="mt-1 text-sm text-[var(--color-ink-muted)]">{projectName}</p>
-          )}
+          <p class="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">DevForge · partage</p>
+          <h1 class="mt-1 text-2xl font-semibold tracking-tight text-[var(--color-ink)]">{title}</h1>
+          {projectName && <p class="mt-1 text-sm text-[var(--color-ink-muted)]">{projectName}</p>}
           <Badge class="mt-3" tone="ok">
             Lecture seule
           </Badge>
         </header>
-
         <Card padding="none" class="flex flex-1 flex-col overflow-hidden">
-          <div class="flex-1 space-y-3 overflow-y-auto p-4">
-            {messages.length === 0 && (
-              <p class="text-sm text-[var(--color-ink-muted)]">Aucun message.</p>
-            )}
-            {messages.map((m) => {
-              const tools = parseTools(m.tool_calls_json);
-              const actions: LiveAction[] = toLiveActions(tools);
-              if (m.role === 'user') {
-                return (
-                  <div
-                    key={m.uuid}
-                    class="ml-auto w-fit max-w-[90%] whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-2xl bg-[var(--color-accent)] px-3 py-2 text-sm text-white"
-                  >
-                    {m.content}
-                  </div>
-                );
-              }
-              return (
-                <div key={m.uuid} class="space-y-2">
-                  {actions.length > 0 && <AgentActionList actions={actions} />}
-                  {m.content.trim() && (
-                    <div class="max-w-full">
-                      <Markdown text={m.content} class={MD_MESSAGE_CLASS} />
-                      {m.provider && (
-                        <div class="mt-1 text-[11px] text-[var(--color-ink-faint)]">
-                          {m.provider}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <ChatThread messages={[]} historyIds={historyIds} stick={stick}>
+            {messages.length === 0 && <p class="text-sm text-[var(--color-ink-muted)]">Aucun message.</p>}
+            {messages.map((m) => (
+              <MessageItem key={m.id} m={m} busy={false} animate={false} readOnly />
+            ))}
+          </ChatThread>
         </Card>
       </div>
     </FadeIn>

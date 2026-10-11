@@ -1,45 +1,24 @@
-import { useEffect, useId, useRef, useState } from 'preact/hooks';
-import { AlertTriangle } from 'lucide-preact';
-import { api } from '../lib/api';
-import { streamAgentChat, type AgentReflection, type AgentToolCall } from '../lib/agent-stream';
+import { useCallback, useId, useRef, useState } from 'preact/hooks';
+import { streamAgentChat } from '../lib/agent-stream';
 import { localMessageId } from '../lib/chat-messages';
 import { cancelQueued, EMPTY_QUEUE, enqueue, flushOnIdle, type ComposerQueue } from '../lib/composer-queue';
-import { Markdown, MD_MESSAGE_CLASS } from '../lib/markdown';
-import { prefersReducedMotion } from '../lib/motion';
 import { AppShell } from './AppShell';
+import { ChatThread, useStickToBottom } from './chat/ChatThread';
 import { Composer } from './chat/Composer';
-import { MessageEnter } from './chat/MessageEnter';
-import {
-  AgentActionList,
-  AgentReflectionList,
-  AgentThinkingBlock,
-  toLiveActions,
-  type LiveAction,
-} from './agents/AgentActionCards';
+import { MessageItem } from './chat/MessageItem';
+import { draftHandlers, draftMessage, finalizedMessage } from './chat/messages';
+import type { ChatMessage } from './chat/types';
+import { useLlmStatus } from './chat/useLlmStatus';
 import { Badge, Card } from './ui';
 
-type Msg = {
-  id: string;
-  role: 'user' | 'assistant';
-  error?: boolean;
-  content: string;
-  provider?: string;
-  toolCalls?: AgentToolCall[];
-  reflections?: AgentReflection[];
-};
+const NO_HISTORY = new Set<string>();
 
+/** Chat global (hors projet) : mêmes bulles et même fil que le chat projet. */
 export function AgentPage() {
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<Msg[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
-  const [thinking, setThinking] = useState<string | null>(null);
-  const [thinkDetail, setThinkDetail] = useState<string | undefined>(undefined);
-  const [thinkStarted, setThinkStarted] = useState(0);
-  const [liveActions, setLiveActions] = useState<LiveAction[]>([]);
-  const [liveReflections, setLiveReflections] = useState<AgentReflection[]>([]);
-  const [llm, setLlm] = useState<string>('—');
-  const [llmError, setLlmError] = useState<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const llm = useLlmStatus();
   const inputId = useId();
   const busyRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -49,41 +28,7 @@ export function AgentPage() {
     queueRef.current = q;
     setQueueState(q);
   };
-  const sendRef = useRef<(text: string) => Promise<void>>(async () => undefined);
-
-  useEffect(() => {
-    async function checkLlm() {
-      try {
-        const status = await api.llmStatus();
-        const mode = status.mode || 'stub';
-        setLlm(mode);
-
-        if (mode === 'stub') {
-          const providers = await api.llmProviders();
-          const unhealthy = providers.data.filter((p) => p.enabled && p.healthy === false);
-          if (unhealthy.length > 0) {
-            const err = unhealthy[0];
-            setLlmError(err.last_probe_error || 'provider unhealthy');
-          } else {
-            setLlmError(null);
-          }
-        } else {
-          setLlmError(null);
-        }
-      } catch {
-        setLlm('offline');
-        setLlmError(null);
-      }
-    }
-
-    void checkLlm();
-  }, []);
-
-  useEffect(() => {
-    // Seule la zone des messages défile (pas la page).
-    const box = scrollRef.current;
-    if (box) box.scrollTo({ top: box.scrollHeight, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
-  }, [messages, thinking, liveActions, liveReflections, thinkDetail]);
+  const stick = useStickToBottom(messages, null);
 
   async function send(raw: string) {
     const text = raw.trim();
@@ -98,78 +43,26 @@ export function AgentPage() {
     abortRef.current = controller;
     let aborted = false;
     setBusy(true);
-    setThinking('Analyse de la demande…');
-    setThinkDetail(undefined);
-    setThinkStarted(Date.now());
-    setLiveActions([]);
-    setLiveReflections([]);
-    setMessages((m) => [...m, { id: localMessageId(), role: 'user', content: text }]);
+    const startedAt = Date.now();
+    const draft = draftMessage(startedAt);
+    const update = (fn: (m: ChatMessage) => ChatMessage) => setMessages((prev) => prev.map((m) => (m.id === draft.id ? fn(m) : m)));
+    setMessages((m) => [...m, { id: localMessageId(), role: 'user', content: text }, draft]);
     setInput('');
+    stick.follow();
     try {
-      const res = await streamAgentChat(
-        text,
-        {},
-        {
-          onThinking: (label, round, detail) => {
-            setThinking(label);
-            if (detail?.trim()) {
-              setThinkDetail(detail);
-              setLiveReflections((prev) => [...prev, { label, detail, round }]);
-            }
-          },
-          onToolStart: (call) => {
-            setThinking(call.name.replace(/_/g, ' '));
-            setThinkDetail(undefined);
-            setLiveActions((prev) => [...prev, { ...call, status: 'running' }]);
-          },
-          onToolDone: (call, ok) => {
-            setLiveActions((prev) => {
-              const next = [...prev];
-              let idx = -1;
-              for (let i = next.length - 1; i >= 0; i--) {
-                const same = call.call_id && next[i].call_id ? next[i].call_id === call.call_id : next[i].name === call.name;
-                if (same && next[i].status === 'running') {
-                  idx = i;
-                  break;
-                }
-              }
-              const done: LiveAction = { ...call, status: ok ? 'ok' : 'fail' };
-              if (idx >= 0) next[idx] = done;
-              else next.push(done);
-              return next;
-            });
-          },
-        },
-        controller.signal,
-      );
-      setMessages((m) => [
-        ...m,
-        {
-          id: localMessageId(),
-          role: 'assistant',
-          content: res.reply,
-          provider: res.provider ?? llm,
-          toolCalls: res.tool_calls ?? [],
-          reflections: res.reflections ?? [],
-        },
-      ]);
+      const res = await streamAgentChat(text, {}, draftHandlers(update), controller.signal);
+      update((m) => ({ ...finalizedMessage(m, res, startedAt), provider: res.provider ?? llm.mode }));
     } catch (err: unknown) {
       if (controller.signal.aborted || (err as Error)?.name === 'AbortError') {
         aborted = true;
+        setMessages((prev) => prev.filter((m) => m.id !== draft.id));
       } else {
-        setMessages((m) => [
-          ...m,
-          { id: localMessageId(), role: 'assistant', content: String((err as Error).message || err), error: true },
-        ]);
+        update(() => ({ id: draft.id, role: 'assistant', content: String((err as Error).message || err), error: true }));
       }
     } finally {
       busyRef.current = false;
       abortRef.current = null;
       setBusy(false);
-      setThinking(null);
-      setThinkDetail(undefined);
-      setLiveActions([]);
-      setLiveReflections([]);
       const { state, send: next } = flushOnIdle(queueRef.current);
       setQueue(state);
       if (next) {
@@ -178,95 +71,41 @@ export function AgentPage() {
       }
     }
   }
+  const sendRef = useRef(send);
   sendRef.current = send;
+  const onSend = useCallback((t: string) => void sendRef.current(t), []);
 
   return (
     <AppShell active="agent" title="Agent">
       <Card padding="none" class="flex h-[min(calc(100dvh-14rem),640px)] flex-col overflow-hidden lg:h-[min(70vh,640px)]">
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-line)] px-4 py-3 text-sm text-[var(--color-ink-muted)]">
           <span class="min-w-0">Chat global · tools DevForge</span>
-          {llm === 'stub' || llm === 'offline' || llm === '—' ? (
-            <Badge tone="warn">Modèle indisponible</Badge>
+          {llm.ready ? (
+            <span class="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-ok)]" title={`Modèle prêt (${llm.mode})`} role="img" aria-label="Modèle prêt" />
           ) : (
-            <span
-              class="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-ok)]"
-              title={`Modèle prêt (${llm})`}
-              role="img"
-              aria-label="Modèle prêt"
-            />
+            <Badge tone="warn">Modèle indisponible</Badge>
           )}
         </div>
-        <div ref={scrollRef} class="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4">
+        <ChatThread messages={messages} historyIds={NO_HISTORY} stick={stick}>
           {messages.length === 0 && (
-            <>
-              {llmError ? (
-                <p class="text-sm text-[var(--color-ink-muted)]">
-                  LLM configuré mais erreur : <strong>{llmError}</strong>. Corrige-le dans{' '}
-                  <a class="underline" href="/app/settings?tab=llm">
-                    Paramètres → Agents / LLM
-                  </a>
-                  .
-                </p>
+            <p class="text-sm text-[var(--color-ink-muted)]">
+              {llm.error ? (
+                <>
+                  LLM configuré mais erreur : <strong>{llm.error}</strong>. Corrige-le dans{' '}
+                </>
               ) : (
-                <p class="text-sm text-[var(--color-ink-muted)]">
-                  « liste les projets », « smoke ». Le modèle se configure dans{' '}
-                  <a class="underline" href="/app/settings?tab=llm">
-                    Paramètres → Agents / LLM
-                  </a>
-                  .
-                </p>
+                '« liste les projets », « smoke ». Le modèle se configure dans '
               )}
-            </>
+              <a class="underline" href="/app/settings?tab=llm">
+                Paramètres → Agents / LLM
+              </a>
+              .
+            </p>
           )}
           {messages.map((m) => (
-            <MessageEnter key={m.id} role={m.role} animate class="space-y-2">
-              {m.role === 'user' ? (
-                <div class="ml-auto w-fit max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-[var(--color-accent)] px-3 py-2 text-sm text-white [overflow-wrap:anywhere]">
-                  {m.content}
-                </div>
-              ) : m.error ? (
-                <div
-                  role="alert"
-                  class="flex max-w-[92%] items-start gap-2.5 rounded-xl border border-[var(--color-line)] border-l-4 border-l-[var(--color-danger)] bg-[var(--color-danger)]/[0.06] px-3 py-2.5 text-sm"
-                >
-                  <AlertTriangle size={16} strokeWidth={2} class="mt-0.5 shrink-0 text-[var(--color-danger)]" aria-hidden />
-                  <div class="min-w-0">
-                    <p class="font-medium text-[var(--color-ink)]">L’agent n’a pas pu répondre</p>
-                    <p class="mt-0.5 break-words text-[var(--color-ink-muted)] [overflow-wrap:anywhere]">{m.content}</p>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {m.reflections && m.reflections.length > 0 && (
-                    <AgentReflectionList items={m.reflections} />
-                  )}
-                  {m.toolCalls && m.toolCalls.length > 0 && (
-                    <AgentActionList actions={toLiveActions(m.toolCalls)} />
-                  )}
-                  {m.content.trim() && (
-                    <div class="max-w-full">
-                      <Markdown text={m.content} class={MD_MESSAGE_CLASS} />
-                      {m.provider && (
-                        <div class="mt-1 text-[11px] text-[var(--color-ink-faint)]">{m.provider}</div>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </MessageEnter>
+            <MessageItem key={m.id} m={m} busy={busy} animate onSend={onSend} />
           ))}
-          {busy && liveReflections.length > 0 && (
-            <AgentReflectionList items={liveReflections} />
-          )}
-          {busy && liveActions.length > 0 && <AgentActionList actions={liveActions} />}
-          {busy && thinking && (
-            <AgentThinkingBlock
-              label={thinking}
-              detail={thinkDetail}
-              startedAt={thinkStarted || Date.now()}
-            />
-          )}
-        </div>
+        </ChatThread>
         <Composer
           inputId={inputId}
           value={input}

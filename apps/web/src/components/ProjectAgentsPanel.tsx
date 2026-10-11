@@ -1,258 +1,22 @@
-import type { ComponentChildren } from 'preact';
-import { memo } from 'preact/compat';
-import { useCallback, useEffect, useId, useRef, useState } from 'preact/hooks';
-import { AlertTriangle, MessageSquare, Plus, RotateCcw, Share2 } from 'lucide-preact';
-import { api, type ProjectAgent } from '../lib/api';
-import {
-  normalizeToolCalls,
-  planFromToolCalls,
-  streamAgentChat,
-  subscribeRun,
-  type AgentChatResult,
-  type StreamHandlers,
-  wroteLocalFiles,
-  type AgentPlan,
-  type AgentReflection,
-  type AgentToolCall,
-} from '../lib/agent-stream';
-import {
-  isLocalId,
-  localMessageId,
-  messagesSignature,
-  reconcileMessageIds,
-  serverMessageId,
-} from '../lib/chat-messages';
+import { useEffect, useId, useRef, useState } from 'preact/hooks';
+import { api } from '../lib/api';
 import { cn } from '../lib/cn';
-import { cancelQueued, EMPTY_QUEUE, enqueue, flushOnIdle, type ComposerQueue } from '../lib/composer-queue';
-import { Markdown, MD_MESSAGE_CLASS } from '../lib/markdown';
-import {
-  approveThenSend,
-  needsUserActionFrom,
-  OPEN_PR_MESSAGE,
-  PUBLISH_APPROVAL_KIND,
-  PUBLISH_APPROVED_MESSAGE,
-  PUSH_LIMIT_CONTINUE_MESSAGE,
-  PUSH_LIMIT_KIND,
-  userActionCopy,
-  type NeedsUserAction,
-} from '../lib/publish-approval';
-import { prefersReducedMotion } from '../lib/motion';
 import { useKeyboardOverlap } from '../lib/useVisualViewport';
+import { ChatHeader, LlmAlert } from './chat/ChatHeader';
+import { ChatThread, useStickToBottom } from './chat/ChatThread';
 import { Composer } from './chat/Composer';
-import { JumpToLatest } from './chat/JumpToLatest';
-import { MessageEnter } from './chat/MessageEnter';
-import { AgentPlanActions, toLiveActions, type LiveAction } from './agents/AgentActionCards';
-import { ActivityGroup } from './chat/ActivityGroup';
-import { MilestoneBar } from './chat/MilestoneBar';
-import { RunBubble } from './chat/RunBubble';
-import { JobCard } from './chat/JobCard';
-import { jobsFromToolCalls, type Job } from '../lib/jobs';
-import { applyMilestone, mergeLiveFinal, type Milestone, visibleActions } from '../lib/activity';
-import { markLaunchedStatus } from '../lib/launched-agents';
-import { Alert, Badge, Button, Card, FadeIn, Spinner, useToast } from './ui';
+import { MessageItem } from './chat/MessageItem';
+import { MobileThreadBar } from './chat/MobileThreadBar';
+import { PersonaChips, PersonaEmptyState } from './chat/PersonaEmptyState';
+import { metaFor, THREAD_STARTERS, threadLabel } from './chat/thread-meta';
+import { TeamSidebar, ThreadSidebar } from './chat/ThreadSidebar';
+import type { ChatChip, ChatPersona } from './chat/types';
+import { useAgentThread } from './chat/useAgentThread';
+import { useLlmStatus } from './chat/useLlmStatus';
+import { useThreadList } from './chat/useThreadList';
+import { Card, FadeIn, useToast } from './ui';
 
-const ROLE_META: Record<string, { label: string; blurb: string; starters: string[] }> = {
-  coordinator: {
-    label: 'Coordinateur',
-    blurb: 'Fil permanent du projet — contexte accumulé, workers éphémères',
-    starters: [
-      'Où en est le projet ?',
-      'Que s’est-il passé récemment ?',
-      'Propose un plan pour la prochaine étape',
-    ],
-  },
-  ops: {
-    label: 'Ops',
-    blurb: 'Santé, logs, environnement',
-    starters: ['Où en est la santé du projet ?', 'Montre les derniers logs', 'Les variables d’env sont-elles cohérentes ?'],
-  },
-  deploy: {
-    label: 'Déploiements',
-    blurb: 'Builds, versions, logs de déploiement',
-    starters: ['Quel est le statut du dernier déploiement ?', 'Pourquoi le dernier build a échoué ?', 'Quelle version est en ligne ?'],
-  },
-  runner: {
-    label: 'Runners',
-    blurb: 'Runners GitHub du dépôt',
-    starters: ['Les runners sont-ils en ligne ?', 'Un runner est-il occupé ou en erreur ?'],
-  },
-  actions: {
-    label: 'Actions',
-    blurb: 'Workflows et jobs CI',
-    starters: ['Quel est le dernier workflow ?', 'Y a-t-il un job en échec ?'],
-  },
-  crons: {
-    label: 'Crons',
-    blurb: 'Tâches planifiées du projet',
-    starters: ['Quelles tâches sont actives ?', 'La dernière exécution a-t-elle échoué ?'],
-  },
-  reviewer: {
-    label: 'Revue',
-    blurb: 'Risques, qualité, CI',
-    starters: ['Lance une revue sécurité du projet', 'Quels risques vois-tu ?', 'La CI est-elle verte ?'],
-  },
-  custom: {
-    label: 'Agent',
-    blurb: 'Assistant projet',
-    starters: [
-      'Où en est le projet ?',
-      'Améliore le design en local',
-      'Déploie la dernière version',
-    ],
-  },
-  worker: {
-    label: 'Worker',
-    blurb: 'Sous-tâche',
-    starters: [],
-  },
-};
-
-const THREAD_STARTERS = [
-  'Où en est le projet ?',
-  'Améliore le design en local',
-  'Déploie la dernière version',
-];
-
-type ChatMessage = {
-  /** uuid serveur, ou `local-…` pour un message optimiste (clé React stable). */
-  id: string;
-  role: string;
-  /** Erreur d'agent (réseau, 524…) : affichée en carte, jamais persistée. */
-  error?: boolean;
-  content: string;
-  provider?: string;
-  toolCalls?: AgentToolCall[];
-  reflections?: AgentReflection[];
-  plan?: AgentPlan | null;
-  canOpenPr?: boolean;
-  needsUserAction?: NeedsUserAction;
-  /** Run en cours (brouillon streamé, P2-02) : le message final garde le même id. */
-  streaming?: boolean;
-  /** Accusé de réception immédiat (jamais persisté). */
-  ack?: string;
-  /** Étape courante (outil, jalon) affichée dans l'en-tête de la bulle. */
-  liveLabel?: string;
-  milestones?: Milestone[];
-  /** Actions du run (live puis fusionnées avec le `Reply` par id). */
-  actions?: LiveAction[];
-  startedAt?: number;
-  elapsedMs?: number;
-};
-
-function metaFor(agent: ProjectAgent) {
-  if (agent.kind === 'subagent') {
-    return {
-      label: agent.name || 'Sous-agent',
-      blurb: 'Worker éphémère sous le Coordinateur',
-      starters: [] as string[],
-    };
-  }
-  return ROLE_META[agent.role] || ROLE_META.custom;
-}
-
-/** Racines + enfants kind=subagent indentés sous leur parent. */
-function nestAgentRows(
-  roots: ProjectAgent[],
-  all: ProjectAgent[],
-): { agent: ProjectAgent; depth: number }[] {
-  const byParent = new Map<string, ProjectAgent[]>();
-  for (const a of all) {
-    if (a.kind !== 'subagent' || !a.parent_agent_uuid) continue;
-    const kids = byParent.get(a.parent_agent_uuid) ?? [];
-    kids.push(a);
-    byParent.set(a.parent_agent_uuid, kids);
-  }
-  for (const kids of byParent.values()) kids.sort(sortByRecent);
-
-  const seen = new Set<string>();
-  const out: { agent: ProjectAgent; depth: number }[] = [];
-  for (const root of roots) {
-    if (seen.has(root.uuid)) continue;
-    seen.add(root.uuid);
-    out.push({ agent: root, depth: 0 });
-    for (const kid of byParent.get(root.uuid) ?? []) {
-      if (seen.has(kid.uuid)) continue;
-      seen.add(kid.uuid);
-      out.push({ agent: kid, depth: 1 });
-    }
-  }
-  // Orphelins (parent hors liste) — toujours visibles
-  for (const a of all) {
-    if (a.kind !== 'subagent' || seen.has(a.uuid)) continue;
-    out.push({ agent: a, depth: 1 });
-    seen.add(a.uuid);
-  }
-  return out;
-}
-
-function sortByRecent(a: ProjectAgent, b: ProjectAgent) {
-  const ta = a.updated_at || '';
-  const tb = b.updated_at || '';
-  return tb.localeCompare(ta);
-}
-
-/** Coordinateur piné en tête ; le reste par activité récente. */
-function sortAgentsPinned(list: ProjectAgent[]): ProjectAgent[] {
-  const coord = list.filter((a) => a.role === 'coordinator');
-  const rest = list.filter((a) => a.role !== 'coordinator').sort(sortByRecent);
-  return [...coord, ...rest];
-}
-
-function titleFromMessage(text: string) {
-  const oneLine = text.trim().replace(/\s+/g, ' ');
-  if (oneLine.length <= 48) return oneLine;
-  return `${oneLine.slice(0, 48)}…`;
-}
-
-function threadStorageKey(projectUuid: string) {
-  return `devforge.workspaceThread.${projectUuid}`;
-}
-
-function readStoredThread(projectUuid: string): string | null {
-  try {
-    return localStorage.getItem(threadStorageKey(projectUuid));
-  } catch {
-    return null;
-  }
-}
-
-function storeThread(projectUuid: string, agentUuid: string) {
-  try {
-    localStorage.setItem(threadStorageKey(projectUuid), agentUuid);
-  } catch {
-    // Navigation privée
-  }
-}
-
-/** Suggestion cliquable au-dessus du champ (envoie, préremplit ou action locale). */
-export type ChatChip = {
-  key: string;
-  label: string;
-  send?: string;
-  prefill?: string;
-  onClick?: () => void;
-  tone?: 'default' | 'danger';
-};
-
-/**
- * Habillage « personnage » du fil principal (Braise) : pas de liste de fils,
- * pas de jargon, avatar + suggestions toujours visibles.
- */
-export type ChatPersona = {
-  name: string;
-  title: string;
-  tagline: string;
-  /**
-   * Ligne d'état facultative affichée à la place du sous-titre (ex. brouillon en cours).
-   * Même hauteur que le sous-titre : son apparition ne décale pas le fil.
-   */
-  status?: ComponentChildren;
-  avatar: ComponentChildren;
-  smallAvatar: ComponentChildren;
-  placeholder: string;
-  emptyText: string;
-  chips: ChatChip[];
-};
+export type { ChatChip, ChatPersona } from './chat/types';
 
 type Props = {
   projectUuid: string;
@@ -266,795 +30,57 @@ type Props = {
   embedded?: boolean;
 };
 
-type MessageItemProps = {
-  m: ChatMessage;
-  persona?: ChatPersona;
-  busy: boolean;
-  animate: boolean;
-  onSend(text: string): void;
-  onRetry(errorId: string): void;
-  /** Accord de publication puis message à l'agent. */
-  onApprovePublish(text: string): void;
-  /** Carte de job : ouvrir le fil du worker (absent en mode persona). */
-  onOpenThread?: (workerUuid: string) => void;
-  /** Une carte de job vient de se terminer : recharger le fil (carte de résultat). */
-  onJobFinished?: (job: Job) => void;
-};
-
-const WAKE_RE = /COORD-WAKE|Événement projet|Déploiement :/;
-
-/** Un message du fil. Mémoïsé : le polling ne re-rend (ni ne re-parse le Markdown) que ce qui change. */
-function MessageItemView({ m, persona, busy, animate, onSend, onRetry, onApprovePublish, onOpenThread, onJobFinished }: MessageItemProps) {
-  // P4-04 : délégation, résultat de worker, déploiement → cartes de job dans le message.
-  const jobs = m.role === 'user' ? [] : jobsFromToolCalls(m.toolCalls?.length ? m.toolCalls : (m.actions ?? []));
-  const isWake = m.role === 'user' && WAKE_RE.test(m.content);
-  const wakeSummary = isWake
-    ? m.content.split('\n').slice(0, 3).join(' ').slice(0, 180) + (m.content.length > 180 ? '…' : '')
-    : '';
-  const role = m.role === 'user' ? 'user' : 'assistant';
-  return (
-    <MessageEnter role={role} animate={animate} class="space-y-2">
-      {m.role === 'user' ? (
-        isWake ? (
-          <div class="mx-auto max-w-[92%] rounded-lg border border-[var(--color-warn)]/40 bg-[var(--color-warn)]/10 px-3 py-2 text-xs text-[var(--color-ink-muted)]">
-            <span class="font-medium text-[var(--color-warn)]">Événement</span> · {wakeSummary}
-          </div>
-        ) : (
-          <div class="ml-auto w-fit max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-[var(--color-accent)] px-3 py-2 text-sm text-white [overflow-wrap:anywhere]">
-            {m.content}
-          </div>
-        )
-      ) : m.error ? (
-        <div
-          role="alert"
-          class="max-w-[92%] rounded-xl border border-[var(--color-line)] border-l-4 border-l-[var(--color-danger)] bg-[var(--color-danger)]/[0.06] px-3 py-2.5"
-        >
-          <div class="flex items-start gap-2.5">
-            <AlertTriangle size={16} strokeWidth={2} class="mt-0.5 shrink-0 text-[var(--color-danger)]" aria-hidden />
-            <div class="min-w-0 flex-1">
-              <p class="text-sm font-medium text-[var(--color-ink)]">L’agent n’a pas pu répondre</p>
-              <p class="mt-0.5 break-words text-sm text-[var(--color-ink-muted)] [overflow-wrap:anywhere]">{m.content}</p>
-              <Button
-                size="sm"
-                variant="outline"
-                class="mt-2"
-                disabled={busy}
-                onClick={() => onRetry(m.id)}
-              >
-                <RotateCcw size={13} strokeWidth={2} aria-hidden />
-                Réessayer
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div class={cn(persona && 'flex items-start gap-2.5')}>
-          {persona && <div class="pt-0.5">{persona.smallAvatar}</div>}
-          <div class={cn('space-y-2', persona && 'min-w-0 flex-1')}>
-            {m.milestones && m.milestones.length > 0 && <MilestoneBar items={m.milestones} />}
-            <ActivityGroup
-              actions={visibleActions(m.actions ?? toLiveActions(m.toolCalls ?? []))}
-              reflections={m.reflections ?? []}
-              live={!!m.streaming}
-              elapsedMs={m.elapsedMs}
-            />
-            {m.streaming || m.elapsedMs !== undefined ? (
-              <RunBubble
-                content={m.content}
-                streaming={!!m.streaming}
-                ack={m.ack}
-                label={m.liveLabel}
-                startedAt={m.startedAt}
-                elapsedMs={m.elapsedMs}
-              />
-            ) : m.content.trim() ? (
-              <div class="max-w-full">
-                <Markdown text={m.content} class={MD_MESSAGE_CLASS} />
-                {m.provider && !persona && m.provider !== 'system' && (
-                  <div class="mt-1 text-[11px] text-[var(--color-ink-faint)]">{m.provider}</div>
-                )}
-              </div>
-            ) : null}
-            {jobs.map((job) => (
-              <JobCard key={job.runUuid} initial={job} onOpenThread={onOpenThread} onFinished={onJobFinished} />
-            ))}
-            {m.plan && m.plan.steps.length > 0 && (
-              <AgentPlanActions
-                plan={m.plan}
-                canOpenPr={m.canOpenPr}
-                busy={busy}
-                onApprovePlan={
-                  m.canOpenPr ? undefined : () => onSend('Go — exécute ce plan en local, puis lance la preview.')
-                }
-                onOpenPr={() => onApprovePublish(OPEN_PR_MESSAGE)}
-              />
-            )}
-            {m.needsUserAction && (
-              <Card class="max-w-[92%] border-l-4 border-l-[var(--color-warn)]">
-                <div class="flex items-start gap-3">
-                  <span class="text-2xl" aria-hidden>
-                    !
-                  </span>
-                  <div class="flex-1">
-                    <p class="mb-2 text-sm font-medium">{userActionCopy(m.needsUserAction.kind).title}</p>
-                    <p class="mb-3 text-sm text-[var(--color-ink-muted)]">{m.needsUserAction.message_fr}</p>
-                    {m.needsUserAction.settings_href && (
-                      <Button size="sm" variant="outline" href={m.needsUserAction.settings_href} class="mb-2">
-                        Ouvrir les paramètres
-                      </Button>
-                    )}
-                    {m.needsUserAction.resume_hint && (
-                      <p class="mt-2 text-xs text-[var(--color-ink-faint)]">{m.needsUserAction.resume_hint}</p>
-                    )}
-                    {m.needsUserAction.kind === PUBLISH_APPROVAL_KIND ? (
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        disabled={busy}
-                        onClick={() => onApprovePublish(PUBLISH_APPROVED_MESSAGE)}
-                        class="mt-3"
-                        title="Autorise l’agent à publier (GitHub, déploiement) pendant 15 minutes."
-                      >
-                        Valider la publication
-                      </Button>
-                    ) : m.needsUserAction.kind === PUSH_LIMIT_KIND ? (
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        disabled={busy}
-                        onClick={() => onSend(PUSH_LIMIT_CONTINUE_MESSAGE)}
-                        class="mt-3"
-                        title="L’agent repart avec un nouveau quota de 3 envois sur GitHub."
-                      >
-                        {userActionCopy(PUSH_LIMIT_KIND).button}
-                      </Button>
-                    ) : (
-                      <Button size="sm" variant="secondary" disabled={busy} onClick={() => onSend('Continuer')} class="mt-3">
-                        Continuer
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </Card>
-            )}
-          </div>
-        </div>
-      )}
-    </MessageEnter>
-  );
-}
-
-const MessageItem = memo(
-  MessageItemView,
-  (a, b) =>
-    // Run en direct : chaque événement crée un nouvel objet message → re-rendu de ce seul message.
-    (a.m === b.m || !(a.m.streaming || b.m.streaming || a.m.elapsedMs !== b.m.elapsedMs)) &&
-    a.m.id === b.m.id &&
-    a.m.content.length === b.m.content.length &&
-    (a.m.toolCalls?.length ?? 0) === (b.m.toolCalls?.length ?? 0) &&
-    !!a.m.error === !!b.m.error &&
-    a.busy === b.busy &&
-    a.animate === b.animate &&
-    a.persona === b.persona &&
-    a.onSend === b.onSend &&
-    a.onRetry === b.onRetry &&
-    a.onApprovePublish === b.onApprovePublish &&
-    a.onOpenThread === b.onOpenThread &&
-    a.onJobFinished === b.onJobFinished &&
-    (a.m.actions?.length ?? 0) === (b.m.actions?.length ?? 0) &&
-    !!a.m.needsUserAction === !!b.m.needsUserAction,
-);
-
-/** Chat agents projet — mode équipe ou fils de conversation. */
-export function ProjectAgentsPanel({
-  projectUuid,
-  defaultAgentUuid,
-  builderMode,
-  mode = 'team',
-  embedded = false,
-  persona,
-}: Props) {
+/** Chat agents projet — mode équipe ou fils de conversation (assembleur des briques `chat/`). */
+export function ProjectAgentsPanel({ projectUuid, defaultAgentUuid, builderMode, mode = 'team', embedded = false, persona }: Props) {
   const threadsMode = mode === 'threads' || !!persona;
   const inputId = useId();
   const toast = useToast();
-  const [agents, setAgents] = useState<ProjectAgent[]>([]);
-  const [threads, setThreads] = useState<ProjectAgent[]>([]);
-  const [selected, setSelected] = useState<string | null>(defaultAgentUuid || null);
-  const [error, setError] = useState<string | null>(null);
-  const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [llmMode, setLlmMode] = useState<string>('—');
-  const [llmError, setLlmError] = useState<string | null>(null);
-  const [pollEnabled, setPollEnabled] = useState(builderMode || false);
   const [sharing, setSharing] = useState(false);
-  /** Zone des messages : on la fait défiler elle seule (pas la page, sinon l'en-tête saute sur mobile). */
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const bootstrapped = useRef(false);
-  /** Garde synchrone (le state `busy` capturé dans une closure peut être périmé). */
-  const busyRef = useRef(false);
-  const abortRef = useRef<AbortController | null>(null);
-  /** Run suivi en direct (P4-02) : uuid pour l'arrêt réel (P4-05). */
-  const runRef = useRef<string | null>(null);
-  /** Abonnement à un run déjà en cours (onglet rouvert, réveil, autre appareil). */
-  const followRef = useRef<{ run: string; ctrl: AbortController } | null>(null);
-  const [stopping, setStopping] = useState(false);
-  const [following, setFollowing] = useState(false);
-  /** Brouillon de la réponse en direct (libellé « Arrêt demandé… »). */
-  const liveDraftRef = useRef<string | null>(null);
-  /** Un seul message en file pendant un run (envoyé à la fin). */
-  const [queue, setQueueState] = useState<ComposerQueue>(EMPTY_QUEUE);
-  const queueRef = useRef<ComposerQueue>(EMPTY_QUEUE);
-  const setQueue = (q: ComposerQueue) => {
-    queueRef.current = q;
-    setQueueState(q);
-  };
-  /** Ids de l'historique chargé au montage du fil : ceux-là ne sont pas animés. */
-  const history = useRef<{ agent: string | null; ids: Set<string> }>({ agent: null, ids: new Set() });
-  const [hasUnseen, setHasUnseen] = useState(false);
-  const [announce, setAnnounce] = useState('');
   /** Grille du chat : sert à mesurer la part cachée par le clavier (iOS). */
   const gridRef = useRef<HTMLDivElement>(null);
-
-  const list = threadsMode ? threads : agents;
-  const current = list.find((a) => a.uuid === selected) ?? agents.find((a) => a.uuid === selected) ?? null;
-  const currentMeta = current ? metaFor(current) : null;
-  const llmReady = llmMode !== 'stub' && llmMode !== '—' && llmMode !== 'offline';
-  const starters = threadsMode ? THREAD_STARTERS : currentMeta?.starters ?? [];
-
-  const displayRows = threadsMode
-    ? nestAgentRows(
-        list.filter((a) => a.kind !== 'subagent'),
-        list,
-      )
-    : nestAgentRows(
-        sortAgentsPinned(agents.filter((a) => a.kind !== 'subagent')),
-        agents,
-      );
-
-  async function resolveThreads(main: ProjectAgent[]): Promise<ProjectAgent[]> {
-    // Workspace = fil coordinateur permanent + tâches isolées. Ops/Reviewer restent dans Agents.
-    const customs = main.filter((a) => a.kind === 'custom');
-    const coordinator = main.find((a) => a.role === 'coordinator');
-    const extras: ProjectAgent[] = [];
-    const add = (agent?: ProjectAgent) => {
-      if (!agent) return;
-      if (agent.role === 'coordinator') return;
-      if (customs.some((c) => c.uuid === agent.uuid)) return;
-      if (extras.some((e) => e.uuid === agent.uuid)) return;
-      extras.push(agent);
-    };
-
-    if (defaultAgentUuid) add(main.find((a) => a.uuid === defaultAgentUuid));
-    const remembered = readStoredThread(projectUuid);
-    if (remembered) add(main.find((a) => a.uuid === remembered));
-
-    const deploy = main.find((a) => a.role === 'deploy');
-    if (deploy) {
-      try {
-        const msgs = await api.agentMessages(projectUuid, deploy.uuid);
-        if ((msgs.data ?? []).length > 0) add(deploy);
-      } catch {
-        // Le fil deploy reste masqué si l’historique est illisible
+  const statusCheckRef = useRef<() => void>(() => undefined);
+  const llm = useLlmStatus([projectUuid, threadsMode]);
+  const list = useThreadList({
+    projectUuid,
+    threadsMode,
+    persona: !!persona,
+    defaultAgentUuid,
+    builderMode,
+    onWorkingPicked: () => statusCheckRef.current(),
+  });
+  const { selected, current } = list;
+  const stickRef = useRef<() => void>(() => undefined);
+  const thread = useAgentThread({
+    projectUuid,
+    agentUuid: selected,
+    rememberThread: !persona,
+    initialPoll: builderMode,
+    onSent: () => stickRef.current(),
+    beforeSend: async (text, emptyThread) => {
+      if (threadsMode && emptyThread && selected && (current?.name === 'Nouveau chat' || current?.name === 'Tâche isolée')) {
+        await list.nameFromFirstMessage(selected, text);
       }
-    }
-
-    const rest = [...extras, ...customs].sort(sortByRecent);
-    return coordinator ? [coordinator, ...rest] : rest;
-  }
-
-  function threadLabel(a: ProjectAgent) {
-    if (a.role === 'coordinator') return 'Coordinateur';
-    if (a.kind === 'subagent') return a.name || 'Sous-agent';
-    if (a.kind === 'custom') return a.name;
-    // Ne jamais afficher Ops / Deploy / Reviewer comme noms de chat
-    if (a.role === 'deploy' || a.name === 'Deploy') return 'Construction';
-    if (a.name === 'Nouveau chat' || a.name === 'Tâche isolée') return a.name;
-    return a.name.startsWith('Chat') ? a.name : 'Chat';
-  }
-
-  async function loadAgents(preferUuid?: string | null) {
-    try {
-      const r = await api.projectAgents(projectUuid);
-      const all = r.data ?? [];
-      const main = all.filter((a) => a.kind !== 'subagent');
-      // Garder aussi les subagents pour le nest UI (sélection + indentation).
-      setAgents(all);
-
-      if (threadsMode) {
-        let nextThreads = await resolveThreads(main);
-        // Inclure les sous-agents dont le parent est dans la liste des fils.
-        const rootIds = new Set(nextThreads.map((t) => t.uuid));
-        const nestedSubs = all
-          .filter(
-            (a) =>
-              a.kind === 'subagent' &&
-              a.parent_agent_uuid &&
-              rootIds.has(a.parent_agent_uuid),
-          )
-          .sort(sortByRecent);
-        for (const s of nestedSubs) {
-          if (!nextThreads.some((t) => t.uuid === s.uuid)) nextThreads.push(s);
-        }
-
-        // Le coordinateur (seed) est le fil par défaut — pas de chat vide auto.
-        if (nextThreads.length === 0 && !bootstrapped.current) {
-          bootstrapped.current = true;
-          const created = await api.createProjectAgent(projectUuid, {
-            name: 'Tâche isolée',
-            role: 'custom',
-            kind: 'custom',
-          });
-          nextThreads = [created.data];
-          setAgents((prev) => [...prev, created.data]);
-        }
-
-        setThreads(nextThreads);
-
-        const remembered = readStoredThread(projectUuid);
-        const coordinatorUuid = nextThreads.find((a) => a.role === 'coordinator')?.uuid;
-        const pick =
-          (persona && coordinatorUuid) ||
-          (preferUuid && nextThreads.some((a) => a.uuid === preferUuid) && preferUuid) ||
-          (selected && nextThreads.some((a) => a.uuid === selected) && selected) ||
-          (defaultAgentUuid && nextThreads.some((a) => a.uuid === defaultAgentUuid)
-            ? defaultAgentUuid
-            : null) ||
-          (remembered && nextThreads.some((a) => a.uuid === remembered) ? remembered : null) ||
-          nextThreads.find((a) => a.status === 'working')?.uuid ||
-          nextThreads.find((a) => a.role === 'coordinator')?.uuid ||
-          nextThreads.find((a) => a.role === 'deploy')?.uuid ||
-          nextThreads[0]?.uuid ||
-          null;
-        setSelected(pick);
-        if (pick && !persona) storeThread(projectUuid, pick);
-        if (nextThreads.find((a) => a.uuid === pick)?.status === 'working') {
-          setPollEnabled(true);
-        }
-      } else {
-        const orderedRoots = sortAgentsPinned(main);
-        const ordered = [
-          ...orderedRoots,
-          ...all.filter((a) => a.kind === 'subagent').sort(sortByRecent),
-        ];
-        setAgents(ordered);
-        const selectDefault = async (prev: string | null) => {
-          if (prev && ordered.some((a) => a.uuid === prev)) return prev;
-          if (defaultAgentUuid && ordered.some((a) => a.uuid === defaultAgentUuid)) {
-            return defaultAgentUuid;
-          }
-          const working = ordered.find((a) => a.status === 'working');
-          if (working) return working.uuid;
-          const coordinator = ordered.find((a) => a.role === 'coordinator');
-          if (coordinator) return coordinator.uuid;
-          const deployAgent = ordered.find((a) => a.role === 'deploy');
-          if (deployAgent) {
-            try {
-              const msgs = await api.agentMessages(projectUuid, deployAgent.uuid);
-              if (msgs.data && msgs.data.length > 0) return deployAgent.uuid;
-            } catch {
-              // Ignorer
-            }
-            if (builderMode) return deployAgent.uuid;
-          }
-          for (const agent of ordered) {
-            if (agent.uuid === deployAgent?.uuid) continue;
-            try {
-              const msgs = await api.agentMessages(projectUuid, agent.uuid);
-              if (msgs.data && msgs.data.length > 0) return agent.uuid;
-            } catch {
-              // Ignorer
-            }
-          }
-          return ordered[0]?.uuid ?? null;
-        };
-        setSelected(await selectDefault(preferUuid ?? selected));
-      }
-
-      setError(null);
-    } catch (e: unknown) {
-      setError(String((e as Error).message || e));
-    }
-  }
-
-  async function loadMessages(agentUuid: string) {
-    try {
-      const r = await api.agentMessages(projectUuid, agentUuid);
-      const next: ChatMessage[] = (r.data ?? []).map((m, i) => {
-        let tools: AgentToolCall[] = [];
-        if (m.tool_calls_json) {
-          try {
-            tools = normalizeToolCalls(JSON.parse(m.tool_calls_json));
-          } catch {
-            tools = [];
-          }
-        }
-        const plan = planFromToolCalls(tools);
-        const isLast = i === (r.data ?? []).length - 1;
-        return {
-          id: serverMessageId(m.uuid, i),
-          role: m.role,
-          content: m.content,
-          provider: m.provider || undefined,
-          toolCalls: tools,
-          plan,
-          canOpenPr: wroteLocalFiles(tools),
-          // Dernier tour seulement (ex. réveil bloqué en attente de validation) : pas de vieux boutons.
-          needsUserAction: isLast && m.role === 'assistant' ? needsUserActionFrom(tools) : undefined,
-        };
-      });
-      // Premier chargement de ce fil : c'est l'historique, pas d'animation en cascade.
-      if (history.current.agent !== agentUuid) {
-        history.current = { agent: agentUuid, ids: new Set(next.map((m) => m.id)) };
-      }
-      setMessages((prev) => {
-        const reconciled = reconcileMessageIds(prev, next);
-        // Polling (1 s) : même contenu ⇒ même tableau ⇒ aucun re-rendu.
-        return messagesSignature(reconciled) === messagesSignature(prev) && prev.length > 0 ? prev : reconciled;
-      });
-    } catch {
-      setMessages([]);
-    }
-  }
-
-  async function createThread() {
-    if (creating) return;
-    setCreating(true);
-    try {
-      const coordinator =
-        agents.find((a) => a.role === 'coordinator') ||
-        threads.find((a) => a.role === 'coordinator');
-      const created = await api.createProjectAgent(projectUuid, {
-        name: 'Tâche isolée',
-        role: 'custom',
-        kind: 'custom',
-        parent_agent_uuid: coordinator?.uuid,
-      });
-      setAgents((prev) => sortAgentsPinned([created.data, ...prev]));
-      setThreads((prev) => {
-        const without = prev.filter((t) => t.uuid !== created.data.uuid);
-        const coord = without.find((t) => t.role === 'coordinator');
-        const rest = without.filter((t) => t.role !== 'coordinator');
-        return coord
-          ? [coord, created.data, ...rest]
-          : [created.data, ...rest];
-      });
-      setSelected(created.data.uuid);
-      storeThread(projectUuid, created.data.uuid);
-      setMessages([]);
-    } catch (e: unknown) {
-      toast.push({
-        title: 'Impossible de créer la tâche',
-        detail: String((e as Error).message || e),
-        tone: 'danger',
-      });
-    } finally {
-      setCreating(false);
-    }
-  }
+    },
+    onReplied: () => {
+      void llm.refresh();
+      if (selected) list.touch(selected);
+    },
+    onRunEnd: list.markIdle,
+  });
+  statusCheckRef.current = thread.requestStatusCheck;
+  const { messages, busy, following } = thread;
+  const stick = useStickToBottom(messages, selected);
+  stickRef.current = stick.follow;
+  // Clavier mobile (iOS) : remonter le composer juste au-dessus, garder la dernière bulle visible.
+  const kbOverlap = useKeyboardOverlap(gridRef, stick.keepBottom);
 
   useEffect(() => {
-    bootstrapped.current = false;
-    void loadAgents(defaultAgentUuid || null);
-
-    async function checkLlm() {
-      try {
-        const status = await api.llmStatus();
-        const mode = status.mode || 'stub';
-        setLlmMode(mode);
-        if (mode === 'stub') {
-          const providers = await api.llmProviders();
-          const unhealthy = providers.data.filter((p) => p.enabled && p.healthy === false);
-          if (unhealthy.length > 0) {
-            setLlmError(unhealthy[0].last_probe_error || 'provider unhealthy');
-          } else {
-            setLlmError(null);
-          }
-        } else {
-          setLlmError(null);
-        }
-      } catch {
-        setLlmMode('offline');
-        setLlmError(null);
-      }
-    }
-    void checkLlm();
+    list.bootstrapped.current = false;
+    void list.loadAgents(defaultAgentUuid || null);
   }, [projectUuid, threadsMode]);
 
-  // P4-02 : plus de polling 1 s des messages. Les runs se suivent par flux reprenable ;
-  // un polling lent (15 s) du statut des fils détecte un run démarré ailleurs (réveil, worker).
-  useEffect(() => {
-    if (!selected) return;
-    let alive = true;
-    let lastStatus: string | undefined;
-    const check = async () => {
-      if (busyRef.current || followRef.current) return;
-      try {
-        const agentsRes = await api.projectAgents(projectUuid);
-        if (!alive) return;
-        const currentAgent = agentsRes.data.find((a) => a.uuid === selected);
-        const status = currentAgent?.status;
-        if (status === 'working') await attachActiveRun(selected);
-        else if (lastStatus === 'working') await loadMessages(selected);
-        lastStatus = status;
-      } catch (err) {
-        console.error('[ProjectAgentsPanel] statut des fils :', err);
-      }
-    };
-    if (pollEnabled) {
-      setPollEnabled(false);
-      void check();
-    }
-    const interval = setInterval(check, 15_000);
-    return () => {
-      alive = false;
-      clearInterval(interval);
-    };
-  }, [pollEnabled, selected, projectUuid]);
-
-  useEffect(() => {
-    if (selected) {
-      if (!persona) storeThread(projectUuid, selected);
-      // Run en cours sur ce fil (onglet fermé puis rouvert…) : on reprend son flux.
-      void loadMessages(selected).then(() => attachActiveRun(selected));
-    } else setMessages([]);
-    return () => {
-      followRef.current?.ctrl.abort();
-      followRef.current = null;
-    };
-  }, [selected, projectUuid]);
-
-  // Effacement déclenché ailleurs (Réglages avancés de la page simple).
-  useEffect(() => {
-    const onCleared = (ev: Event) => {
-      const id = (ev as CustomEvent<{ agentUuid?: string }>).detail?.agentUuid;
-      if (id && id === selected) setMessages([]);
-    };
-    window.addEventListener('devforge:chat-cleared', onCleared);
-    return () => window.removeEventListener('devforge:chat-cleared', onCleared);
-  }, [selected]);
-
-  /** Suit le bas du fil seulement si l'utilisateur y est déjà (il peut remonter lire sans être ramené). */
-  const stickToBottom = useRef(true);
-  const lastScrollSig = useRef('');
-  const lastScrollLen = useRef(0);
-  useEffect(() => {
-    const box = scrollRef.current;
-    if (!box) return;
-    // Le polling (1 s pendant qu'un agent travaille) recrée le tableau à chaque tick :
-    // on ne défile que si le contenu a réellement changé.
-    const last = messages[messages.length - 1];
-    const sig = [
-      messages.length,
-      last?.content.length ?? 0,
-      last?.toolCalls?.length ?? 0,
-      last?.actions?.length ?? 0,
-      last?.reflections?.length ?? 0,
-      last?.milestones?.length ?? 0,
-      last?.liveLabel ?? '',
-      last?.streaming ? 1 : 0,
-    ].join('|');
-    if (sig === lastScrollSig.current) return;
-    const first = lastScrollSig.current === '';
-    lastScrollSig.current = sig;
-    const grew = messages.length > lastScrollLen.current;
-    lastScrollLen.current = messages.length;
-    // Message que l'on vient d'envoyer : toujours le montrer (une fois, pas pendant tout le run).
-    const justSent = grew && last?.role === 'user';
-    if (!first && !stickToBottom.current && !justSent) {
-      // L'utilisateur lit plus haut : on signale le nouveau contenu sans le déplacer.
-      setHasUnseen(true);
-      return;
-    }
-    // Seule la zone des messages défile, jamais la page (sinon l'écran saute sur mobile).
-    // Pendant le streaming : 'auto' (le smooth saccade à chaque delta), smooth pour un nouveau message.
-    const instant = first || prefersReducedMotion() || (!!last?.streaming && !grew);
-    box.scrollTo({ top: box.scrollHeight, behavior: instant ? 'auto' : 'smooth' });
-  }, [messages]);
-
-  useEffect(() => {
-    // Nouveau fil : repartir en bas.
-    lastScrollSig.current = '';
-    lastScrollLen.current = 0;
-    stickToBottom.current = true;
-    setHasUnseen(false);
-  }, [selected]);
-
-  // Lecteurs d'écran : annoncer chaque nouvelle réponse de l'agent (pas l'historique).
-  const lastAnnounced = useRef<string | null>(null);
-  useEffect(() => {
-    const last = messages[messages.length - 1];
-    if (!last || last.role === 'user') return;
-    if (lastAnnounced.current === null || history.current.ids.has(last.id)) {
-      lastAnnounced.current = last.id;
-      return;
-    }
-    if (last.id === lastAnnounced.current) return;
-    lastAnnounced.current = last.id;
-    setAnnounce(last.error ? 'Erreur de l’agent' : 'Nouvelle réponse de l’agent');
-  }, [messages]);
-
-  function jumpToLatest() {
-    const box = scrollRef.current;
-    if (!box) return;
-    stickToBottom.current = true;
-    setHasUnseen(false);
-    box.scrollTo({ top: box.scrollHeight, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
-  }
-
-  // Clavier mobile (iOS) : remonter le composer juste au-dessus, garder la dernière bulle visible.
-  const kbOverlap = useKeyboardOverlap(gridRef, () => {
-    if (!stickToBottom.current) return;
-    window.requestAnimationFrame(() => {
-      const box = scrollRef.current;
-      if (box) box.scrollTo({ top: box.scrollHeight, behavior: 'auto' });
-    });
-  });
-
-  async function clearChat() {
-    if (!selected) return;
-    await api.clearAgentMessages(projectUuid, selected);
-    setMessages([]);
-  }
-
-  /** Fin de run : envoie le message en attente (s'il y en a un). */
-  function flushQueue() {
-    const { state, send } = flushOnIdle(queueRef.current);
-    setQueue(state);
-    if (send) window.setTimeout(() => void sendRef.current(send), 0);
-  }
-
-  /** Stop : arrêt réel du run côté serveur (P4-05) ; le flux reçoit « Arrêté à ta demande… ». */
-  function stopLive() {
-    const run = runRef.current ?? followRef.current?.run ?? null;
-    if (!run) {
-      abortRef.current?.abort();
-      return;
-    }
-    setStopping(true);
-    const draft = liveDraftRef.current;
-    if (draft) setMessages((prev) => prev.map((m) => (m.id === draft ? { ...m, ack: undefined, liveLabel: 'Arrêt demandé…' } : m)));
-    api.cancelAgentRun(run).catch((e: unknown) => {
-      setStopping(false);
-      toast.push({ title: 'Arrêt impossible', detail: String((e as Error)?.message || e), tone: 'danger' });
-    });
-  }
-
-  /** Écouteurs d'un brouillon de réponse (run envoyé ici ou repris). */
-  function draftHandlers(draftId: string): StreamHandlers {
-    let seq = 0;
-    const updateDraft = (fn: (m: ChatMessage) => ChatMessage) =>
-      setMessages((prev) => prev.map((m) => (m.id === draftId ? fn(m) : m)));
-    return {
-      onRunStarted: (runUuid) => {
-        if (runUuid) runRef.current = runUuid;
-      },
-      onAck: (text) => updateDraft((m) => ({ ...m, ack: text })),
-      onThinking: (label, round, detail) => {
-        updateDraft((m) => ({
-          ...m,
-          // L'accusé de réception reste affiché jusqu'au premier outil.
-          liveLabel: detail?.trim() || (m.ack && !(m.actions ?? []).length) ? m.liveLabel : label,
-          reflections: detail?.trim()
-            ? [...(m.reflections ?? []), { label, detail, round, seq: seq++ }]
-            : m.reflections,
-        }));
-      },
-      onDelta: (text) => updateDraft((m) => ({ ...m, content: m.content + text })),
-      onDeltaReset: (round) =>
-        // Texte d'un tour à outils = raisonnement : il passe dans le groupe d'activité.
-        updateDraft((m) => {
-          const text = m.content.trim();
-          if (!text) return { ...m, content: '' };
-          const label = text.length > 120 ? `${text.slice(0, 120)}…` : text;
-          return {
-            ...m,
-            content: '',
-            reflections: [...(m.reflections ?? []), { label, detail: text, round, seq: seq++ }],
-          };
-        }),
-      onMilestone: (label, status) =>
-        updateDraft((m) => ({
-          ...m,
-          milestones: applyMilestone(m.milestones ?? [], label, status),
-        })),
-      onToolStart: (call) => {
-        const s = seq++;
-        updateDraft((m) => ({
-          ...m,
-          liveLabel: call.label || call.name.replace(/_/g, ' '),
-          actions: [...(m.actions ?? []), { ...call, seq: s, status: 'running' }],
-        }));
-      },
-      onToolDone: (call, ok) => {
-        updateDraft((m) => {
-          const next = [...(m.actions ?? [])];
-          let idx = -1;
-          for (let i = next.length - 1; i >= 0; i--) {
-            const same = call.call_id && next[i].call_id ? next[i].call_id === call.call_id : next[i].name === call.name;
-            if (same && next[i].status === 'running') {
-              idx = i;
-              break;
-            }
-          }
-          if (idx >= 0) next[idx] = { ...next[idx], ...call, seq: next[idx].seq, status: ok ? 'ok' : 'fail' };
-          else next.push({ ...call, seq: seq++, status: ok ? 'ok' : 'fail' });
-          return { ...m, actions: next };
-        });
-      },
-    };
-  }
-
-  /** Finalisation sur le même id : pas de nouveau message, pas de saut. */
-  function finalizeDraft(draftId: string, res: AgentChatResult, startedAt: number) {
-    const tools = res.tool_calls ?? [];
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === draftId
-          ? {
-              ...m,
-              streaming: false,
-              content: res.reply,
-              provider: res.provider || undefined,
-              toolCalls: tools,
-              actions: mergeLiveFinal(m.actions ?? [], tools),
-              reflections: m.reflections?.length ? m.reflections : (res.reflections ?? []),
-              milestones: (m.milestones ?? []).map((x) => (x.status === 'running' ? { ...x, status: 'done' as const } : x)),
-              plan: res.plan,
-              canOpenPr: wroteLocalFiles(tools) || res.executed_plan === true,
-              needsUserAction: needsUserActionFrom(tools),
-              liveLabel: undefined,
-              elapsedMs: Date.now() - startedAt,
-            }
-          : m,
-      ),
-    );
-  }
-
-  /** Reprend le flux d'un run déjà en cours sur ce fil (P4-02). */
-  async function attachActiveRun(agentUuid: string) {
-    if (busyRef.current || followRef.current) return;
-    let run: Awaited<ReturnType<typeof api.activeRun>>['data'] = null;
-    try {
-      run = (await api.activeRun(projectUuid, agentUuid)).data;
-    } catch {
-      return;
-    }
-    if (!run || busyRef.current || followRef.current) return;
-    const ctrl = new AbortController();
-    followRef.current = { run: run.run_uuid, ctrl };
-    setFollowing(true);
-    const draftId = localMessageId();
-    liveDraftRef.current = draftId;
-    const startedAt = Date.parse(run.started_at) || Date.now();
-    setMessages((m) => [
-      ...m,
-      { id: draftId, role: 'assistant', content: '', streaming: true, startedAt, actions: [], reflections: [], milestones: [] },
-    ]);
-    try {
-      const res = await subscribeRun(run.run_uuid, draftHandlers(draftId), ctrl.signal);
-      finalizeDraft(draftId, res, startedAt);
-    } catch {
-      if (ctrl.signal.aborted) return;
-      setMessages((prev) => prev.filter((m) => m.id !== draftId));
-    } finally {
-      if (followRef.current?.ctrl === ctrl) followRef.current = null;
-      if (liveDraftRef.current === draftId) liveDraftRef.current = null;
-      setFollowing(!!followRef.current);
-      setStopping(false);
-      if (!ctrl.signal.aborted) {
-        markLaunchedStatus(agentUuid, 'idle');
-        // Run fini ou annulé : plus de badge « Au travail… » en attendant le prochain relevé.
-        const idle = <T extends { uuid: string; status?: string | null }>(a: T): T =>
-          a.uuid === agentUuid && a.status === 'working' ? { ...a, status: 'idle' } : a;
-        setAgents((prev) => prev.map(idle));
-        setThreads((prev) => prev.map(idle));
-        // Message persisté (et éventuelles cartes) : le fil se recale sur le serveur.
-        void loadMessages(agentUuid);
-        flushQueue();
-      }
-    }
+  async function createThread() {
+    if (await list.createThread()) thread.setMessages([]);
   }
 
   async function shareChat() {
@@ -1062,409 +88,67 @@ export function ProjectAgentsPanel({
     setSharing(true);
     try {
       const r = await api.shareAgentConversation(projectUuid, selected);
-      const url =
-        r.url.startsWith('http') ? r.url : `${window.location.origin}${r.path || r.url}`;
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(r.url.startsWith('http') ? r.url : `${window.location.origin}${r.path || r.url}`);
       toast.push({ title: 'Lien de partage copié', tone: 'ok' });
     } catch (e) {
-      toast.push({
-        title: 'Partage impossible',
-        detail: e instanceof Error ? e.message : String(e),
-        tone: 'danger',
-      });
+      toast.push({ title: 'Partage impossible', detail: e instanceof Error ? e.message : String(e), tone: 'danger' });
     } finally {
       setSharing(false);
     }
   }
 
-  async function sendText(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed || !selected) return;
-    if (busyRef.current || followRef.current) {
-      // Run en cours (ici ou repris) : la saisie reste libre, l'envoi part à la fin.
-      setQueue(enqueue(queueRef.current, trimmed));
-      setInput('');
-      return;
-    }
-    busyRef.current = true;
-    const controller = new AbortController();
-    abortRef.current = controller;
-    let aborted = false;
-    setBusy(true);
-    markLaunchedStatus(selected, 'working');
-    // Brouillon de réponse créé tout de suite : points de frappe, puis texte streamé (même id à la fin).
-    const draftId = localMessageId();
-    const startedAt = Date.now();
-    runRef.current = null;
-    liveDraftRef.current = draftId;
-    setMessages((m) => [
-      ...m,
-      { id: localMessageId(), role: 'user', content: trimmed },
-      {
-        id: draftId,
-        role: 'assistant',
-        content: '',
-        streaming: true,
-        startedAt,
-        actions: [],
-        reflections: [],
-        milestones: [],
-      },
-    ]);
-    setInput('');
-    stickToBottom.current = true;
-    setHasUnseen(false);
-
-    if (threadsMode && (current?.name === 'Nouveau chat' || current?.name === 'Tâche isolée') && messages.length === 0) {
-      const title = titleFromMessage(trimmed);
-      try {
-        const renamed = await api.renameProjectAgent(projectUuid, selected, title);
-        setThreads((prev) =>
-          prev
-            .map((t) => (t.uuid === selected ? renamed.data : t))
-            .sort(sortByRecent),
-        );
-        setAgents((prev) => prev.map((a) => (a.uuid === selected ? renamed.data : a)));
-      } catch {
-        // Titre non critique
-      }
-    }
-
-    try {
-      const res = await streamAgentChat(
-        trimmed,
-        {
-          project_uuid: projectUuid,
-          agent_uuid: selected,
-        },
-        draftHandlers(draftId),
-        controller.signal,
-      );
-      const tools = res.tool_calls ?? [];
-      finalizeDraft(draftId, res, startedAt);
-      api
-        .llmStatus()
-        .then((s) => setLlmMode(s.mode || llmMode))
-        .catch(() => undefined);
-      if (
-        tools.some(
-          (t) => t.name === 'start_local_preview' && t.result?.public_ok === false,
-        )
-      ) {
-        setPollEnabled(true);
-      }
-      if (threadsMode) {
-        setThreads((prev) => {
-          const now = new Date().toISOString();
-          return prev
-            .map((t) => (t.uuid === selected ? { ...t, updated_at: now } : t))
-            .sort(sortByRecent);
-        });
-      }
-    } catch (err: unknown) {
-      if (controller.signal.aborted || (err as Error)?.name === 'AbortError') {
-        // Stop sans run persistant (repli) : seul l'affichage s'arrête ; le run continue côté serveur,
-        // le fil repasse en polling pour récupérer la réponse.
-        aborted = true;
-        setMessages((prev) => prev.filter((m) => m.id !== draftId));
-        setPollEnabled(true);
-      } else {
-        const msg = String((err as Error).message || err);
-        // La carte d'erreur (avec « Réessayer ») remplace le brouillon, au même endroit.
-        setMessages((prev) => prev.map((m) => (m.id === draftId ? { id: draftId, role: 'assistant', content: msg, error: true } : m)));
-      }
-    } finally {
-      busyRef.current = false;
-      abortRef.current = null;
-      runRef.current = null;
-      liveDraftRef.current = null;
-      setStopping(false);
-      setBusy(false);
-      markLaunchedStatus(selected, aborted ? 'working' : 'idle');
-      if (aborted) {
-        // Le serveur travaille encore : on ne relance pas de run par-dessus.
-        // Le message en attente revient dans la saisie.
-        const pending = queueRef.current.queued;
-        setQueue(EMPTY_QUEUE);
-        if (pending) setInput((cur) => (cur.trim() ? `${pending}\n\n${cur}` : pending));
-      } else {
-        flushQueue();
-      }
-    }
-  }
-
-  /** « Réessayer » sur une carte d'erreur : renvoie le dernier message utilisateur. */
-  function retryAfterError(errorId: string) {
-    if (busyRef.current) return;
-    const idx = messages.findIndex((m) => m.id === errorId);
-    if (idx < 0) return;
-    let userIdx = -1;
-    for (let i = idx - 1; i >= 0; i--) {
-      if (messages[i].role === 'user') {
-        userIdx = i;
-        break;
-      }
-    }
-    const text = userIdx >= 0 ? messages[userIdx].content : null;
-    // Le message utilisateur optimiste sera ré-ajouté par sendText (pas de doublon).
-    const dropUser = userIdx >= 0 && isLocalId(messages[userIdx].id);
-    const dropIds = new Set([errorId, ...(dropUser ? [messages[userIdx].id] : [])]);
-    setMessages((prev) => prev.filter((m) => !dropIds.has(m.id)));
-    if (text) void sendText(text);
-  }
-
-  // Callbacks stables pour les messages mémoïsés (toujours la dernière version de sendText).
-  const sendRef = useRef(sendText);
-  sendRef.current = sendText;
-  const retryRef = useRef(retryAfterError);
-  retryRef.current = retryAfterError;
-  const onSendStable = useCallback((t: string) => void sendRef.current(t), []);
-  const onRetryStable = useCallback((id: string) => retryRef.current(id), []);
-  const approveRef = useRef<(text: string) => Promise<void>>(async () => undefined);
-  approveRef.current = async (text: string) => {
-    try {
-      await approveThenSend(
-        () => api.approvePublish(projectUuid),
-        (t) => {
-          // Accord posé : les anciennes cartes « Validation requise » n'ont plus lieu d'être.
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.needsUserAction?.kind === PUBLISH_APPROVAL_KIND ? { ...m, needsUserAction: undefined } : m,
-            ),
-          );
-          void sendRef.current(t);
-        },
-        text,
-      );
-    } catch (e: unknown) {
-      toast.push({
-        title: 'Validation impossible',
-        detail: String((e as Error)?.message || e),
-        tone: 'danger',
-      });
-    }
-  };
-  const onApprovePublishStable = useCallback((t: string) => void approveRef.current(t), []);
-  const selectedRef = useRef(selected);
-  selectedRef.current = selected;
-  /** Fin d'une carte de job : la carte de résultat arrive dans le fil (posée par le serveur). */
-  const onJobFinishedStable = useCallback(() => {
-    const id = selectedRef.current;
-    if (!id) return;
-    for (const delay of [1200, 4000]) {
-      window.setTimeout(() => {
-        if (selectedRef.current === id && !busyRef.current) void loadMessagesRef.current(id);
-      }, delay);
-    }
-  }, []);
-  const loadMessagesRef = useRef(loadMessages);
-  loadMessagesRef.current = loadMessages;
   const openThreadRef = useRef<(id: string) => void>(() => undefined);
-  openThreadRef.current = (workerUuid: string) => {
-    void loadAgents(workerUuid).then(() => setSelected(workerUuid));
-  };
-  const onOpenThreadStable = useCallback((id: string) => openThreadRef.current(id), []);
+  openThreadRef.current = (workerUuid) => void list.loadAgents(workerUuid).then(() => list.setSelected(workerUuid));
+  const [onOpenThread] = useState(() => (id: string) => openThreadRef.current(id));
 
   function onChip(chip: ChatChip) {
-    if (chip.onClick) {
-      chip.onClick();
-      return;
-    }
-    if (chip.send) {
-      void sendText(chip.send);
-      return;
-    }
-    if (chip.prefill !== undefined) {
-      setInput(chip.prefill);
-      window.setTimeout(() => {
-        const el = document.getElementById(inputId) as HTMLTextAreaElement | null;
-        if (el) {
-          el.focus();
-          el.setSelectionRange(el.value.length, el.value.length);
-        }
-      }, 0);
-    }
+    if (chip.onClick) return chip.onClick();
+    if (chip.send) return void thread.send(chip.send);
+    if (chip.prefill === undefined) return;
+    thread.setInput(chip.prefill);
+    window.setTimeout(() => {
+      const el = document.getElementById(inputId) as HTMLTextAreaElement | null;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      }
+    }, 0);
   }
 
-  const chatHeaderTitle = threadsMode
-    ? (current ? threadLabel(current) : 'Chat')
-    : currentMeta?.label || 'Agent';
+  const currentMeta = current ? metaFor(current) : null;
+  const title = threadsMode ? (current ? threadLabel(current) : 'Chat') : currentMeta?.label || 'Agent';
   const isCoordinator = current?.role === 'coordinator';
   const isSubagent = current?.kind === 'subagent';
-  const chatHeaderBlurb = isCoordinator
+  const blurb = isCoordinator
     ? 'Fil permanent du projet — contexte accumulé, workers éphémères'
     : isSubagent
       ? 'Sous-agent — tâche déléguée par le Coordinateur'
       : threadsMode
         ? 'Assistant projet — planifie, édite en local, preview'
         : currentMeta?.blurb;
-
+  const select = (uuid: string) => list.setSelected(uuid);
   const sidebar = threadsMode ? (
-    <div class="flex flex-col gap-2">
-      <Button
-        type="button"
-        size="sm"
-        variant="secondary"
-        disabled={creating || busy}
-        onClick={() => void createThread()}
-        class="w-full justify-start"
-      >
-        {creating ? <Spinner /> : <Plus size={14} strokeWidth={2} aria-hidden />}
-        Nouvelle tâche isolée
-      </Button>
-      {error && (
-        <Alert tone="warn" class="mb-1">
-          {error}
-        </Alert>
-      )}
-      <ul class="space-y-0.5">
-        {displayRows.map(({ agent: a, depth }) => {
-          const on = selected === a.uuid;
-          return (
-            <li key={a.uuid}>
-              <button
-                type="button"
-                class={cn(
-                  'flex w-full items-start gap-2 rounded-xl py-2.5 text-left transition',
-                  depth > 0 ? 'pl-7 pr-3' : 'px-3',
-                  on ? 'bg-[var(--color-accent-soft)]' : 'hover:bg-[var(--color-surface)]',
-                )}
-                onClick={() => setSelected(a.uuid)}
-              >
-                <MessageSquare
-                  size={14}
-                  strokeWidth={2}
-                  class="mt-0.5 shrink-0 text-[var(--color-ink-faint)]"
-                  aria-hidden
-                />
-                <span class="min-w-0 flex-1">
-                  <span class="block truncate text-sm font-medium tracking-tight">
-                    {depth > 0 ? `↳ ${threadLabel(a)}` : threadLabel(a)}
-                  </span>
-                  {a.kind === 'subagent' && (
-                    <span class="mt-0.5 block text-[10px] text-[var(--color-ink-faint)]">
-                      Sous-agent
-                    </span>
-                  )}
-                  {a.status === 'working' && (
-                    <span class="mt-0.5 block text-[10px] text-[var(--color-accent)]">En cours…</span>
-                  )}
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-      {displayRows.length === 0 && !error && (
-        <p class="px-1 text-sm text-[var(--color-ink-muted)]">Aucun chat…</p>
-      )}
-    </div>
+    <ThreadSidebar rows={list.rows} selected={selected} onSelect={select} error={list.error} creating={list.creating} busy={busy} onCreate={() => void createThread()} />
   ) : (
-    <Card>
-      <p class="mb-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-faint)]">
-        Équipe
-      </p>
-      {error && (
-        <Alert tone="warn" class="mb-3">
-          {error}
-        </Alert>
-      )}
-      <ul class="space-y-1">
-        {displayRows.map(({ agent: a, depth }) => {
-          const meta = metaFor(a);
-          const on = selected === a.uuid;
-          return (
-            <li key={a.uuid}>
-              <button
-                type="button"
-                class={cn(
-                  'flex w-full flex-col rounded-xl py-2.5 text-left transition',
-                  depth > 0 ? 'pl-7 pr-3' : 'px-3',
-                  on ? 'bg-[var(--color-accent-soft)]' : 'hover:bg-[var(--color-surface)]',
-                )}
-                onClick={() => setSelected(a.uuid)}
-              >
-                <span class="flex items-center gap-2 font-medium tracking-tight">
-                  {depth > 0 ? `↳ ${meta.label}` : meta.label}
-                  {a.role === 'coordinator' && (
-                    <Badge tone="accent" class="!px-1.5 !py-0 text-[10px]">
-                      Fil permanent
-                    </Badge>
-                  )}
-                  {a.kind === 'subagent' && (
-                    <Badge tone="neutral" class="!px-1.5 !py-0 text-[10px]">
-                      Sous-agent
-                    </Badge>
-                  )}
-                </span>
-                <span class="mt-0.5 text-xs text-[var(--color-ink-faint)]">{meta.blurb}</span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-      {agents.length === 0 && !error && (
-        <p class="text-sm text-[var(--color-ink-muted)]">Chargement des agents…</p>
-      )}
-    </Card>
+    <TeamSidebar rows={list.rows} selected={selected} onSelect={select} error={list.error} loading={list.agents.length === 0} />
   );
-
-  const mobileThreadBar = threadsMode && !persona ? (
-    <div class={cn('mb-2 flex shrink-0 items-center gap-2', !embedded && 'lg:hidden')}>
-      {/* -my/py : la zone de défilement laisse dépasser la zone de toucher des puces (44 px) sans changer la mise en page. */}
-      <div class="min-w-0 flex-1 overflow-x-auto py-2 -my-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div class="flex w-max gap-1">
-          {displayRows.map(({ agent: a, depth }) => (
-            <button
-              key={a.uuid}
-              type="button"
-              onClick={() => setSelected(a.uuid)}
-              class={cn(
-                'df-hit max-w-[10rem] shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium transition',
-                selected === a.uuid
-                  ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                  : 'bg-white/[0.03] text-[var(--color-ink-muted)] hover:bg-white/5',
-              )}
-            >
-              {/* truncate sur le texte : un overflow:hidden sur le bouton couperait sa zone de toucher. */}
-              <span class="block truncate">{depth > 0 ? `↳ ${threadLabel(a)}` : threadLabel(a)}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-      <Button
-        type="button"
-        size="sm"
-        variant="secondary"
-        disabled={creating || busy}
-        onClick={() => void createThread()}
-        aria-label="Nouvelle tâche isolée"
-        title="Nouvelle tâche isolée"
-      >
-        {creating ? <Spinner /> : <Plus size={14} strokeWidth={2} aria-hidden />}
-      </Button>
-    </div>
-  ) : null;
 
   return (
     <FadeIn class={embedded ? 'flex h-full min-h-0 flex-col' : undefined}>
-      {mobileThreadBar}
+      {threadsMode && !persona && (
+        <MobileThreadBar rows={list.rows} selected={selected} onSelect={select} creating={list.creating} busy={busy} onCreate={() => void createThread()} embedded={embedded} />
+      )}
       <div
         ref={gridRef}
         style={{ '--kb': `${kbOverlap}px` }}
-        class={cn(
-          'grid min-h-0 gap-4',
-          embedded ? 'h-full flex-1 grid-cols-1' : threadsMode ? 'lg:grid-cols-[200px_1fr]' : 'lg:grid-cols-[240px_1fr]',
-        )}
+        class={cn('grid min-h-0 gap-4', embedded ? 'h-full flex-1 grid-cols-1' : threadsMode ? 'lg:grid-cols-[200px_1fr]' : 'lg:grid-cols-[240px_1fr]')}
       >
         <div class={cn(embedded ? 'hidden' : threadsMode && 'hidden lg:block')}>{sidebar}</div>
-
         <Card
           padding="none"
           class={cn(
             'flex min-h-0 flex-col overflow-hidden',
-            // Clavier iOS : la part du panneau cachée sous le clavier devient du padding,
-            // le composer reste juste au-dessus (0 sur desktop et Android).
+            // Clavier iOS : la part du panneau cachée sous le clavier devient du padding (0 sur desktop et Android).
             'max-lg:pb-[var(--kb,0px)]',
             persona && 'df-tap',
             embedded
@@ -1474,143 +158,31 @@ export function ProjectAgentsPanel({
                 : 'h-[min(calc(100dvh-14rem),600px)] lg:h-[min(64vh,600px)]',
           )}
         >
-          <div class="flex items-center justify-between gap-2 border-b border-[var(--color-line)] px-4 py-3">
-            {persona ? (
-              <div class="flex min-w-0 items-center gap-3">
-                {persona.avatar}
-                <div class="min-w-0">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="truncate text-[15px] font-semibold tracking-tight">{persona.name}</span>
-                    <span class="rounded-full border border-[var(--color-line)] bg-white/[0.04] px-2 py-0.5 text-[11px] text-[var(--color-ink-muted)]">
-                      {persona.title}
-                    </span>
-                    {current?.status === 'working' && !busy && !following && (
-                      <Badge tone="accent">Au travail…</Badge>
-                    )}
-                  </div>
-                  <div class="mt-0.5 h-4 min-w-0" aria-live="polite">
-                    {persona.status || (
-                      <p class="truncate text-xs leading-4 text-[var(--color-ink-faint)]">{persona.tagline}</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : (
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="truncate font-medium tracking-tight">{chatHeaderTitle}</span>
-                {isCoordinator && <Badge tone="accent">Coordinateur</Badge>}
-                {isSubagent && <Badge tone="neutral">Sous-agent</Badge>}
-                {llmReady ? (
-                  <span
-                    class="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-ok)]"
-                    title={`Modèle prêt (${llmMode})`}
-                    role="img"
-                    aria-label="Modèle prêt"
-                  />
-                ) : (
-                  <Badge tone="warn">Modèle indisponible</Badge>
-                )}
-              </div>
-              {chatHeaderBlurb && (
-                <p class="mt-0.5 truncate text-xs text-[var(--color-ink-faint)]">{chatHeaderBlurb}</p>
-              )}
-            </div>
-            )}
-            <div class="flex shrink-0 items-center gap-1">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={!selected || sharing || messages.length === 0}
-                onClick={() => void shareChat()}
-                title="Copier un lien de partage"
-                aria-label="Partager la conversation"
-              >
-                {sharing ? <Spinner /> : <Share2 size={14} strokeWidth={2} aria-hidden />}
-              </Button>
-              {/* Page simple : l'effacement passe par Réglages avancés (avec confirmation). */}
-              {!persona && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  disabled={!selected || busy || messages.length === 0}
-                  onClick={() => void clearChat()}
-                >
-                  Effacer
-                </Button>
-              )}
-            </div>
-          </div>
-
-          {!llmReady && (
-            <Alert tone="warn" class="m-3 mb-0">
-                  {llmError ? (
-                <>
-                  LLM configuré mais erreur : <strong>{llmError}</strong>
-                  {' '}
-                  —{' '}
-                  <a class="underline" href="/app/settings?tab=llm">
-                    corrige dans Paramètres → Agents / LLM
-                  </a>
-                  .
-                </>
-              ) : (
-                <>
-                  Aucun LLM prêt. Configure le tien dans{' '}
-                  <a class="underline" href="/app/settings?tab=llm">
-                    Paramètres → Agents / LLM
-                  </a>
-                  . Les agents répondront dès qu'un modèle est actif.
-                </>
-              )}
-            </Alert>
-          )}
-
-          <div class="relative flex min-h-0 flex-1 flex-col">
-          <span class="sr-only" aria-live="polite">
-            {announce}
-          </span>
-          <div
-            ref={scrollRef}
-            class="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4"
-            onScroll={(e) => {
-              const el = e.currentTarget;
-              const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-              stickToBottom.current = atBottom;
-              if (atBottom && hasUnseen) setHasUnseen(false);
-            }}
-          >
-            {messages.length === 0 && persona && (
-              <div class="flex items-start gap-2.5">
-                {persona.smallAvatar}
-                <p class="max-w-[92%] rounded-2xl rounded-tl-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-ink)]">
-                  {persona.emptyText}
-                </p>
-              </div>
-            )}
-            {messages.length === 0 && !persona && (
-              <div class="space-y-3">
-                <p class="text-sm text-[var(--color-ink-muted)]">
-                  {threadsMode
-                    ? 'Décris ce que tu veux. L’assistant modifie le projet ; la preview et les fichiers sont à côté.'
-                    : 'Cet agent surveille sa partie du projet. Pose une question, ou choisis une piste.'}
-                </p>
-                <div class="flex flex-wrap gap-2">
-                  {starters.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      disabled={busy || !selected}
-                      class="rounded-full border border-[var(--color-line)] px-3 py-1.5 text-xs text-[var(--color-ink-muted)] transition hover:border-[var(--color-line-strong)] hover:text-[var(--color-ink)]"
-                      onClick={() => void sendText(s)}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          <ChatHeader
+            persona={persona}
+            title={title}
+            blurb={blurb}
+            isCoordinator={isCoordinator}
+            isSubagent={isSubagent}
+            working={current?.status === 'working' && !busy && !following}
+            llmReady={llm.ready}
+            llmMode={llm.mode}
+            canShare={!!selected && messages.length > 0}
+            sharing={sharing}
+            onShare={() => void shareChat()}
+            onClear={persona ? undefined : () => void thread.clear()}
+            canClear={!!selected && !busy && messages.length > 0}
+          />
+          {!llm.ready && <LlmAlert error={llm.error} />}
+          <ChatThread messages={messages} historyIds={thread.historyIds} stick={stick}>
+            {messages.length === 0 && (
+              <PersonaEmptyState
+                persona={persona}
+                threadsMode={threadsMode}
+                starters={threadsMode ? THREAD_STARTERS : currentMeta?.starters ?? []}
+                disabled={busy || !selected}
+                onStarter={(s) => void thread.send(s)}
+              />
             )}
             {messages.map((m) => (
               <MessageItem
@@ -1618,49 +190,27 @@ export function ProjectAgentsPanel({
                 m={m}
                 persona={persona}
                 busy={busy}
-                animate={!history.current.ids.has(m.id)}
-                onSend={onSendStable}
-                onRetry={onRetryStable}
-                onApprovePublish={onApprovePublishStable}
-                onOpenThread={persona ? undefined : onOpenThreadStable}
-                onJobFinished={onJobFinishedStable}
+                animate={!thread.historyIds.has(m.id)}
+                onSend={thread.onSend}
+                onRetry={thread.onRetry}
+                onApprovePublish={thread.onApprovePublish}
+                onOpenThread={persona ? undefined : onOpenThread}
+                onJobFinished={thread.onJobFinished}
               />
             ))}
-          </div>
-          <JumpToLatest visible={hasUnseen} onClick={jumpToLatest} />
-          </div>
-
-          {persona && persona.chips.length > 0 && (
-            <div class="df-scroll-x flex shrink-0 gap-2 overflow-x-auto border-t border-[var(--color-line)] px-3 pt-3 md:flex-wrap md:overflow-visible">
-              {persona.chips.map((chip) => (
-                <button
-                  key={chip.key}
-                  type="button"
-                  disabled={busy || (!chip.onClick && !selected)}
-                  class={cn(
-                    'inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-3 py-1.5 text-xs transition disabled:opacity-50 max-lg:text-[13px]',
-                    chip.tone === 'danger'
-                      ? 'border-[var(--color-danger)]/35 bg-[var(--color-danger)]/10 text-[var(--color-danger)] hover:bg-[var(--color-danger)]/15'
-                      : 'border-[var(--color-line-strong)] bg-white/[0.03] text-[var(--color-ink)] hover:bg-white/[0.07]',
-                  )}
-                  onClick={() => onChip(chip)}
-                >
-                  {chip.label}
-                </button>
-              ))}
-            </div>
-          )}
+          </ChatThread>
+          {persona && persona.chips.length > 0 && <PersonaChips chips={persona.chips} busy={busy} hasThread={!!selected} onChip={onChip} />}
           <Composer
             inputId={inputId}
-            value={input}
-            onChange={setInput}
-            onSubmit={(text) => void sendText(text)}
+            value={thread.input}
+            onChange={thread.setInput}
+            onSubmit={(text) => void thread.send(text)}
             busy={busy || following}
-            disabled={!selected || stopping}
-            onStop={stopLive}
-            queued={queue.queued}
-            onCancelQueued={() => setQueue(cancelQueued(queueRef.current))}
-            placeholder={persona ? persona.placeholder : threadsMode ? 'Message…' : current ? `Message pour ${chatHeaderTitle}…` : 'Message…'}
+            disabled={!selected || thread.stopping}
+            onStop={thread.stop}
+            queued={thread.queued}
+            onCancelQueued={thread.cancelQueued}
+            placeholder={persona ? persona.placeholder : threadsMode ? 'Message…' : current ? `Message pour ${title}…` : 'Message…'}
             class={cn(
               'shrink-0 p-3',
               // Au focus (clavier mobile), garder la saisie au-dessus du dock bas.
