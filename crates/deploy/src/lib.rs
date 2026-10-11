@@ -162,6 +162,38 @@ struct ContainerExtras {
     runtime: crate::runtime::RuntimeSpec,
 }
 
+/// Fichiers suivis contenant des marqueurs `<<<<<<< ` / `>>>>>>> ` en début de ligne
+/// (hors documentation). `git grep` sort 0 quand il trouve, 1 sinon.
+pub const CONFLICT_GREP_CMD: &str = "git grep -nIE '^(<<<<<<<|>>>>>>>)( |$)' -- . ':!*.md' ':!*.mdx' ':!*.txt' ':!*.rst' ':!*.patch' ':!*.diff' | head -n 20";
+
+/// Message d'échec si des marqueurs de conflit ont été trouvés, sinon `None`.
+pub fn conflict_marker_message(exit_code: i32, output: &str) -> Option<String> {
+    let hits: Vec<&str> = output
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.contains(":<<<<<<<") || l.contains(":>>>>>>>"))
+        .collect();
+    if exit_code != 0 || hits.is_empty() {
+        return None;
+    }
+    let mut files: Vec<String> = Vec::new();
+    for h in &hits {
+        let mut it = h.splitn(3, ':');
+        if let (Some(f), Some(n)) = (it.next(), it.next()) {
+            let loc = format!("{f}:{n}");
+            if !files.iter().any(|x| x.starts_with(&format!("{f}:"))) {
+                files.push(loc);
+            }
+        }
+    }
+    Some(format!(
+        "[conflit] Marqueurs de conflit Git commités dans {} — build non lancé.\n\
+         [conflit] Résous le conflit (garde une seule version, supprime les lignes <<<<<<< ======= >>>>>>>) puis pousse un nouveau commit.\n",
+        files.join(", ")
+    ))
+}
+
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DeployResult {
     pub ok: bool,
@@ -688,6 +720,17 @@ impl DeployFacade {
         };
         if let Some(ref s) = sha {
             logs.push_str(&format!("[git] HEAD={s}\n"));
+        }
+
+        // Marqueurs de conflit Git commités (incident devforge-esp 11/10) : échec immédiat et
+        // lisible plutôt qu'un build Docker qui plante loin dans les logs.
+        if !cfg!(windows) {
+            if let Ok(r) = self.executor.exec(server, &workdir, CONFLICT_GREP_CMD, 60).await {
+                if let Some(msg) = conflict_marker_message(r.exit_code, &r.output) {
+                    logs.push_str(&msg);
+                    return DeployResult { ok: false, git_sha: sha, logs };
+                }
+            }
         }
 
         // Clone env projet → workdir `.env` (source de vérité = DB / req.env_file).
@@ -2077,5 +2120,28 @@ mod runtime_logs_tests {
         let cmd = docker::docker_runtime_logs("devforge-abc", 5000);
         assert!(cmd.contains("--tail 1000"));
         assert!(cmd.contains("devforge-abc"));
+    }
+}
+
+#[cfg(test)]
+mod conflict_marker_tests {
+    use super::*;
+
+    #[test]
+    fn detects_markers_and_lists_files_once() {
+        let out = "scripts/turso-store.mjs:1186:<<<<<<< HEAD\nscripts/turso-store.mjs:1263:>>>>>>> 692f355 (feat)\nsrc/a.ts:3:<<<<<<< ours\n";
+        let m = conflict_marker_message(0, out).unwrap();
+        assert!(m.contains("scripts/turso-store.mjs:1186"));
+        assert!(m.contains("src/a.ts:3"));
+        assert!(!m.contains(":1263"));
+        assert!(m.contains("build non lancé"));
+    }
+
+    #[test]
+    fn clean_repo_passes() {
+        assert!(conflict_marker_message(1, "").is_none());
+        assert!(conflict_marker_message(0, "").is_none());
+        // `head` peut renvoyer 0 même sans résultat : seul un vrai marqueur compte.
+        assert!(conflict_marker_message(0, "fatal: not a git repository").is_none());
     }
 }
