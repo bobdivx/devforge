@@ -1,5 +1,7 @@
 import type { ComponentChildren, VNode } from 'preact';
 import { CodeBlock } from '../components/chat/CodeBlock';
+import { MathBlock, MathInline } from '../components/chat/MathBlock';
+import { MermaidBlock } from '../components/chat/MermaidBlock';
 
 /*
  * Rendu Markdown minimal et sûr pour les messages d'agents.
@@ -7,6 +9,8 @@ import { CodeBlock } from '../components/chat/CodeBlock';
  * reste affiché comme du texte. Liens limités à http(s) et mailto.
  * Gère : paragraphes, titres, listes, citations, blocs de code, tableaux simples,
  * **gras**, *italique*, `code`, [liens](https://…) et URL nues.
+ * P5-01 : fences colorées (shiki), ```mermaid, maths $…$ / $$…$$ (KaTeX), listes de tâches —
+ * bibliothèques chargées seulement à la première occurrence.
  */
 
 /** Classe commune des réponses d'agents (Workspace, Agents, /app/agent, partage). */
@@ -28,7 +32,7 @@ export function renderInline(text: string, keyBase = 'i'): ComponentChildren[] {
   const out: ComponentChildren[] = [];
   // Ordre : code d'abord (son contenu n'est pas interprété), puis liens, gras, italique, URL.
   const re =
-    /(`+)([^`]+?)\1|\[([^\]\n]+)\]\(([^)\s]+)\)|\*\*([^*\n]+?)\*\*|__([^_\n]+?)__|(^|[^\w*])\*(?=\S)([^*\n]+?)\*(?!\w)|(^|[^\w_])_(?=\S)([^_\n]+?)_(?!\w)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"»])/g;
+    /(`+)([^`]+?)\1|\[([^\]\n]+)\]\(([^)\s]+)\)|\*\*([^*\n]+?)\*\*|__([^_\n]+?)__|(^|[^\w*])\*(?=\S)([^*\n]+?)\*(?!\w)|(^|[^\w_])_(?=\S)([^_\n]+?)_(?!\w)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"»])|(^|[^\\$\w])\$([^\s$](?:[^$\n]*?[^\s$\\])?)\$(?![\w$])/g;
   // Pas de lookbehind : non supporté par les anciens Safari iOS (le bundle entier planterait).
   let last = 0;
   let m: RegExpExecArray | null;
@@ -55,6 +59,9 @@ export function renderInline(text: string, keyBase = 'i'): ComponentChildren[] {
       const prefix = (m[8] !== undefined ? m[7] : m[9]) ?? '';
       if (prefix) out.push(prefix);
       out.push(<em key={k}>{renderInline((m[8] ?? m[10]) as string, k)}</em>);
+    } else if (m[13] !== undefined) {
+      if (m[12]) out.push(m[12]);
+      out.push(<MathInline key={k} tex={m[13]} />);
     } else if (m[11] !== undefined) {
       out.push(
         <a key={k} href={m[11]} target="_blank" rel="noopener noreferrer" class={LINK}>
@@ -77,6 +84,9 @@ function inlineWithBreaks(lines: string[], key: string): ComponentChildren[] {
   });
   return out;
 }
+
+/** Liste de tâches : `- [ ] à faire`, `- [x] fait` (cases non interactives). */
+const TASK = /^\[([ xX])\]\s+/;
 
 const isTableSep = (l: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l);
 const splitRow = (l: string) =>
@@ -102,8 +112,34 @@ export function Markdown({ text, class: className }: { text: string; class?: str
       i++;
       while (i < lines.length && !lines[i].trim().startsWith(fence[1])) body.push(lines[i++]);
       i++;
-      blocks.push(<CodeBlock key={key} code={body.join('\n')} lang={fence[2] || undefined} />);
+      const lang = (fence[2] || '').toLowerCase();
+      const code = body.join('\n');
+      if (lang === 'mermaid') blocks.push(<MermaidBlock key={key} code={code} />);
+      else if (lang === 'math' || lang === 'latex' || lang === 'tex') blocks.push(<MathBlock key={key} tex={code} />);
+      else blocks.push(<CodeBlock key={key} code={code} lang={fence[2] || undefined} />);
       continue;
+    }
+    // Maths en bloc : $$ … $$ (une ou plusieurs lignes).
+    const mathOpen = line.match(/^\s*\$\$(.*)$/);
+    if (mathOpen) {
+      const rest = mathOpen[1];
+      const oneLine = rest.match(/^(.*)\$\$\s*$/);
+      if (oneLine) {
+        blocks.push(<MathBlock key={key} tex={oneLine[1].trim()} />);
+        i++;
+        continue;
+      }
+      const body: string[] = rest.trim() ? [rest] : [];
+      let j = i + 1;
+      while (j < lines.length && !/\$\$\s*$/.test(lines[j])) body.push(lines[j++]);
+      if (j < lines.length) {
+        const last = lines[j].replace(/\$\$\s*$/, '');
+        if (last.trim()) body.push(last);
+        blocks.push(<MathBlock key={key} tex={body.join('\n').trim()} />);
+        i = j + 1;
+        continue;
+      }
+      // $$ jamais refermé (flux en cours) : texte normal.
     }
     if (!line.trim()) {
       i++;
@@ -196,9 +232,25 @@ export function Markdown({ text, class: className }: { text: string; class?: str
       const Tag = ordered ? 'ol' : 'ul';
       blocks.push(
         <Tag key={key} class={ordered ? 'list-decimal space-y-1 pl-5' : 'list-disc space-y-1 pl-5'}>
-          {items.map((it, j) => (
-            <li key={j}>{inlineWithBreaks(it, `${key}-${j}`)}</li>
-          ))}
+          {items.map((it, j) => {
+            const task = !ordered ? it[0].match(TASK) : null;
+            if (!task) return <li key={j}>{inlineWithBreaks(it, `${key}-${j}`)}</li>;
+            const done = task[1] !== ' ';
+            return (
+              <li key={j} class="-ml-5 flex list-none items-start gap-2" data-task={done ? 'done' : 'todo'}>
+                <input
+                  type="checkbox"
+                  checked={done}
+                  disabled
+                  aria-label={done ? 'Fait' : 'À faire'}
+                  class="mt-[3px] h-3.5 w-3.5 shrink-0 accent-[var(--color-accent)]"
+                />
+                <span class={done ? 'text-[var(--color-ink-muted)] line-through decoration-[var(--color-ink-faint)]' : undefined}>
+                  {inlineWithBreaks([it[0].replace(TASK, ''), ...it.slice(1)], `${key}-${j}`)}
+                </span>
+              </li>
+            );
+          })}
         </Tag>,
       );
       continue;
@@ -210,6 +262,7 @@ export function Markdown({ text, class: className }: { text: string; class?: str
       lines[i].trim() &&
       !/^\s*(```|~~~)/.test(lines[i]) &&
       !/^\s*#{1,6}\s/.test(lines[i]) &&
+      !(/^\s*\$\$/.test(lines[i]) && para.length > 0) &&
       !/^\s*>/.test(lines[i]) &&
       !ul.test(lines[i]) &&
       !ol.test(lines[i]) &&

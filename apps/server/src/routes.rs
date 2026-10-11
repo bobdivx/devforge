@@ -1934,6 +1934,15 @@ pub struct ChatBody {
     pub stream: Option<bool>,
     pub project_uuid: Option<String>,
     pub agent_uuid: Option<String>,
+    /// P5-04 : réponse à une question `ask_user`.
+    #[serde(default)]
+    pub answer: Option<crate::rich_chat::AnswerBody>,
+    /// P5-06 : message cité.
+    #[serde(default)]
+    pub reply_to: Option<String>,
+    /// P5-02 : ids de pièces jointes déjà envoyées.
+    #[serde(default)]
+    pub attachments: Vec<String>,
 }
 
 struct ProjectAgentBrief {
@@ -2896,12 +2905,13 @@ fn schedule_preview_repair(
     }
 }
 
-async fn load_agent_context(
+pub(crate) async fn load_agent_context(
     state: &AppState,
     project_uuid: &str,
     agent_uuid: &str,
 ) -> devforge_agent::AgentChatContext {
     let mut ctx = devforge_agent::AgentChatContext {
+        images: Vec::new(),
         project_uuid: Some(project_uuid.to_string()),
         agent_uuid: Some(agent_uuid.to_string()),
         agent_role: None,
@@ -3178,6 +3188,7 @@ async fn agent_chat(
 ) -> Result<axum::response::Response, ApiError> {
     let (user, workspace) = require_auth(&state, &headers).await?;
     let mut ctx = devforge_agent::AgentChatContext {
+        images: Vec::new(),
         project_uuid: body.project_uuid.clone().filter(|s| !s.is_empty()),
         agent_uuid: body.agent_uuid.clone().filter(|s| !s.is_empty()),
         agent_role: None,
@@ -3249,13 +3260,28 @@ async fn agent_chat(
 
     let project_uuid = ctx.project_uuid.clone();
     let agent_uuid = ctx.agent_uuid.clone();
-    let user_message = body.message.clone();
+    let mut user_message = body.message.clone();
     let force_tool = body.tool.clone();
     let force_args = body.arguments.clone();
     let want_stream = body.stream.unwrap_or(false);
     let run_uuid = match (project_uuid.as_ref(), agent_uuid.as_ref()) {
         (Some(project_uuid), Some(agent_uuid)) => {
-            Some(begin_agent_run(&state, project_uuid, agent_uuid, &user_message).await?)
+            {
+                let turn = crate::rich_chat::prepare_user_turn(
+                    &state,
+                    &user.uuid,
+                    project_uuid,
+                    agent_uuid,
+                    &user_message,
+                    body.answer.as_ref(),
+                    body.reply_to.as_deref(),
+                    &body.attachments,
+                )
+                .await?;
+                ctx.images = turn.images;
+                user_message = turn.for_model;
+                Some(begin_agent_run_with(&state, project_uuid, agent_uuid, &turn.persisted, &turn.extras).await?)
+            }
         }
         _ => None,
     };
@@ -3468,14 +3494,15 @@ async fn agent_chat(
     Ok(Json(json!({"data": result})).into_response())
 }
 
-async fn begin_agent_run(
+async fn begin_agent_run_with(
     state: &AppState,
     project_uuid: &str,
     agent_uuid: &str,
     message: &str,
+    extras: &crate::agent_runs::UserTurnExtras,
 ) -> Result<String, ApiError> {
     let run_uuid =
-        crate::agent_runs::record_user_turn(&state.pool, project_uuid, agent_uuid, message)
+        crate::agent_runs::record_user_turn_with(&state.pool, project_uuid, agent_uuid, message, extras)
             .await
             .map_err(ApiError::message)?;
     let claimed = crate::agent_runs::try_claim(&state.pool, &run_uuid)

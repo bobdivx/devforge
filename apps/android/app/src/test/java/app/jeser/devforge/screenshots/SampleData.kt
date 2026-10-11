@@ -234,4 +234,26 @@ object SampleData {
             jobs = listOf(app.jeser.devforge.data.JobInfo("run-0", "worker", "Page contact", "done", "Formulaire ajouté, build OK.", files = 3)),
         ),
     )
+
+    /* Chat riche (P5) : question ask_user, réactions, image jointe, réponse « ✓ ». */
+    val richQuestion = app.jeser.devforge.data.QuestionInfo(
+        "Je pousse le correctif lockfile sur fix/lockfile ?",
+        listOf(
+            app.jeser.devforge.data.QuestionOption("yes", "Oui, publier", action = "approve_publish", style = "primary"),
+            app.jeser.devforge.data.QuestionOption("no", "Non, garder en local"),
+        ),
+    )
+    val projectRich = project.copy(
+        messages = listOf(
+            ChatItem("r1", "user", "Le bouton est décalé sur mobile, regarde :", ago(12), uuid = "u-1",
+                attachments = listOf(app.jeser.devforge.data.AttachmentInfo("a".repeat(64), name = "capture.png", mime = "image/png", width = 1080, height = 1920))),
+            ChatItem("r2", "assistant", "Corrigé en local : le bouton garde sa marge sur 360 px. Build OK.", ago(10), uuid = "a-1",
+                reactions = listOf(app.jeser.devforge.data.ReactionInfo("👍", 1, true), app.jeser.devforge.data.ReactionInfo("🎉", 2, false))),
+            ChatItem("r3", "assistant", "Je pousse le correctif lockfile sur fix/lockfile ?", ago(2), uuid = "a-2", question = richQuestion),
+        ),
+    )
+    val projectRichAnswered = projectRich.copy(
+        messages = projectRich.messages + ChatItem("r4", "user", "Réponse à ta question « Je pousse le correctif lockfile sur fix/lockfile ? » : Non, garder en local", ago(1), uuid = "u-2",
+            answer = app.jeser.devforge.data.AnswerInfo("a-2", "no", "Non, garder en local")),
+    )
 }

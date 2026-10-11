@@ -8,8 +8,10 @@ import { ActivityGroup } from './ActivityGroup';
 import { JobCard, JobCardView } from './JobCard';
 import { MilestoneBar } from './MilestoneBar';
 import { RunBubble } from './RunBubble';
+import { QuestionCard, questionFrom, type QuestionState } from './QuestionCard';
 import { UserActionCard } from './UserActionCard';
-import type { ChatMessage, ChatPersona } from './types';
+import type { QuestionChoice } from './useAgentThread';
+import type { Answer, ChatMessage, ChatPersona } from './types';
 
 export type AssistantMessageProps = {
   m: ChatMessage;
@@ -21,14 +23,32 @@ export type AssistantMessageProps = {
   onApprovePublish?: (text: string) => void;
   onOpenThread?: (workerUuid: string) => void;
   onJobFinished?: (job: Job) => void;
+  questionState?: QuestionState;
+  questionAnswer?: Answer;
+  onAnswer?: (m: ChatMessage, question: string, choice: QuestionChoice) => void;
 };
 
 const noop = () => undefined;
 
 /** Réponse d'agent : jalons, activité, texte (streamé ou Markdown), cartes de job, plan, action requise. */
-export function AssistantMessage({ m, persona, busy, readOnly, onSend = noop, onApprovePublish = noop, onOpenThread, onJobFinished }: AssistantMessageProps) {
+export function AssistantMessage({
+  m,
+  persona,
+  busy,
+  readOnly,
+  onSend = noop,
+  onApprovePublish = noop,
+  onOpenThread,
+  onJobFinished,
+  questionState,
+  questionAnswer,
+  onAnswer,
+}: AssistantMessageProps) {
   // P4-04 : délégation, résultat de worker, déploiement → cartes de job dans le message.
   const jobs = jobsFromToolCalls(m.toolCalls?.length ? m.toolCalls : (m.actions ?? []));
+  // P5-04 : question de l'agent (le texte de réponse = la question : pas de doublon).
+  const question = m.streaming ? null : questionFrom(m.toolCalls);
+  const sameText = !!question && m.content.trim() === question.question.trim();
   return (
     <div class={cn(persona && 'flex items-start gap-2.5')}>
       {persona && <div class="pt-0.5">{persona.smallAvatar}</div>}
@@ -49,7 +69,7 @@ export function AssistantMessage({ m, persona, busy, readOnly, onSend = noop, on
             startedAt={m.startedAt}
             elapsedMs={m.elapsedMs}
           />
-        ) : m.content.trim() ? (
+        ) : m.content.trim() && !sameText ? (
           <div class="max-w-full">
             <Markdown text={m.content} class={MD_MESSAGE_CLASS} />
             {m.provider && !persona && m.provider !== 'system' && (
@@ -71,6 +91,16 @@ export function AssistantMessage({ m, persona, busy, readOnly, onSend = noop, on
             busy={busy}
             onApprovePlan={m.canOpenPr ? undefined : () => onSend('Go — exécute ce plan en local, puis lance la preview.')}
             onOpenPr={() => onApprovePublish(OPEN_PR_MESSAGE)}
+          />
+        )}
+        {question && (
+          <QuestionCard
+            q={question}
+            hideQuestion={sameText && (m.streaming || m.elapsedMs !== undefined)}
+            state={questionAnswer ? 'answered' : (questionState ?? 'stale')}
+            answer={questionAnswer}
+            busy={busy}
+            onAnswer={readOnly || !onAnswer ? undefined : (choice) => onAnswer(m, question.question, choice)}
           />
         )}
         {!readOnly && m.needsUserAction && (

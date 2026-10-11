@@ -9,7 +9,7 @@ import {
 import { applyMilestone, mergeLiveFinal } from '../../lib/activity';
 import { localMessageId, serverMessageId } from '../../lib/chat-messages';
 import { needsUserActionFrom } from '../../lib/publish-approval';
-import type { ChatMessage } from './types';
+import type { Answer, Attachment, ChatMessage, Reaction } from './types';
 
 /** Message tel que renvoyé par l'API (fil d'agent ou partage). */
 export type ServerMessage = {
@@ -18,7 +18,33 @@ export type ServerMessage = {
   content: string;
   provider?: string | null;
   tool_calls_json?: string | null;
+  attachments_json?: string | null;
+  reply_to_uuid?: string | null;
+  reactions_json?: string | null;
 };
+
+function parseJsonArray<T>(raw?: string | null): T[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? (v as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Réponse structurée (P5-04) portée par un message utilisateur. */
+export function answerFrom(tools: AgentToolCall[]): Answer | undefined {
+  const a = tools.find((t) => t.name === 'answer');
+  const r = a?.result as Record<string, unknown> | undefined;
+  if (!r) return undefined;
+  return {
+    answerTo: (r.answer_to as string) ?? null,
+    optionId: (r.option_id as string) ?? null,
+    label: String(r.label ?? ''),
+    text: (r.text as string) ?? null,
+  };
+}
 
 export function parseToolCalls(raw?: string | null): AgentToolCall[] {
   if (!raw) return [];
@@ -34,8 +60,15 @@ export function fromServerMessages(list: ServerMessage[]): ChatMessage[] {
   return list.map((m, i) => {
     const tools = parseToolCalls(m.tool_calls_json);
     const isLast = i === list.length - 1;
+    const attachments = parseJsonArray<Attachment>(m.attachments_json);
+    const reactions = parseJsonArray<Reaction>(m.reactions_json);
     return {
       id: serverMessageId(m.uuid ?? undefined, i),
+      serverUuid: m.uuid ?? undefined,
+      attachments: attachments.length ? attachments : undefined,
+      reactions: reactions.length ? reactions : undefined,
+      replyTo: m.reply_to_uuid ?? undefined,
+      answer: m.role === 'user' ? answerFrom(tools) : undefined,
       role: m.role,
       content: m.content,
       provider: m.provider || undefined,
@@ -127,4 +160,23 @@ export function finalizedMessage(m: ChatMessage, res: AgentChatResult, startedAt
     liveLabel: undefined,
     elapsedMs: now - startedAt,
   };
+}
+
+/**
+ * Après un rechargement sans changement visible : on garde les messages affichés (aucun re-rendu
+ * du run terminé) mais on adopte les uuids serveur (réactions, citations, réponses — P5).
+ */
+export function adoptServerUuids(prev: ChatMessage[], next: ChatMessage[]): ChatMessage[] {
+  let k = 0;
+  let changed = false;
+  const out = prev.map((m) => {
+    if (m.error) return m;
+    const n = next[k++];
+    if (n && n.role === m.role && n.serverUuid && m.serverUuid !== n.serverUuid) {
+      changed = true;
+      return { ...m, serverUuid: n.serverUuid, reactions: n.reactions, attachments: m.attachments ?? n.attachments };
+    }
+    return m;
+  });
+  return changed ? out : prev;
 }

@@ -17,24 +17,52 @@ pub struct RunRow {
     pub content: String,
 }
 
+/// Métadonnées d'un message utilisateur enrichi (P5) : réponse structurée, images, citation.
+#[derive(Debug, Clone)]
+pub struct UserTurnExtras {
+    pub tool_calls_json: String,
+    pub attachments_json: String,
+    pub reply_to_uuid: Option<String>,
+}
+
+impl Default for UserTurnExtras {
+    fn default() -> Self {
+        Self { tool_calls_json: "[]".into(), attachments_json: "[]".into(), reply_to_uuid: None }
+    }
+}
+
 pub async fn record_user_turn(
     pool: &PgPool,
     project_uuid: &str,
     agent_uuid: &str,
     content: &str,
 ) -> Result<String, String> {
+    record_user_turn_with(pool, project_uuid, agent_uuid, content, &UserTurnExtras::default()).await
+}
+
+pub async fn record_user_turn_with(
+    pool: &PgPool,
+    project_uuid: &str,
+    agent_uuid: &str,
+    content: &str,
+    extras: &UserTurnExtras,
+) -> Result<String, String> {
     let message_uuid = new_uuid();
     let now = now_str();
     sqlx::query(
         r#"INSERT INTO agent_messages (
-            uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at
-        ) VALUES ($1, $2, $3, 'user', $4, '[]', '', $5)"#,
+            uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at,
+            attachments_json, reply_to_uuid
+        ) VALUES ($1, $2, $3, 'user', $4, $6, '', $5, $7, $8)"#,
     )
     .bind(&message_uuid)
     .bind(project_uuid)
     .bind(agent_uuid)
     .bind(content)
     .bind(&now)
+    .bind(&extras.tool_calls_json)
+    .bind(&extras.attachments_json)
+    .bind(&extras.reply_to_uuid)
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
@@ -513,7 +541,9 @@ mod tests {
                 content TEXT NOT NULL,
                 tool_calls_json TEXT NOT NULL DEFAULT '[]',
                 provider TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                attachments_json TEXT NOT NULL DEFAULT '[]',
+                reply_to_uuid TEXT NULL
             )"#,
         )
         .execute(&pool)

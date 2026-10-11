@@ -527,6 +527,7 @@ version = "2.0.225"
 dependencies = [
  "async-trait",
  "chrono",
+ "devforge-cron",
  "devforge-database",
  "devforge-deploy",
  "devforge-env",

@@ -44,9 +44,25 @@ pub struct ChatMessage {
     pub tool_call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCallRequest>,
+    /// Images jointes (P5-02), envoyées seulement aux modèles qui voient (`supports_vision`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ImagePart>,
+}
+
+/// Image d'un message utilisateur, en data URL (`data:image/png;base64,…`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ImagePart {
+    pub name: String,
+    pub data_url: String,
 }
 
 impl ChatMessage {
+    /// Ajoute des images à un message utilisateur.
+    pub fn with_images(mut self, images: Vec<ImagePart>) -> Self {
+        self.images = images;
+        self
+    }
+
     pub fn system(content: impl Into<String>) -> Self {
         Self {
             role: Role::System,
@@ -54,6 +70,7 @@ impl ChatMessage {
             name: None,
             tool_call_id: None,
             tool_calls: vec![],
+            images: vec![],
         }
     }
 
@@ -64,6 +81,7 @@ impl ChatMessage {
             name: None,
             tool_call_id: None,
             tool_calls: vec![],
+            images: vec![],
         }
     }
 
@@ -74,6 +92,7 @@ impl ChatMessage {
             name: None,
             tool_call_id: None,
             tool_calls: vec![],
+            images: vec![],
         }
     }
 
@@ -84,6 +103,7 @@ impl ChatMessage {
             name: None,
             tool_call_id: None,
             tool_calls,
+            images: vec![],
         }
     }
 
@@ -94,6 +114,7 @@ impl ChatMessage {
             name: Some(name.into()),
             tool_call_id: Some(tool_call_id.into()),
             tool_calls: vec![],
+            images: vec![],
         }
     }
 }
@@ -125,6 +146,10 @@ pub type DeltaSink<'a> = dyn Fn(&str) + Send + Sync + 'a;
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     fn name(&self) -> &str;
+    /// Le modèle accepte des images en entrée (P5-02). Par défaut : non (texte « [image jointe] »).
+    fn supports_vision(&self) -> bool {
+        false
+    }
     async fn chat(&self, req: ChatRequest) -> Result<AssistantTurn>;
     /// Streaming (P2-02). Par défaut : appelle `chat()` et émet tout le texte en un seul morceau.
     async fn chat_stream(&self, req: ChatRequest, on_delta: &DeltaSink<'_>) -> Result<AssistantTurn> {
@@ -354,5 +379,43 @@ mod tests {
         let (provider, mode) = provider_from_config("omniroute", "", "auto", None);
         assert_eq!(mode, "omniroute");
         assert_eq!(provider.name(), "openai-compatible");
+    }
+}
+
+/// Modèles connus pour accepter des images. `DEVFORGE_LLM_VISION=1|0` force le choix.
+pub fn model_supports_vision(model: &str) -> bool {
+    if let Ok(v) = std::env::var("DEVFORGE_LLM_VISION") {
+        match v.trim() {
+            "1" | "true" | "yes" => return true,
+            "0" | "false" | "no" => return false,
+            _ => {}
+        }
+    }
+    let m = model.to_ascii_lowercase();
+    const VISION: &[&str] = &[
+        "gpt-4o", "gpt-4.1", "gpt-5", "o3", "o4", "claude-3", "claude-sonnet", "claude-opus", "claude-haiku", "gemini",
+        "grok-4", "grok-2-vision", "vision", "llava", "pixtral", "qwen2.5-vl", "qwen-vl", "llama-4", "gemma-3",
+    ];
+    VISION.iter().any(|k| m.contains(k))
+}
+
+#[cfg(test)]
+mod vision_tests {
+    use super::*;
+
+    #[test]
+    fn vision_models_are_detected() {
+        assert!(model_supports_vision("openai/gpt-4o-mini"));
+        assert!(model_supports_vision("anthropic/claude-sonnet-4"));
+        assert!(!model_supports_vision("deepseek-chat"));
+        assert!(!model_supports_vision("llama3.1:8b"));
+    }
+
+    #[test]
+    fn images_skip_serialization_when_empty() {
+        let v = serde_json::to_value(ChatMessage::user("x")).unwrap();
+        assert!(v.get("images").is_none());
+        let m = ChatMessage::user("x").with_images(vec![ImagePart { name: "a.png".into(), data_url: "data:image/png;base64,AA".into() }]);
+        assert_eq!(m.images.len(), 1);
     }
 }

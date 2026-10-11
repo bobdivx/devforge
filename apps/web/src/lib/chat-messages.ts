@@ -8,6 +8,7 @@ export type IdentifiedMessage = {
   content: string;
   toolCalls?: unknown[];
   error?: boolean;
+  reactions?: { emoji: string; count: number; mine: boolean }[];
 };
 
 export const LOCAL_PREFIX = 'local-';
@@ -37,6 +38,8 @@ export function messagesSignature(messages: IdentifiedMessage[]): string {
     last?.id ?? '',
     last?.content.length ?? 0,
     last?.toolCalls?.length ?? 0,
+    // Réactions (P5-03) : une réaction ailleurs dans le fil doit se voir au rechargement.
+    messages.map((m) => (m.reactions ?? []).map((r) => `${r.emoji}${r.count}${r.mine ? '*' : ''}`).join('')).join(','),
   ].join('|');
 }
 

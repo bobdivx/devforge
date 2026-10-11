@@ -1227,6 +1227,10 @@ struct AgentMessageRow {
     tool_calls_json: String,
     provider: String,
     created_at: String,
+    /// P5 : pièces jointes (JSON), message cité, réactions agrégées (JSON).
+    attachments_json: String,
+    reply_to_uuid: Option<String>,
+    reactions_json: String,
 }
 
 async fn list_agent_messages(
@@ -1235,13 +1239,18 @@ async fn list_agent_messages(
     Path((uuid, agent_uuid)): Path<(String, String)>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let _ = auth_project(&state, &headers, &uuid).await?;
-    let rows = sqlx::query_as::<_, AgentMessageRow>(
-        r#"SELECT uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at
-           FROM agent_messages WHERE project_uuid = $1 AND agent_uuid = $2
-           ORDER BY id ASC LIMIT 200"#,
-    )
+    let (user, _) = crate::auth_routes::current_workspace(&state, &headers).await?;
+    let sql = format!(
+        r#"SELECT m.uuid, m.project_uuid, m.agent_uuid, m.role, m.content, m.tool_calls_json, m.provider, m.created_at,
+                  {}
+           FROM agent_messages m WHERE m.project_uuid = $1 AND m.agent_uuid = $2
+           ORDER BY m.id ASC LIMIT 200"#,
+        crate::rich_chat::MESSAGE_EXTRA_COLUMNS
+    );
+    let rows = sqlx::query_as::<_, AgentMessageRow>(&sql)
     .bind(&uuid)
     .bind(&agent_uuid)
+    .bind(&user.uuid)
     .fetch_all(&state.pool)
     .await
     .map_err(|e| {
@@ -1408,13 +1417,17 @@ async fn get_shared_agent_conversation(
             .ok()
             .flatten();
 
-    let rows = sqlx::query_as::<_, AgentMessageRow>(
-        r#"SELECT uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at
-           FROM agent_messages WHERE project_uuid = $1 AND agent_uuid = $2
-           ORDER BY id ASC LIMIT 500"#,
-    )
+    let sql = format!(
+        r#"SELECT m.uuid, m.project_uuid, m.agent_uuid, m.role, m.content, m.tool_calls_json, m.provider, m.created_at,
+                  {}
+           FROM agent_messages m WHERE m.project_uuid = $1 AND m.agent_uuid = $2
+           ORDER BY m.id ASC LIMIT 500"#,
+        crate::rich_chat::MESSAGE_EXTRA_COLUMNS
+    );
+    let rows = sqlx::query_as::<_, AgentMessageRow>(&sql)
     .bind(&project_uuid)
     .bind(&agent_uuid)
+    .bind("")
     .fetch_all(&state.pool)
     .await
     .map_err(|e| {

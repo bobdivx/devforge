@@ -155,6 +155,18 @@ impl ScriptedLlmProvider {
         }
     }
 
+    /// Tour avec plusieurs appels d'outils.
+    pub fn tools(calls: Vec<(&str, &str, serde_json::Value)>) -> AssistantTurn {
+        AssistantTurn {
+            content: String::new(),
+            tool_calls: calls
+                .into_iter()
+                .map(|(id, name, arguments)| ToolCallRequest { id: id.into(), name: name.into(), arguments })
+                .collect(),
+            finish_reason: "tool_calls".into(),
+        }
+    }
+
     pub fn requests(&self) -> Vec<ChatRequest> {
         self.requests.lock().unwrap().clone()
     }
