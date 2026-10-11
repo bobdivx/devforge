@@ -1,0 +1,19 @@
+[package]
+name = "devforge-memory"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+sqlx = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+regex = "1"
+
+[dev-dependencies]
+tokio = { workspace = true }
+devforge-database = { workspace = true }

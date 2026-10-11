@@ -22,6 +22,7 @@ members = [
     "crates/runner",
     "crates/cron",
     "crates/cluster",
+    "crates/memory",
 ]
 
 [workspace.package]
@@ -46,6 +47,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "mul
 zeroize = "1.8"
 devforge-shared = { path = "crates/shared" }
 devforge-agent = { path = "crates/agent" }
+devforge-memory = { path = "crates/memory" }
 devforge-deploy = { path = "crates/deploy" }
 devforge-github = { path = "crates/github" }
 devforge-database = { path = "crates/database" }

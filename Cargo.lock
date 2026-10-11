@@ -533,6 +533,7 @@ dependencies = [
  "devforge-github",
  "devforge-llm",
  "devforge-mcp",
+ "devforge-memory",
  "devforge-shared",
  "libc",
  "regex",
@@ -541,6 +542,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -718,6 +720,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "devforge-memory"
+version = "2.0.222"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "devforge-database",
+ "regex",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "devforge-ports"
 version = "2.0.222"
 dependencies = [
@@ -780,6 +798,7 @@ dependencies = [
  "devforge-github",
  "devforge-llm",
  "devforge-mcp",
+ "devforge-memory",
  "devforge-ports",
  "devforge-proxy",
  "devforge-runner",

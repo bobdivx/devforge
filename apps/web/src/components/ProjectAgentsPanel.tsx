@@ -237,6 +237,11 @@ export type ChatPersona = {
   name: string;
   title: string;
   tagline: string;
+  /**
+   * Ligne d'état facultative affichée à la place du sous-titre (ex. brouillon en cours).
+   * Même hauteur que le sous-titre : son apparition ne décale pas le fil.
+   */
+  status?: ComponentChildren;
   avatar: ComponentChildren;
   smallAvatar: ComponentChildren;
   placeholder: string;
@@ -1349,7 +1354,11 @@ export function ProjectAgentsPanel({
                       <Badge tone="accent">Au travail…</Badge>
                     )}
                   </div>
-                  <p class="mt-0.5 truncate text-xs text-[var(--color-ink-faint)]">{persona.tagline}</p>
+                  <div class="mt-0.5 h-4 min-w-0" aria-live="polite">
+                    {persona.status || (
+                      <p class="truncate text-xs leading-4 text-[var(--color-ink-faint)]">{persona.tagline}</p>
+                    )}
+                  </div>
                 </div>
               </div>
             ) : (

@@ -116,6 +116,41 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return res.json() as Promise<T>;
 }
+/** Mémoire durable des agents (P3). */
+export type MemoryScope = 'user' | 'project' | 'agent';
+export type MemoryTier = 'profile' | 'log' | 'note';
+export type MemoryItem = {
+  uuid: string;
+  scope: MemoryScope;
+  project_uuid?: string | null;
+  project_name?: string | null;
+  agent_uuid?: string | null;
+  agent_name?: string | null;
+  tier: MemoryTier;
+  kind: string;
+  key?: string | null;
+  content: string;
+  source: string;
+  confidence: number;
+  inferred: boolean;
+  pinned: boolean;
+  created_by: string;
+  created_by_name?: string | null;
+  created_at: string;
+  updated_at: string;
+  expires_at?: string | null;
+  superseded_by?: string | null;
+  /** Versions remplacées (historique dépliable). */
+  versions?: number;
+};
+export type MemoryList = {
+  ok: boolean;
+  items: MemoryItem[];
+  has_more: boolean;
+  profile_budget: { used: number; max: number };
+};
+export type MemoryWriteResult = { ok: boolean; outcome: string; uuid?: string | null; replaced?: string };
+
 export type ProjectSync = {
   state:
     | 'up_to_date'
@@ -1980,6 +2015,24 @@ export const api = {
   },
 
   /* ---- Brouillon (workdir local pas encore sur GitHub) ---- */
+  memoryList: (params: { tier?: MemoryTier; scope?: MemoryScope; q?: string; project_uuid?: string; offset?: number } = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') qs.set(k, String(v));
+    const tail = qs.toString();
+    return request<MemoryList>(`/memory${tail ? `?${tail}` : ''}`);
+  },
+  memoryCreate: (body: { content: string; tier: MemoryTier; kind?: string; scope?: 'user' | 'project'; project_uuid?: string; key?: string }) =>
+    request<MemoryWriteResult>('/memory', { method: 'POST', body: JSON.stringify(body) }),
+  memoryCorrect: (uuid: string, content: string) =>
+    request<MemoryWriteResult>(`/memory/${encodeURIComponent(uuid)}`, { method: 'PATCH', body: JSON.stringify({ content }) }),
+  memoryForget: (uuid: string) =>
+    request<{ ok: boolean; forgotten: number }>(`/memory/${encodeURIComponent(uuid)}`, { method: 'DELETE' }),
+  memoryPin: (uuid: string, pinned: boolean) =>
+    request<{ ok: boolean; pinned: boolean }>(`/memory/${encodeURIComponent(uuid)}/${pinned ? 'pin' : 'unpin'}`, { method: 'POST' }),
+  memoryHistory: (uuid: string) =>
+    request<{ ok: boolean; items: MemoryItem[] }>(`/memory/${encodeURIComponent(uuid)}/history`),
+  memoryEraseAll: () =>
+    request<{ ok: boolean; erased: number }>('/memory?all=true&confirm=EFFACER', { method: 'DELETE' }),
   draftStatus: (uuid: string, fetch = false) =>
     request<DraftStatus>(`/projects/${encodeURIComponent(uuid)}/draft${fetch ? '?fetch=1' : ''}`),
   draftDiff: (uuid: string, path?: string) =>

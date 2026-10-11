@@ -10,6 +10,8 @@ devforge-github = { workspace = true }
 devforge-mcp = { workspace = true }
 devforge-env = { workspace = true }
 devforge-llm = { workspace = true }
+devforge-memory = { workspace = true }
+tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = { workspace = true }

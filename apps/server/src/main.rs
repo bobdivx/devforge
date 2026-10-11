@@ -31,6 +31,7 @@ mod android_routes;
 mod mcp_oauth;
 mod mobile_routes;
 mod mcp_routes;
+mod memory_routes;
 mod paths;
 mod platform_sso;
 #[cfg(test)]
@@ -236,6 +237,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     crate::dns_failover::spawn_loop(state.clone());
     routes::resume_deploy_queue(state.clone());
     routes::resume_agent_runs(state.clone());
+    memory_routes::spawn_maintenance(state.clone());
 
     // Background sync for GitHub runners (Docker + Actions status → SQLite snapshot).
     {
@@ -330,6 +332,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(platform_sso::router())
         .merge(routes::router())
         .merge(infra_routes::router())
+        .merge(memory_routes::router())
         .merge(backup_routes::router())
         .merge(sso_routes::router())
         .merge(acme_routes::router())

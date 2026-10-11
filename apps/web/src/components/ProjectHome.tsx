@@ -35,7 +35,7 @@ import { ProjectAgentsPanel, type ChatChip } from './ProjectAgentsPanel';
 import { PersonaAvatar } from './personas/PersonaAvatar';
 import { PreviewModal } from './workspace/PreviewModal';
 import { StatusBadge } from './StatusBadge';
-import { DraftBanner, DraftModal, filesLabel, useDraft } from './DraftPanel';
+import { DraftModal, DraftStatusLine, draftStatusText, filesLabel, useDraft } from './DraftPanel';
 import { PreviewPane } from './workspace/WorkspaceAtelier';
 import type { PreviewServerStatus } from './workspace/WorkspaceTopBar';
 import { Button, FadeIn, HubGrid, HubTile, Modal, Spinner, useToast } from './ui';
@@ -510,8 +510,8 @@ export function ProjectHome({
         </div>
       </div>
 
-      <DraftBanner draft={draft} onOpen={() => setDraftOpen(true)} class="mb-3 sm:mb-4" />
-
+      {/* Le brouillon s'affiche dans l'en-tête du chat (ligne d'état), pas en bandeau :
+          son apparition en fin de run ne décale plus la conversation. */}
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-5">
         {/* Conversation avec Braise */}
         <section
@@ -525,6 +525,7 @@ export function ProjectHome({
               name: PERSONAS.braise.name,
               title: braiseTitle(project?.name),
               tagline: PERSONAS.braise.tagline,
+              status: draftStatusText(draft) ? <DraftStatusLine draft={draft} onOpen={() => setDraftOpen(true)} /> : undefined,
               avatar: <PersonaAvatar persona="braise" size={38} />,
               smallAvatar: <PersonaAvatar persona="braise" size={26} />,
               placeholder: 'Dis à Braise ce que tu veux…',

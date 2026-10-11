@@ -242,6 +242,7 @@ fun SettingsScreen(
     onUpdate: () -> Unit,
     onOpenWeb: () -> Unit,
     onSignOut: () -> Unit,
+    onOpenMemory: () -> Unit = {},
 ) {
     var confirmOut by remember { mutableStateOf(false) }
     TabScaffold("Réglages") { padding ->
@@ -288,6 +289,18 @@ fun SettingsScreen(
                         }
                     }
                     Text("Vérifié toutes les 15 minutes environ, sans service tiers.", color = DfColors.InkFaint, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                }
+            }
+            item(key = "memory") {
+                SectionTitle("Mémoire")
+                Card {
+                    Text("Ce que tes agents retiennent", fontWeight = FontWeight.Medium)
+                    Text("Préférences, infos sur tes machines, journal des déploiements. Tu peux tout corriger ou oublier.", color = DfColors.InkMuted, fontSize = 13.sp)
+                    TextButton(onClick = onOpenMemory, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text("Gérer la mémoire")
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                    }
                 }
             }
             item(key = "app") {
