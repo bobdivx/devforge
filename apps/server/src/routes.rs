@@ -2112,6 +2112,8 @@ pub(crate) async fn wake_project_agent(
     .await
     .map_err(|e| e.to_string())?;
 
+    let title = crate::agent_runs::wake_title(marker, content);
+    let _ = crate::agent_runs::enqueue_with(&state.pool, project_uuid, agent_uuid, &msg_uuid, "wake", Some(&title)).await;
     let _ = trigger_agent_turn(state, project_uuid, agent_uuid).await;
     tracing::info!(project_uuid, agent_uuid, marker, "wake agent lancé");
     Ok(())
@@ -2589,11 +2591,29 @@ pub(crate) async fn trigger_agent_turn(
     execute_claimed_run(state, &run).await
 }
 
-async fn execute_claimed_run(
+pub(crate) async fn execute_claimed_run(
     state: &AppState,
     run: &crate::agent_runs::RunRow,
 ) -> Result<(), String> {
+    let out = execute_claimed_run_inner(state, run).await;
+    crate::run_routes::on_run_finished(state, &run.uuid).await;
+    out
+}
+
+async fn execute_claimed_run_inner(
+    state: &AppState,
+    run: &crate::agent_runs::RunRow,
+) -> Result<(), String> {
+    // P4-01 : progression persistée et diffusée (réveils, workers, reprises).
+    let handle = crate::run_events::start(&state.pool, &run.uuid, &run.agent_uuid).await;
+    let _ = handle.tx.send(devforge_agent::AgentEvent::RunStarted {
+        run_uuid: run.uuid.clone(),
+        message_uuid: run.message_uuid.clone(),
+    });
+    let cancel = handle.cancel.clone();
     let mut ctx = load_agent_context(state, &run.project_uuid, &run.agent_uuid).await;
+    ctx.run_uuid = Some(run.uuid.clone());
+    ctx.cancel = Some(cancel.clone());
     if ctx
         .history
         .last()
@@ -2635,7 +2655,7 @@ async fn execute_claimed_run(
                         None,
                         None,
                         ctx,
-                        None,
+                        Some(handle.tx.clone()),
                         Some((llm, mode)),
                     ),
                 )
@@ -2673,7 +2693,7 @@ async fn execute_claimed_run(
                     None,
                     None,
                     ctx,
-                    None,
+                    Some(handle.tx.clone()),
                     Some((llm, mode)),
                 ),
             )
@@ -2699,7 +2719,7 @@ async fn execute_claimed_run(
         None => {
             state
                 .agent
-                .handle_with_context(&run.content, None, None, ctx)
+                .handle_with_progress(&run.content, None, None, ctx, Some(handle.tx.clone()))
                 .await
         }
     };
@@ -2739,11 +2759,18 @@ async fn execute_claimed_run(
                 return Ok(());
             }
             crate::agent_runs::fail_run(&state.pool, &run.uuid, &run.agent_uuid, &message).await;
+            let _ = handle.tx.send(devforge_agent::AgentEvent::Error { message: message.clone(), retryable: false });
             return Err(message);
         }
     };
     let tools_json = serde_json::to_string(&result.tool_calls).unwrap_or_else(|_| "[]".into());
-    crate::agent_runs::save_assistant_and_finish(
+    let status = if cancel.is_cancelled() { "cancelled" } else { "completed" };
+    let _ = handle.tx.send(devforge_agent::AgentEvent::Reply {
+        content: result.reply.clone(),
+        provider: result.provider.clone(),
+        tool_calls: result.tool_calls.clone(),
+    });
+    crate::agent_runs::save_assistant_and_finish_as(
         &state.pool,
         &run.uuid,
         &run.project_uuid,
@@ -2751,9 +2778,14 @@ async fn execute_claimed_run(
         &result.reply,
         &tools_json,
         &result.provider,
+        status,
     )
     .await
     .map_err(|e| e.to_string())?;
+    drop(handle);
+    if status == "cancelled" {
+        return Ok(());
+    }
     crate::wake_causes::record_run_action(&state.pool, &run.project_uuid, &run.content, &tools_json).await;
     schedule_preview_repair(
         state.clone(),
@@ -2883,6 +2915,8 @@ async fn load_agent_context(
         user_uuid: None,
         memory_profile: None,
         memory_recall: None,
+        run_uuid: None,
+        cancel: None,
     };
     if let Ok(Some((name, role, kind))) = sqlx::query_as::<_, (String, String, String)>(
         "SELECT name, role, COALESCE(kind, '') FROM project_agents WHERE uuid = $1",
@@ -3157,6 +3191,8 @@ async fn agent_chat(
         user_uuid: Some(user.uuid.clone()),
         memory_profile: None,
         memory_recall: None,
+        run_uuid: None,
+        cancel: None,
     };
 
     // Arguments may also carry project/agent (UI historique).
@@ -3231,9 +3267,28 @@ async fn agent_chat(
         let pool = state.pool.clone();
         let repair_state = state.clone();
         let llm_state = state.clone();
-        let (ev_tx, ev_rx) = tokio::sync::mpsc::unbounded_channel::<devforge_agent::AgentEvent>();
+        // P4-01 : run de projet → événements persistés et diffusés (reprise après coupure,
+        // autre onglet, fermeture). Sans projet : canal direct comme avant.
+        let handle = match (run_uuid.as_ref(), agent_uuid.as_ref()) {
+            (Some(r), Some(a)) => Some(crate::run_events::start(&pool, r, a).await),
+            _ => None,
+        };
+        let (ev_tx, ev_rx) = match &handle {
+            Some(h) => (h.tx.clone(), None),
+            None => {
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<devforge_agent::AgentEvent>();
+                (tx, Some(rx))
+            }
+        };
+        let cancel = handle.as_ref().map(|h| h.cancel.clone());
+        if let Some(h) = &handle {
+            ctx.run_uuid = run_uuid.clone();
+            ctx.cancel = Some(h.cancel.clone());
+        }
+        drop(handle);
         let progress_tx = ev_tx.clone();
         let run_uuid_stream = run_uuid.clone();
+        let finish_state = state.clone();
 
         // Octets tout de suite : la résolution LLM (sondes) ne doit pas retarder les en-têtes,
         // sinon Cloudflare renvoie 524 avant le premier octet.
@@ -3282,7 +3337,9 @@ async fn agent_chat(
                     ) {
                         let tools_json = serde_json::to_string(&result.tool_calls)
                             .unwrap_or_else(|_| "[]".into());
-                        if let Err(e) = crate::agent_runs::save_assistant_and_finish(
+                        let cancelled = cancel.as_ref().is_some_and(|c| c.is_cancelled());
+                        let status = if cancelled { "cancelled" } else { "completed" };
+                        if let Err(e) = crate::agent_runs::save_assistant_and_finish_as(
                             &pool,
                             run_uuid,
                             project_uuid,
@@ -3290,11 +3347,12 @@ async fn agent_chat(
                             &result.reply,
                             &tools_json,
                             &result.provider,
+                            status,
                         )
                         .await
                         {
                             tracing::error!(error = %e, "sauvegarde du tour d'agent");
-                        } else {
+                        } else if !cancelled {
                             schedule_preview_repair(
                                 repair_state.clone(),
                                 project_uuid.clone(),
@@ -3324,7 +3382,17 @@ async fn agent_chat(
                     });
                 }
             }
+            if let Some(run_uuid) = run_uuid_stream.as_ref() {
+                crate::run_routes::on_run_finished(&finish_state, run_uuid).await;
+            }
+            drop(ev_tx);
         });
+
+        if let (Some(run), None) = (run_uuid.as_ref(), ev_rx.as_ref()) {
+            return Ok(crate::run_routes::sse_from(crate::run_events::follow(state.pool.clone(), run.clone(), 0)));
+        }
+        let ev_rx = ev_rx.expect("canal direct sans run");
+
 
         let stream = stream::unfold(ev_rx, |mut rx| async move {
             match rx.recv().await {
@@ -3812,7 +3880,7 @@ pub(crate) async fn auth_project(
     Ok((user, workspace, project))
 }
 
-async fn require_auth(
+pub(crate) async fn require_auth(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<(crate::auth_routes::UserRow, crate::auth_routes::TeamRow), ApiError> {

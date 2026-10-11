@@ -319,6 +319,25 @@ class ApiClient(
 
     suspend fun drafts(): List<DraftSummary> = get("/drafts", DraftList.serializer()).drafts
 
+    /* Mémoire des agents (écran natif Réglages → Mémoire). */
+    suspend fun memoryList(tier: String): MemoryList = get("/memory?tier=${enc(tier)}", MemoryList.serializer())
+
+    suspend fun memoryCorrect(uuid: String, content: String): MemoryWriteResult =
+        send("PATCH", "/memory/${enc(uuid)}", buildJsonObject { put("content", content) }, MemoryWriteResult.serializer())
+
+    suspend fun memoryForget(uuid: String): MemoryOk =
+        send("DELETE", "/memory/${enc(uuid)}", buildJsonObject { }, MemoryOk.serializer())
+
+    suspend fun memoryPin(uuid: String, pinned: Boolean): MemoryOk =
+        send("POST", "/memory/${enc(uuid)}/${if (pinned) "pin" else "unpin"}", buildJsonObject { }, MemoryOk.serializer())
+
+    /* Runs d'agent (cartes de job, P4). */
+    suspend fun agentRun(runUuid: String): AgentRunInfo =
+        get("/agent/runs/${enc(runUuid)}", DataEnvelope.serializer(AgentRunInfo.serializer())).data
+
+    suspend fun cancelRun(runUuid: String): RunCancel =
+        send("POST", "/agent/runs/${enc(runUuid)}/cancel", buildJsonObject { }, DataEnvelope.serializer(RunCancel.serializer())).data
+
     suspend fun conversations(): List<Conversation> =
         get("/mobile/conversations", DataEnvelope.serializer(Conversations.serializer())).data.conversations
 

@@ -554,3 +554,126 @@ fn memory_tools_are_available_to_every_role() {
     }
     assert!(roles::role_allows("worker", Some("subagent"), "memory_search", false));
 }
+
+// ---------- P4-03 : délégation ; P4-05 : annulation ----------
+
+#[tokio::test]
+async fn after_delegate_task_workdir_tools_are_refused_and_the_turn_ends() {
+    let mut reg = ToolRegistry::new();
+    let delegate = spy(&mut reg, "delegate_task", json!({"ok": true, "status": "started", "run_uuid": "r-w", "worker_uuid": "w1", "title": "Refonte de l'accueil"}));
+    let write = spy(&mut reg, "write_project_file", json!({"ok": true}));
+    let turns = vec![
+        ScriptedLlmProvider::tool("d1", "delegate_task", json!({"title": "Refonte de l'accueil", "instructions": "refais tout"})),
+        ScriptedLlmProvider::tool("w1", "write_project_file", json!({"path": "src/pages/index.astro", "content": "x"})),
+        ScriptedLlmProvider::text("J'ai lancé un worker pour la refonte de l'accueil."),
+    ];
+    let mut c = ctx("coordinator");
+    c.run_uuid = Some("run-parent".into());
+    let (reply, llm) = run(reg, turns, "refais toute la page d'accueil", c).await;
+    assert_eq!(delegate.load(Ordering::SeqCst), 1);
+    assert_eq!(write.load(Ordering::SeqCst), 0, "le Coordinateur ne fait pas le travail du worker");
+    assert_eq!(reply.tool_calls[1].result["error"], tools::DELEGATED_REFUSAL);
+    assert!(reply.reply.contains("worker"));
+    // Le modèle est prévenu qu'il doit s'arrêter.
+    let last = llm.requests().last().cloned().unwrap();
+    assert!(last.messages.iter().any(|m| m.content == DELEGATED_NUDGE));
+}
+
+#[tokio::test]
+async fn a_model_that_keeps_working_after_delegation_is_stopped() {
+    let mut reg = ToolRegistry::new();
+    spy(&mut reg, "delegate_task", json!({"ok": true, "status": "started", "title": "Refonte"}));
+    let write = spy(&mut reg, "write_project_file", json!({"ok": true}));
+    let turns = vec![
+        ScriptedLlmProvider::tool("d1", "delegate_task", json!({"title": "Refonte", "instructions": "x"})),
+        ScriptedLlmProvider::tool("w1", "write_project_file", json!({"path": "a"})),
+        ScriptedLlmProvider::tool("w2", "write_project_file", json!({"path": "b"})),
+        ScriptedLlmProvider::tool("w3", "write_project_file", json!({"path": "c"})),
+        ScriptedLlmProvider::text("jamais atteint"),
+    ];
+    let (reply, llm) = run(reg, turns, "refais tout", ctx("coordinator")).await;
+    assert_eq!(write.load(Ordering::SeqCst), 0);
+    assert!(reply.reply.starts_with("J'ai lancé un worker : « Refonte »"), "{}", reply.reply);
+    assert_eq!(llm.requests().len(), 3, "arrêt après deux refus");
+}
+
+#[test]
+fn delegate_task_identity_is_forced_by_the_server() {
+    let mut c = ctx("coordinator");
+    c.run_uuid = Some("run-1".into());
+    let mut args = json!({"title": "t", "instructions": "i", "project_uuid": "autre", "caller_agent_uuid": "x", "parent_run_uuid": "y"});
+    inject_tool_defaults("delegate_task", &mut args, &c);
+    assert_eq!(args["project_uuid"], "proj-1");
+    assert_eq!(args["caller_agent_uuid"], "agent-1");
+    assert_eq!(args["parent_run_uuid"], "run-1");
+}
+
+#[test]
+fn only_the_coordinator_can_delegate() {
+    assert!(roles::role_allows("coordinator", None, "delegate_task", false));
+    assert!(!roles::role_allows("worker", Some("subagent"), "delegate_task", false));
+    assert!(!roles::role_allows("ops", None, "delegate_task", false));
+}
+
+struct Slow {
+    started: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl Tool for Slow {
+    fn name(&self) -> &str {
+        "run_workdir_command"
+    }
+    fn description(&self) -> &str {
+        "lent"
+    }
+    fn parameters(&self) -> Value {
+        json!({"type": "object", "properties": {"command": {"type": "string"}}})
+    }
+    async fn execute(&self, _a: Value) -> Result<Value> {
+        self.started.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        Ok(json!({"ok": true}))
+    }
+}
+
+#[tokio::test]
+async fn cancel_stops_a_running_tool_fast_and_runs_nothing_after() {
+    let mut reg = ToolRegistry::new();
+    let started = Arc::new(AtomicUsize::new(0));
+    reg.register(Arc::new(Slow { started: started.clone() }));
+    let after = spy(&mut reg, "write_project_file", json!({"ok": true}));
+    let turns = vec![
+        ScriptedLlmProvider::tool("n1", "run_workdir_command", json!({"command": "npm install"})),
+        ScriptedLlmProvider::tool("w1", "write_project_file", json!({"path": "a"})),
+        ScriptedLlmProvider::text("fini"),
+    ];
+    let token = CancellationToken::new();
+    let mut c = ctx("coordinator");
+    c.cancel = Some(token.clone());
+    let t2 = token.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        t2.cancel();
+    });
+    let t0 = std::time::Instant::now();
+    let (reply, llm) = run(reg, turns, "installe", c).await;
+    assert!(t0.elapsed() < std::time::Duration::from_secs(3), "arrêt en moins de 3 s");
+    assert_eq!(started.load(Ordering::SeqCst), 1);
+    assert_eq!(after.load(Ordering::SeqCst), 0, "aucun outil suivant");
+    assert_eq!(llm.requests().len(), 1);
+    assert_eq!(reply.reply, "Arrêté à ta demande après « npm install ».");
+    assert_eq!(reply.tool_calls[0].result["cancelled"], true);
+}
+
+#[tokio::test]
+async fn cancel_before_the_first_call_does_nothing() {
+    let reg = ToolRegistry::new();
+    let token = CancellationToken::new();
+    token.cancel();
+    let mut c = ctx("coordinator");
+    c.cancel = Some(token);
+    let (reply, llm) = run(reg, vec![ScriptedLlmProvider::text("x")], "go", c).await;
+    assert_eq!(llm.requests().len(), 0);
+    assert_eq!(reply.reply, "Arrêté à ta demande, avant toute action.");
+}

@@ -542,6 +542,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
 ]
@@ -818,6 +819,7 @@ dependencies = [
  "sha2",
  "sqlx",
  "tokio",
+ "tokio-util",
  "tower-http",
  "tracing",
  "tracing-subscriber",

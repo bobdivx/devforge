@@ -447,3 +447,133 @@ fun githubOwnerRepo(url: String?): Pair<String, String>? {
         .find(url?.trim().orEmpty()) ?: return null
     return m.groupValues[1] to m.groupValues[2]
 }
+
+/* ---------------- Mémoire des agents (P3, écran natif) ---------------- */
+
+@Serializable
+data class MemoryItem(
+    val uuid: String,
+    val scope: String = "user",
+    @SerialName("project_name") val projectName: String? = null,
+    @SerialName("agent_name") val agentName: String? = null,
+    val tier: String = "profile",
+    val kind: String = "fact",
+    val content: String = "",
+    val source: String = "",
+    val inferred: Boolean = false,
+    val pinned: Boolean = false,
+    @SerialName("created_by") val createdBy: String = "",
+    @SerialName("created_by_name") val createdByName: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
+    @SerialName("expires_at") val expiresAt: String? = null,
+)
+
+@Serializable
+data class MemoryBudget(val used: Int = 0, val max: Int = 0)
+
+@Serializable
+data class MemoryList(
+    val ok: Boolean = true,
+    val items: List<MemoryItem> = emptyList(),
+    @SerialName("has_more") val hasMore: Boolean = false,
+    @SerialName("profile_budget") val profileBudget: MemoryBudget = MemoryBudget(),
+)
+
+@Serializable
+data class MemoryWriteResult(val ok: Boolean = false, val outcome: String = "", val uuid: String? = null)
+
+@Serializable
+data class MemoryOk(val ok: Boolean = false)
+
+/* ---------------- Runs d'agent et cartes de job (P4) ---------------- */
+
+@Serializable
+data class RunMilestone(val label: String = "", val status: String = "running")
+
+@Serializable
+data class AgentRunInfo(
+    @SerialName("run_uuid") val runUuid: String,
+    val status: String = "running",
+    val kind: String = "chat",
+    val title: String? = null,
+    val progress: List<RunMilestone> = emptyList(),
+    val summary: String? = null,
+    @SerialName("started_at") val startedAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
+)
+
+@Serializable
+data class RunCancel(val ok: Boolean = false, val status: String = "")
+
+/** Carte de job affichée dans le fil (délégation, résultat de worker, mise en ligne). */
+data class JobInfo(
+    val id: String,
+    val kind: String,
+    val title: String,
+    val status: String,
+    val summary: String? = null,
+    val files: Int = 0,
+    val milestones: List<RunMilestone> = emptyList(),
+) {
+    val live: Boolean get() = status == "queued" || status == "running"
+}
+
+/** Statut `agent_runs` / déploiement → statut de carte (`queued|running|done|failed|cancelled`). */
+fun jobStatus(raw: String?): String = when (raw?.lowercase()) {
+    "queued" -> "queued"
+    "completed", "done", "success", "succeeded" -> "done"
+    "failed", "error", "timeout" -> "failed"
+    "cancelled", "canceled" -> "cancelled"
+    else -> "running"
+}
+
+private fun JsonObject.str(key: String): String =
+    (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim().orEmpty()
+
+/** Cartes de job d'un message (un résultat de worker remplace la carte de délégation). */
+fun jobsFromToolCalls(calls: List<ToolCall>): List<JobInfo> {
+    val jobs = LinkedHashMap<String, JobInfo>()
+    for (c in calls) {
+        val r = c.result as? JsonObject ?: continue
+        val okFalse = (r["ok"] as? JsonPrimitive)?.content == "false"
+        when (c.name) {
+            "delegate_task" -> {
+                val id = r.str("run_uuid")
+                if (id.isEmpty() || okFalse || jobs.containsKey(id)) continue
+                jobs[id] = JobInfo(id, "worker", r.str("title").ifEmpty { "Tâche déléguée" }, jobStatus(r.str("status").let { if (it == "started" || it == "already_running") "running" else it }))
+            }
+            "job_result" -> {
+                val id = r.str("run_uuid")
+                if (id.isEmpty()) continue
+                val files = (r["files"] as? kotlinx.serialization.json.JsonArray)?.size ?: 0
+                jobs[id] = JobInfo(id, "worker", r.str("title").ifEmpty { "Tâche" }, jobStatus(r.str("status")), r.str("summary").ifEmpty { null }, files)
+            }
+            "trigger_deploy" -> {
+                val id = r.str("deployment_uuid")
+                if (id.isEmpty() || jobs.containsKey(id)) continue
+                jobs[id] = JobInfo(id, "deploy", "Mise en ligne", jobStatus(r.str("status")), if (okFalse) r.str("error").ifEmpty { null } else null)
+            }
+        }
+    }
+    return jobs.values.toList()
+}
+
+/**
+ * Statut réel des cartes : un `job_result` posté plus tard remplace la carte de délégation du même run,
+ * puis les infos live (`agent_runs`) mettent à jour les workers encore en cours.
+ */
+fun mergeJobStatus(perMessage: List<List<JobInfo>>, live: Map<String, AgentRunInfo> = emptyMap()): List<List<JobInfo>> {
+    val finished = perMessage.flatten().filter { it.kind == "worker" && !it.live }.associateBy { it.id }
+    return perMessage.map { jobs ->
+        jobs.map { j ->
+            val done = finished[j.id]
+            when {
+                j.live && done != null -> j.copy(status = done.status, summary = done.summary ?: j.summary, files = maxOf(done.files, j.files))
+                j.live && live[j.id] != null -> live.getValue(j.id).let { r ->
+                    j.copy(status = jobStatus(r.status), milestones = r.progress, summary = r.summary ?: j.summary)
+                }
+                else -> j
+            }
+        }
+    }
+}

@@ -41,6 +41,8 @@ data class ChatItem(
     val content: String,
     val createdAt: String? = null,
     val hasPlan: Boolean = false,
+    /** Cartes de job (workers délégués, mises en ligne) attachées au message. */
+    val jobs: List<app.jeser.devforge.data.JobInfo> = emptyList(),
 )
 
 /** Logs d'exécution de l'app (conteneur), lecture seule. */
@@ -118,6 +120,7 @@ fun AgentMessage.toChatItem(index: Int) = ChatItem(
     content = content,
     createdAt = createdAt,
     hasPlan = role == "assistant" && hasPlan,
+    jobs = if (role == "assistant") app.jeser.devforge.data.jobsFromToolCalls(toolCalls) else emptyList(),
 )
 
 class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewModel() {
@@ -158,7 +161,20 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
 
     private suspend fun refreshMessages(agent: String) {
         val list = api.messages(uuid, agent)
-        val items = list.mapIndexed { i, m -> m.toChatItem(i) }
+        val raw = list.mapIndexed { i, m -> m.toChatItem(i) }
+        val merged = app.jeser.devforge.data.mergeJobStatus(raw.map { it.jobs })
+        // Workers encore en cours : on lit leur run (jalons, statut) — 3 au plus par rafraîchissement.
+        val liveIds = merged.flatten().filter { it.live && it.kind == "worker" }.map { it.id }.distinct().takeLast(3)
+        val live = liveIds.mapNotNull { id -> runCatching { api.agentRun(id) }.getOrNull()?.let { id to it } }.toMap()
+        val jobs = if (live.isEmpty()) merged else app.jeser.devforge.data.mergeJobStatus(merged, live)
+        val deploys = _state.value.deployments.associateBy { it.uuid }
+        val items = raw.mapIndexed { i, m ->
+            if (m.jobs.isEmpty()) m
+            else m.copy(jobs = jobs[i].map { j ->
+                val d = if (j.kind == "deploy") deploys[j.id] else null
+                if (d == null) j else j.copy(status = app.jeser.devforge.data.jobStatus(d.status), summary = d.errorSummary ?: j.summary)
+            })
+        }
         _state.update { s ->
             // Ne remplace que si le contenu a changé : pas de recomposition inutile ni de saut.
             if (s.messages == items) s else s.copy(messages = items)
@@ -217,7 +233,8 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
             var tick = 0
             while (isActive) {
                 val s = _state.value
-                delay(if (s.latest?.isRunning == true || s.sending) 4_000 else 30_000)
+                val jobLive = s.messages.any { m -> m.jobs.any { it.live } }
+                delay(if (s.latest?.isRunning == true || s.sending) 4_000 else if (jobLive) 6_000 else 30_000)
                 tick++
                 runCatching {
                     refreshDeployments()
@@ -326,6 +343,15 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
     }
 
     fun urlOpened() = _state.update { it.copy(openUrl = null) }
+
+    /** Arrête un worker délégué (annulation réelle côté serveur). */
+    fun cancelJob(runUuid: String) {
+        viewModelScope.launch {
+            runCatching { api.cancelRun(runUuid) }
+                .onSuccess { _state.value.coordinatorUuid?.let { a -> runCatching { refreshMessages(a) } } }
+                .onFailure { e -> _state.update { it.copy(notice = e.message ?: "Arrêt impossible") } }
+        }
+    }
 
     fun send(text: String) {
         val msg = text.trim()

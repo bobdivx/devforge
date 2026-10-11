@@ -254,4 +254,50 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
         }
         shot("notif-prompt")
     }
+
+    /* Réglages → Mémoire (écran natif). */
+    @Test fun memoryProfile() {
+        compose.setContent { Shot { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memory, app.jeser.devforge.ui.memory.MemoryActions()) } }
+        shot("memory-profile")
+        // Onglets : cibles tactiles ≥ 48 dp.
+        val tab = compose.onNodeWithTag("memory-tab-log").getBoundsInRoot()
+        assertTrue("onglet trop petit : ${tab.bottom - tab.top}", (tab.bottom - tab.top).value >= 48f)
+    }
+
+    @Test fun memoryNotes() {
+        compose.setContent { Shot { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memoryNotes, app.jeser.devforge.ui.memory.MemoryActions()) } }
+        shot("memory-notes")
+    }
+
+    @Test fun memoryEmpty() {
+        compose.setContent { Shot { app.jeser.devforge.ui.memory.MemoryScreen(app.jeser.devforge.ui.memory.MemoryUiState(tab = app.jeser.devforge.ui.memory.MemoryTab.Log, loading = false), app.jeser.devforge.ui.memory.MemoryActions()) } }
+        shot("memory-empty")
+    }
+
+    @Test fun memoryForgetConfirm() {
+        compose.setContent {
+            Shot { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memory, app.jeser.devforge.ui.memory.MemoryActions(), initialSheet = app.jeser.devforge.ui.memory.MemorySheet.Forget(SampleData.memoryProfile[1])) }
+        }
+        shot("memory-forget-confirm")
+    }
+
+    @Test fun memoryPinConfirm() {
+        compose.setContent {
+            Shot { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memory, app.jeser.devforge.ui.memory.MemoryActions(), initialSheet = app.jeser.devforge.ui.memory.MemorySheet.Pin(SampleData.memoryProfile[2])) }
+        }
+        shot("memory-pin-confirm")
+    }
+
+    @Test fun memoryEdit() {
+        compose.setContent {
+            Shot { app.jeser.devforge.ui.memory.MemoryScreen(SampleData.memory, app.jeser.devforge.ui.memory.MemoryActions(), initialSheet = app.jeser.devforge.ui.memory.MemorySheet.Edit(SampleData.memoryProfile[0])) }
+        }
+        shot("memory-edit")
+    }
+
+    /* Braise : cartes de job (worker délégué en cours + terminé). */
+    @Test fun projectChatJobs() {
+        compose.setContent { Shot { ProjectScreen(SampleData.projectJobs, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Chat) } }
+        shot("project-chat-jobs")
+    }
 }

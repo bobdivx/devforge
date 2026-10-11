@@ -318,6 +318,24 @@ export type CronRun = {
   finished_at?: string | null;
 };
 
+/** Run d'agent (chat, réveil, worker) — P4. */
+export type AgentRunInfo = {
+  run_uuid: string;
+  project_uuid: string;
+  agent_uuid: string;
+  agent_name?: string | null;
+  status: 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | string;
+  kind: 'chat' | 'wake' | 'worker' | 'routine' | string;
+  title?: string | null;
+  progress?: Array<{ label: string; status: string }>;
+  summary?: string | null;
+  parent_run_uuid?: string | null;
+  cancel_requested?: boolean;
+  started_at: string;
+  updated_at: string;
+  live?: boolean;
+};
+
 export type Deployment = {
   uuid: string;
   status: string;
@@ -802,6 +820,16 @@ export const api = {
         created_at: string;
       }>;
     }>(`/projects/${projectUuid}/agents/${agentUuid}/messages`),
+  /** P4-02 : run en cours d'un fil (pour reprendre son flux). */
+  activeRun: (projectUuid: string, agentUuid: string) =>
+    request<{ data: AgentRunInfo | null }>(`/projects/${projectUuid}/agents/${agentUuid}/active-run`),
+  agentRun: (runUuid: string) => request<{ data: AgentRunInfo }>(`/agent/runs/${encodeURIComponent(runUuid)}`),
+  /** P4-05 : arrêt réel du run (outil en cours interrompu). */
+  cancelAgentRun: (runUuid: string) =>
+    request<{ data: { ok: boolean; status: string } }>(`/agent/runs/${encodeURIComponent(runUuid)}/cancel`, {
+      method: 'POST',
+      body: '{}',
+    }),
   clearAgentMessages: (projectUuid: string, agentUuid: string) =>
     request<{ ok: boolean }>(`/projects/${projectUuid}/agents/${agentUuid}/messages`, {
       method: 'DELETE',

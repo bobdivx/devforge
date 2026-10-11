@@ -7,6 +7,9 @@ import {
   normalizeToolCalls,
   planFromToolCalls,
   streamAgentChat,
+  subscribeRun,
+  type AgentChatResult,
+  type StreamHandlers,
   wroteLocalFiles,
   type AgentPlan,
   type AgentReflection,
@@ -42,7 +45,9 @@ import { AgentPlanActions, toLiveActions, type LiveAction } from './agents/Agent
 import { ActivityGroup } from './chat/ActivityGroup';
 import { MilestoneBar } from './chat/MilestoneBar';
 import { RunBubble } from './chat/RunBubble';
-import { applyMilestone, mergeLiveFinal, type Milestone } from '../lib/activity';
+import { JobCard } from './chat/JobCard';
+import { jobsFromToolCalls, type Job } from '../lib/jobs';
+import { applyMilestone, mergeLiveFinal, type Milestone, visibleActions } from '../lib/activity';
 import { markLaunchedStatus } from '../lib/launched-agents';
 import { Alert, Badge, Button, Card, FadeIn, Spinner, useToast } from './ui';
 
@@ -270,12 +275,18 @@ type MessageItemProps = {
   onRetry(errorId: string): void;
   /** Accord de publication puis message à l'agent. */
   onApprovePublish(text: string): void;
+  /** Carte de job : ouvrir le fil du worker (absent en mode persona). */
+  onOpenThread?: (workerUuid: string) => void;
+  /** Une carte de job vient de se terminer : recharger le fil (carte de résultat). */
+  onJobFinished?: (job: Job) => void;
 };
 
 const WAKE_RE = /COORD-WAKE|Événement projet|Déploiement :/;
 
 /** Un message du fil. Mémoïsé : le polling ne re-rend (ni ne re-parse le Markdown) que ce qui change. */
-function MessageItemView({ m, persona, busy, animate, onSend, onRetry, onApprovePublish }: MessageItemProps) {
+function MessageItemView({ m, persona, busy, animate, onSend, onRetry, onApprovePublish, onOpenThread, onJobFinished }: MessageItemProps) {
+  // P4-04 : délégation, résultat de worker, déploiement → cartes de job dans le message.
+  const jobs = m.role === 'user' ? [] : jobsFromToolCalls(m.toolCalls?.length ? m.toolCalls : (m.actions ?? []));
   const isWake = m.role === 'user' && WAKE_RE.test(m.content);
   const wakeSummary = isWake
     ? m.content.split('\n').slice(0, 3).join(' ').slice(0, 180) + (m.content.length > 180 ? '…' : '')
@@ -322,7 +333,7 @@ function MessageItemView({ m, persona, busy, animate, onSend, onRetry, onApprove
           <div class={cn('space-y-2', persona && 'min-w-0 flex-1')}>
             {m.milestones && m.milestones.length > 0 && <MilestoneBar items={m.milestones} />}
             <ActivityGroup
-              actions={m.actions ?? toLiveActions(m.toolCalls ?? [])}
+              actions={visibleActions(m.actions ?? toLiveActions(m.toolCalls ?? []))}
               reflections={m.reflections ?? []}
               live={!!m.streaming}
               elapsedMs={m.elapsedMs}
@@ -339,11 +350,14 @@ function MessageItemView({ m, persona, busy, animate, onSend, onRetry, onApprove
             ) : m.content.trim() ? (
               <div class="max-w-full">
                 <Markdown text={m.content} class={MD_MESSAGE_CLASS} />
-                {m.provider && !persona && (
+                {m.provider && !persona && m.provider !== 'system' && (
                   <div class="mt-1 text-[11px] text-[var(--color-ink-faint)]">{m.provider}</div>
                 )}
               </div>
             ) : null}
+            {jobs.map((job) => (
+              <JobCard key={job.runUuid} initial={job} onOpenThread={onOpenThread} onFinished={onJobFinished} />
+            ))}
             {m.plan && m.plan.steps.length > 0 && (
               <AgentPlanActions
                 plan={m.plan}
@@ -425,6 +439,9 @@ const MessageItem = memo(
     a.onSend === b.onSend &&
     a.onRetry === b.onRetry &&
     a.onApprovePublish === b.onApprovePublish &&
+    a.onOpenThread === b.onOpenThread &&
+    a.onJobFinished === b.onJobFinished &&
+    (a.m.actions?.length ?? 0) === (b.m.actions?.length ?? 0) &&
     !!a.m.needsUserAction === !!b.m.needsUserAction,
 );
 
@@ -458,6 +475,14 @@ export function ProjectAgentsPanel({
   /** Garde synchrone (le state `busy` capturé dans une closure peut être périmé). */
   const busyRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  /** Run suivi en direct (P4-02) : uuid pour l'arrêt réel (P4-05). */
+  const runRef = useRef<string | null>(null);
+  /** Abonnement à un run déjà en cours (onglet rouvert, réveil, autre appareil). */
+  const followRef = useRef<{ run: string; ctrl: AbortController } | null>(null);
+  const [stopping, setStopping] = useState(false);
+  const [following, setFollowing] = useState(false);
+  /** Brouillon de la réponse en direct (libellé « Arrêt demandé… »). */
+  const liveDraftRef = useRef<string | null>(null);
   /** Un seul message en file pendant un run (envoyé à la fin). */
   const [queue, setQueueState] = useState<ComposerQueue>(EMPTY_QUEUE);
   const queueRef = useRef<ComposerQueue>(EMPTY_QUEUE);
@@ -737,35 +762,47 @@ export function ProjectAgentsPanel({
     void checkLlm();
   }, [projectUuid, threadsMode]);
 
+  // P4-02 : plus de polling 1 s des messages. Les runs se suivent par flux reprenable ;
+  // un polling lent (15 s) du statut des fils détecte un run démarré ailleurs (réveil, worker).
   useEffect(() => {
-    if (!pollEnabled || !selected) return;
-    let pollCount = 0;
-    let idleStreak = 0;
-    const interval = setInterval(async () => {
-      if (busy) return;
+    if (!selected) return;
+    let alive = true;
+    let lastStatus: string | undefined;
+    const check = async () => {
+      if (busyRef.current || followRef.current) return;
       try {
-        await loadMessages(selected);
         const agentsRes = await api.projectAgents(projectUuid);
+        if (!alive) return;
         const currentAgent = agentsRes.data.find((a) => a.uuid === selected);
-        pollCount++;
-        if (currentAgent?.status === 'idle') idleStreak += 1;
-        else idleStreak = 0;
-        if (pollCount > 90 || idleStreak >= 3) {
-          setPollEnabled(false);
-          clearInterval(interval);
-        }
+        const status = currentAgent?.status;
+        if (status === 'working') await attachActiveRun(selected);
+        else if (lastStatus === 'working') await loadMessages(selected);
+        lastStatus = status;
       } catch (err) {
-        console.error('[ProjectAgentsPanel] Poll error:', err);
+        console.error('[ProjectAgentsPanel] statut des fils :', err);
       }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [pollEnabled, selected, projectUuid, busy]);
+    };
+    if (pollEnabled) {
+      setPollEnabled(false);
+      void check();
+    }
+    const interval = setInterval(check, 15_000);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+    };
+  }, [pollEnabled, selected, projectUuid]);
 
   useEffect(() => {
     if (selected) {
       if (!persona) storeThread(projectUuid, selected);
-      void loadMessages(selected);
+      // Run en cours sur ce fil (onglet fermé puis rouvert…) : on reprend son flux.
+      void loadMessages(selected).then(() => attachActiveRun(selected));
     } else setMessages([]);
+    return () => {
+      followRef.current?.ctrl.abort();
+      followRef.current = null;
+    };
   }, [selected, projectUuid]);
 
   // Effacement déclenché ailleurs (Réglages avancés de la page simple).
@@ -868,8 +905,156 @@ export function ProjectAgentsPanel({
     if (send) window.setTimeout(() => void sendRef.current(send), 0);
   }
 
+  /** Stop : arrêt réel du run côté serveur (P4-05) ; le flux reçoit « Arrêté à ta demande… ». */
   function stopLive() {
-    abortRef.current?.abort();
+    const run = runRef.current ?? followRef.current?.run ?? null;
+    if (!run) {
+      abortRef.current?.abort();
+      return;
+    }
+    setStopping(true);
+    const draft = liveDraftRef.current;
+    if (draft) setMessages((prev) => prev.map((m) => (m.id === draft ? { ...m, ack: undefined, liveLabel: 'Arrêt demandé…' } : m)));
+    api.cancelAgentRun(run).catch((e: unknown) => {
+      setStopping(false);
+      toast.push({ title: 'Arrêt impossible', detail: String((e as Error)?.message || e), tone: 'danger' });
+    });
+  }
+
+  /** Écouteurs d'un brouillon de réponse (run envoyé ici ou repris). */
+  function draftHandlers(draftId: string): StreamHandlers {
+    let seq = 0;
+    const updateDraft = (fn: (m: ChatMessage) => ChatMessage) =>
+      setMessages((prev) => prev.map((m) => (m.id === draftId ? fn(m) : m)));
+    return {
+      onRunStarted: (runUuid) => {
+        if (runUuid) runRef.current = runUuid;
+      },
+      onAck: (text) => updateDraft((m) => ({ ...m, ack: text })),
+      onThinking: (label, round, detail) => {
+        updateDraft((m) => ({
+          ...m,
+          // L'accusé de réception reste affiché jusqu'au premier outil.
+          liveLabel: detail?.trim() || (m.ack && !(m.actions ?? []).length) ? m.liveLabel : label,
+          reflections: detail?.trim()
+            ? [...(m.reflections ?? []), { label, detail, round, seq: seq++ }]
+            : m.reflections,
+        }));
+      },
+      onDelta: (text) => updateDraft((m) => ({ ...m, content: m.content + text })),
+      onDeltaReset: (round) =>
+        // Texte d'un tour à outils = raisonnement : il passe dans le groupe d'activité.
+        updateDraft((m) => {
+          const text = m.content.trim();
+          if (!text) return { ...m, content: '' };
+          const label = text.length > 120 ? `${text.slice(0, 120)}…` : text;
+          return {
+            ...m,
+            content: '',
+            reflections: [...(m.reflections ?? []), { label, detail: text, round, seq: seq++ }],
+          };
+        }),
+      onMilestone: (label, status) =>
+        updateDraft((m) => ({
+          ...m,
+          milestones: applyMilestone(m.milestones ?? [], label, status),
+        })),
+      onToolStart: (call) => {
+        const s = seq++;
+        updateDraft((m) => ({
+          ...m,
+          liveLabel: call.label || call.name.replace(/_/g, ' '),
+          actions: [...(m.actions ?? []), { ...call, seq: s, status: 'running' }],
+        }));
+      },
+      onToolDone: (call, ok) => {
+        updateDraft((m) => {
+          const next = [...(m.actions ?? [])];
+          let idx = -1;
+          for (let i = next.length - 1; i >= 0; i--) {
+            const same = call.call_id && next[i].call_id ? next[i].call_id === call.call_id : next[i].name === call.name;
+            if (same && next[i].status === 'running') {
+              idx = i;
+              break;
+            }
+          }
+          if (idx >= 0) next[idx] = { ...next[idx], ...call, seq: next[idx].seq, status: ok ? 'ok' : 'fail' };
+          else next.push({ ...call, seq: seq++, status: ok ? 'ok' : 'fail' });
+          return { ...m, actions: next };
+        });
+      },
+    };
+  }
+
+  /** Finalisation sur le même id : pas de nouveau message, pas de saut. */
+  function finalizeDraft(draftId: string, res: AgentChatResult, startedAt: number) {
+    const tools = res.tool_calls ?? [];
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === draftId
+          ? {
+              ...m,
+              streaming: false,
+              content: res.reply,
+              provider: res.provider || undefined,
+              toolCalls: tools,
+              actions: mergeLiveFinal(m.actions ?? [], tools),
+              reflections: m.reflections?.length ? m.reflections : (res.reflections ?? []),
+              milestones: (m.milestones ?? []).map((x) => (x.status === 'running' ? { ...x, status: 'done' as const } : x)),
+              plan: res.plan,
+              canOpenPr: wroteLocalFiles(tools) || res.executed_plan === true,
+              needsUserAction: needsUserActionFrom(tools),
+              liveLabel: undefined,
+              elapsedMs: Date.now() - startedAt,
+            }
+          : m,
+      ),
+    );
+  }
+
+  /** Reprend le flux d'un run déjà en cours sur ce fil (P4-02). */
+  async function attachActiveRun(agentUuid: string) {
+    if (busyRef.current || followRef.current) return;
+    let run: Awaited<ReturnType<typeof api.activeRun>>['data'] = null;
+    try {
+      run = (await api.activeRun(projectUuid, agentUuid)).data;
+    } catch {
+      return;
+    }
+    if (!run || busyRef.current || followRef.current) return;
+    const ctrl = new AbortController();
+    followRef.current = { run: run.run_uuid, ctrl };
+    setFollowing(true);
+    const draftId = localMessageId();
+    liveDraftRef.current = draftId;
+    const startedAt = Date.parse(run.started_at) || Date.now();
+    setMessages((m) => [
+      ...m,
+      { id: draftId, role: 'assistant', content: '', streaming: true, startedAt, actions: [], reflections: [], milestones: [] },
+    ]);
+    try {
+      const res = await subscribeRun(run.run_uuid, draftHandlers(draftId), ctrl.signal);
+      finalizeDraft(draftId, res, startedAt);
+    } catch {
+      if (ctrl.signal.aborted) return;
+      setMessages((prev) => prev.filter((m) => m.id !== draftId));
+    } finally {
+      if (followRef.current?.ctrl === ctrl) followRef.current = null;
+      if (liveDraftRef.current === draftId) liveDraftRef.current = null;
+      setFollowing(!!followRef.current);
+      setStopping(false);
+      if (!ctrl.signal.aborted) {
+        markLaunchedStatus(agentUuid, 'idle');
+        // Run fini ou annulé : plus de badge « Au travail… » en attendant le prochain relevé.
+        const idle = <T extends { uuid: string; status?: string | null }>(a: T): T =>
+          a.uuid === agentUuid && a.status === 'working' ? { ...a, status: 'idle' } : a;
+        setAgents((prev) => prev.map(idle));
+        setThreads((prev) => prev.map(idle));
+        // Message persisté (et éventuelles cartes) : le fil se recale sur le serveur.
+        void loadMessages(agentUuid);
+        flushQueue();
+      }
+    }
   }
 
   async function shareChat() {
@@ -895,8 +1080,8 @@ export function ProjectAgentsPanel({
   async function sendText(text: string) {
     const trimmed = text.trim();
     if (!trimmed || !selected) return;
-    if (busyRef.current) {
-      // Run en cours : la saisie reste libre, l'envoi part à la fin.
+    if (busyRef.current || followRef.current) {
+      // Run en cours (ici ou repris) : la saisie reste libre, l'envoi part à la fin.
       setQueue(enqueue(queueRef.current, trimmed));
       setInput('');
       return;
@@ -910,9 +1095,8 @@ export function ProjectAgentsPanel({
     // Brouillon de réponse créé tout de suite : points de frappe, puis texte streamé (même id à la fin).
     const draftId = localMessageId();
     const startedAt = Date.now();
-    let seq = 0;
-    const updateDraft = (fn: (m: ChatMessage) => ChatMessage) =>
-      setMessages((prev) => prev.map((m) => (m.id === draftId ? fn(m) : m)));
+    runRef.current = null;
+    liveDraftRef.current = draftId;
     setMessages((m) => [
       ...m,
       { id: localMessageId(), role: 'user', content: trimmed },
@@ -953,83 +1137,11 @@ export function ProjectAgentsPanel({
           project_uuid: projectUuid,
           agent_uuid: selected,
         },
-        {
-          onAck: (text) => updateDraft((m) => ({ ...m, ack: text })),
-          onThinking: (label, round, detail) => {
-            updateDraft((m) => ({
-              ...m,
-              // L'accusé de réception reste affiché jusqu'au premier outil.
-              liveLabel: detail?.trim() || (m.ack && !(m.actions ?? []).length) ? m.liveLabel : label,
-              reflections: detail?.trim()
-                ? [...(m.reflections ?? []), { label, detail, round, seq: seq++ }]
-                : m.reflections,
-            }));
-          },
-          onDelta: (text) => updateDraft((m) => ({ ...m, content: m.content + text })),
-          onDeltaReset: (round) =>
-            // Texte d'un tour à outils = raisonnement : il passe dans le groupe d'activité.
-            updateDraft((m) => {
-              const text = m.content.trim();
-              if (!text) return { ...m, content: '' };
-              const label = text.length > 120 ? `${text.slice(0, 120)}…` : text;
-              return {
-                ...m,
-                content: '',
-                reflections: [...(m.reflections ?? []), { label, detail: text, round, seq: seq++ }],
-              };
-            }),
-          onMilestone: (label, status) =>
-            updateDraft((m) => ({
-              ...m,
-              milestones: applyMilestone(m.milestones ?? [], label, status),
-            })),
-          onToolStart: (call) => {
-            const s = seq++;
-            updateDraft((m) => ({
-              ...m,
-              liveLabel: call.label || call.name.replace(/_/g, ' '),
-              actions: [...(m.actions ?? []), { ...call, seq: s, status: 'running' }],
-            }));
-          },
-          onToolDone: (call, ok) => {
-            updateDraft((m) => {
-              const next = [...(m.actions ?? [])];
-              let idx = -1;
-              for (let i = next.length - 1; i >= 0; i--) {
-                const same = call.call_id && next[i].call_id ? next[i].call_id === call.call_id : next[i].name === call.name;
-                if (same && next[i].status === 'running') {
-                  idx = i;
-                  break;
-                }
-              }
-              if (idx >= 0) next[idx] = { ...next[idx], ...call, seq: next[idx].seq, status: ok ? 'ok' : 'fail' };
-              else next.push({ ...call, seq: seq++, status: ok ? 'ok' : 'fail' });
-              return { ...m, actions: next };
-            });
-          },
-        },
+        draftHandlers(draftId),
         controller.signal,
       );
       const tools = res.tool_calls ?? [];
-      const needsUserAction = needsUserActionFrom(tools);
-      const elapsedMs = Date.now() - startedAt;
-
-      // Finalisation sur le même id : pas de nouveau message, pas de saut.
-      updateDraft((m) => ({
-        ...m,
-        streaming: false,
-        content: res.reply,
-        provider: res.provider || undefined,
-        toolCalls: tools,
-        actions: mergeLiveFinal(m.actions ?? [], tools),
-        reflections: m.reflections?.length ? m.reflections : (res.reflections ?? []),
-        milestones: (m.milestones ?? []).map((x) => (x.status === 'running' ? { ...x, status: 'done' as const } : x)),
-        plan: res.plan,
-        canOpenPr: wroteLocalFiles(tools) || res.executed_plan === true,
-        needsUserAction,
-        liveLabel: undefined,
-        elapsedMs,
-      }));
+      finalizeDraft(draftId, res, startedAt);
       api
         .llmStatus()
         .then((s) => setLlmMode(s.mode || llmMode))
@@ -1051,7 +1163,7 @@ export function ProjectAgentsPanel({
       }
     } catch (err: unknown) {
       if (controller.signal.aborted || (err as Error)?.name === 'AbortError') {
-        // Stop : seul l'affichage en direct s'arrête ; le run continue côté serveur,
+        // Stop sans run persistant (repli) : seul l'affichage s'arrête ; le run continue côté serveur,
         // le fil repasse en polling pour récupérer la réponse.
         aborted = true;
         setMessages((prev) => prev.filter((m) => m.id !== draftId));
@@ -1059,11 +1171,14 @@ export function ProjectAgentsPanel({
       } else {
         const msg = String((err as Error).message || err);
         // La carte d'erreur (avec « Réessayer ») remplace le brouillon, au même endroit.
-        updateDraft(() => ({ id: draftId, role: 'assistant', content: msg, error: true }));
+        setMessages((prev) => prev.map((m) => (m.id === draftId ? { id: draftId, role: 'assistant', content: msg, error: true } : m)));
       }
     } finally {
       busyRef.current = false;
       abortRef.current = null;
+      runRef.current = null;
+      liveDraftRef.current = null;
+      setStopping(false);
       setBusy(false);
       markLaunchedStatus(selected, aborted ? 'working' : 'idle');
       if (aborted) {
@@ -1130,6 +1245,25 @@ export function ProjectAgentsPanel({
     }
   };
   const onApprovePublishStable = useCallback((t: string) => void approveRef.current(t), []);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  /** Fin d'une carte de job : la carte de résultat arrive dans le fil (posée par le serveur). */
+  const onJobFinishedStable = useCallback(() => {
+    const id = selectedRef.current;
+    if (!id) return;
+    for (const delay of [1200, 4000]) {
+      window.setTimeout(() => {
+        if (selectedRef.current === id && !busyRef.current) void loadMessagesRef.current(id);
+      }, delay);
+    }
+  }, []);
+  const loadMessagesRef = useRef(loadMessages);
+  loadMessagesRef.current = loadMessages;
+  const openThreadRef = useRef<(id: string) => void>(() => undefined);
+  openThreadRef.current = (workerUuid: string) => {
+    void loadAgents(workerUuid).then(() => setSelected(workerUuid));
+  };
+  const onOpenThreadStable = useCallback((id: string) => openThreadRef.current(id), []);
 
   function onChip(chip: ChatChip) {
     if (chip.onClick) {
@@ -1350,7 +1484,7 @@ export function ProjectAgentsPanel({
                     <span class="rounded-full border border-[var(--color-line)] bg-white/[0.04] px-2 py-0.5 text-[11px] text-[var(--color-ink-muted)]">
                       {persona.title}
                     </span>
-                    {current?.status === 'working' && !busy && (
+                    {current?.status === 'working' && !busy && !following && (
                       <Badge tone="accent">Au travail…</Badge>
                     )}
                   </div>
@@ -1488,6 +1622,8 @@ export function ProjectAgentsPanel({
                 onSend={onSendStable}
                 onRetry={onRetryStable}
                 onApprovePublish={onApprovePublishStable}
+                onOpenThread={persona ? undefined : onOpenThreadStable}
+                onJobFinished={onJobFinishedStable}
               />
             ))}
           </div>
@@ -1519,8 +1655,8 @@ export function ProjectAgentsPanel({
             value={input}
             onChange={setInput}
             onSubmit={(text) => void sendText(text)}
-            busy={busy}
-            disabled={!selected}
+            busy={busy || following}
+            disabled={!selected || stopping}
             onStop={stopLive}
             queued={queue.queued}
             onCancelQueued={() => setQueue(cancelQueued(queueRef.current))}

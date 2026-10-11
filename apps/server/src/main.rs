@@ -42,6 +42,8 @@ mod project_oidc_routes;
 mod project_pg;
 mod project_pg_routes;
 mod routes;
+mod run_events;
+mod run_routes;
 mod runner_routes;
 mod runner_store;
 mod security;
@@ -236,6 +238,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     crate::dns::spawn_dns_loop(state.clone());
     crate::dns_failover::spawn_loop(state.clone());
     routes::resume_deploy_queue(state.clone());
+    run_routes::install_launcher(&state);
     routes::resume_agent_runs(state.clone());
     memory_routes::spawn_maintenance(state.clone());
 
@@ -333,6 +336,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(routes::router())
         .merge(infra_routes::router())
         .merge(memory_routes::router())
+        .merge(run_routes::router())
         .merge(backup_routes::router())
         .merge(sso_routes::router())
         .merge(acme_routes::router())

@@ -164,3 +164,11 @@ export function applyMilestone(list: Milestone[], label: string, status: Milesto
   next[i] = { label, status };
   return next;
 }
+
+/**
+ * Outils montrés en pastilles : la carte de job (`job_result`) a son propre rendu, et les appels
+ * refusés après une délégation (`code: delegated`) ne sont pas de vrais échecs.
+ */
+export function visibleActions<T extends { name: string; result?: Record<string, unknown> | null }>(actions: T[]): T[] {
+  return actions.filter((a) => a.name !== 'job_result' && a.result?.code !== 'delegated');
+}

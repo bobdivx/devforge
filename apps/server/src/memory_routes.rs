@@ -381,7 +381,7 @@ async fn deployment_sha(state: &AppState, dep_uuid: &str) -> Option<String> {
     sha.as_deref().and_then(short_sha)
 }
 
-async fn system_write(state: &AppState, project_uuid: &str, kind: &str, key: Option<String>, content: String, source_ref: &str) {
+pub(crate) async fn system_write(state: &AppState, project_uuid: &str, kind: &str, key: Option<String>, content: String, source_ref: &str) {
     let Some(store) = state.registry.memory() else { return };
     let Some(owner) = project_owner(&state.pool, project_uuid).await else {
         tracing::debug!(project_uuid, "mémoire : pas de propriétaire, journal non écrit");
@@ -466,6 +466,10 @@ pub fn spawn_maintenance(state: AppState) {
             let Some(store) = state.registry.memory() else { return };
             if !writable(&state).await {
                 continue;
+            }
+            let n = crate::run_events::purge(&state.pool).await;
+            if n > 0 {
+                tracing::info!(purged = n, "événements de run de plus de 14 jours supprimés");
             }
             match store.purge_expired().await {
                 Ok(0) => {}

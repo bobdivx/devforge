@@ -110,6 +110,7 @@ data class ProjectActions(
     val onDraftUpdate: () -> Unit = {},
     val onDraftValidatedSeen: () -> Unit = {},
     val onUndoShown: () -> Unit = {},
+    val onCancelJob: (String) -> Unit = {},
 )
 
 /** Feuilles de la page app (une seule ouverte à la fois). */
@@ -652,7 +653,7 @@ private fun ChatPane(
                 }
             }
             items(state.messages, key = { it.key }) { m ->
-                MessageRow(m, showPlanAction = m.key == lastPlanKey && canChat, onBuild = { actions.onSend(ChipText.BUILD_PLAN) })
+                MessageRow(m, showPlanAction = m.key == lastPlanKey && canChat, onBuild = { actions.onSend(ChipText.BUILD_PLAN) }, onCancelJob = actions.onCancelJob)
             }
             if (state.sending) {
                 item(key = "thinking") { ThinkingRow(state.progress) }
@@ -737,7 +738,7 @@ private fun ChatPane(
 }
 
 @Composable
-private fun MessageRow(m: ChatItem, showPlanAction: Boolean, onBuild: () -> Unit) {
+private fun MessageRow(m: ChatItem, showPlanAction: Boolean, onBuild: () -> Unit, onCancelJob: (String) -> Unit = {}) {
     when (m.role) {
         "user" -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
             Surface(
@@ -763,6 +764,7 @@ private fun MessageRow(m: ChatItem, showPlanAction: Boolean, onBuild: () -> Unit
                         MarkdownText(m.content.ifBlank { "…" }, Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
                     }
                 }
+                m.jobs.forEach { job -> JobCardRow(job, onCancel = { onCancelJob(job.id) }) }
                 if (showPlanAction) {
                     OutlinedButton(onClick = onBuild, modifier = Modifier.heightIn(min = 48.dp)) {
                         Text("🧱 Construire en brouillon")

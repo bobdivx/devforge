@@ -293,13 +293,14 @@ fun SettingsScreen(
             }
             item(key = "memory") {
                 SectionTitle("Mémoire")
-                Card {
-                    Text("Ce que tes agents retiennent", fontWeight = FontWeight.Medium)
-                    Text("Préférences, infos sur tes machines, journal des déploiements. Tu peux tout corriger ou oublier.", color = DfColors.InkMuted, fontSize = 13.sp)
-                    TextButton(onClick = onOpenMemory, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Text("Gérer la mémoire")
-                        Spacer(Modifier.width(6.dp))
-                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                Card(onClick = onOpenMemory) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text("🧠", fontSize = 24.sp)
+                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                            Text("Ce que tes agents retiennent", fontWeight = FontWeight.Medium)
+                            Text("Préférences, machines, journal des déploiements. Corrige, épingle ou oublie.", color = DfColors.InkMuted, fontSize = 13.sp)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Ouvrir la mémoire", tint = DfColors.InkFaint)
                     }
                 }
             }

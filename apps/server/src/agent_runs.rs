@@ -158,6 +158,21 @@ pub async fn save_assistant_and_finish(
     tools_json: &str,
     provider: &str,
 ) -> Result<(), sqlx::Error> {
+    save_assistant_and_finish_as(pool, run_uuid, project_uuid, agent_uuid, reply, tools_json, provider, "completed").await
+}
+
+/// Fin de tour avec un statut explicite (`completed` | `cancelled`, P4-05).
+#[allow(clippy::too_many_arguments)]
+pub async fn save_assistant_and_finish_as(
+    pool: &PgPool,
+    run_uuid: &str,
+    project_uuid: &str,
+    agent_uuid: &str,
+    reply: &str,
+    tools_json: &str,
+    provider: &str,
+    status: &str,
+) -> Result<(), sqlx::Error> {
     let now = now_str();
     sqlx::query(
         r#"INSERT INTO agent_messages (
@@ -174,7 +189,12 @@ pub async fn save_assistant_and_finish(
     .execute(pool)
     .await?;
     crate::deploy_queue::record_tool_trace(pool, project_uuid, tools_json).await;
-    finish(pool, run_uuid, "completed", None).await?;
+    finish(pool, run_uuid, status, None).await?;
+    let _ = sqlx::query("UPDATE agent_runs SET summary = $1 WHERE uuid = $2")
+        .bind(summary_line(reply))
+        .bind(run_uuid)
+        .execute(pool)
+        .await;
     let _ =
         sqlx::query("UPDATE project_agents SET status = 'idle', updated_at = $1 WHERE uuid = $2")
             .bind(&now)
@@ -193,6 +213,71 @@ pub async fn fail_run(pool: &PgPool, run_uuid: &str, agent_uuid: &str, error: &s
             .bind(agent_uuid)
             .execute(pool)
             .await;
+}
+
+/// Première ligne utile d'une réponse, bornée (résumé de carte de job).
+pub fn summary_line(reply: &str) -> String {
+    let line = reply
+        .lines()
+        .map(|l| l.trim().trim_start_matches(['#', '*', '-', '>', ' ']).trim())
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    clip(line, 160)
+}
+
+/// Run d'un message système (réveil, worker) avec son type et son titre (P4-01).
+pub async fn enqueue_with(
+    pool: &PgPool,
+    project_uuid: &str,
+    agent_uuid: &str,
+    message_uuid: &str,
+    kind: &str,
+    title: Option<&str>,
+) -> Result<String, String> {
+    let uuid = enqueue(pool, project_uuid, agent_uuid, message_uuid).await?;
+    let _ = sqlx::query("UPDATE agent_runs SET kind = $1, title = COALESCE(title, $2) WHERE uuid = $3")
+        .bind(kind)
+        .bind(title.map(|t| clip(t, 80)))
+        .bind(&uuid)
+        .execute(pool)
+        .await;
+    Ok(uuid)
+}
+
+/// Titre lisible d'un réveil : marqueur ou première ligne.
+pub fn wake_title(marker: &str, content: &str) -> String {
+    let m = marker.trim().trim_matches(['[', ']']).trim();
+    if !m.is_empty() {
+        return clip(m, 80);
+    }
+    clip(content.lines().find(|l| !l.trim().is_empty()).unwrap_or("Réveil").trim(), 80)
+}
+
+/// Prochain worker en file d'attente du projet, passé en `pending` (P4-03).
+pub async fn promote_queued(pool: &PgPool, project_uuid: &str) -> Option<(String, String)> {
+    let active: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM agent_runs WHERE project_uuid = $1 AND kind = 'worker' AND status IN ('pending','running')",
+    )
+    .bind(project_uuid)
+    .fetch_one(pool)
+    .await
+    .ok()?;
+    if active >= devforge_agent::MAX_ACTIVE_WORKERS {
+        return None;
+    }
+    sqlx::query_as::<_, (String, String)>(
+        r#"UPDATE agent_runs SET status = 'pending', updated_at = $2
+           WHERE uuid = (SELECT uuid FROM agent_runs WHERE project_uuid = $1 AND kind = 'worker' AND status = 'queued'
+                         ORDER BY created_at ASC LIMIT 1)
+             AND status = 'queued'
+           RETURNING uuid, agent_uuid"#,
+    )
+    .bind(project_uuid)
+    .bind(now_str())
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
 }
 
 /// Derniers messages, avec un extrait des outils sur les réponses assistant.

@@ -1,4 +1,5 @@
 mod agent_threads;
+mod delegate;
 mod deploy;
 mod deploy_logs;
 mod env;
@@ -23,6 +24,7 @@ pub use agent_threads::{
     CreateProjectAgentTool, ListAgentMessagesTool, ListAgentToolFailuresTool,
     ListProjectAgentsTool,
 };
+pub use delegate::{set_worker_launcher, DelegateTaskTool, WorkerLauncher, DELEGATED_REFUSAL, MAX_ACTIVE_WORKERS};
 pub use deploy::{CancelDeploymentTool, ListDeploymentsTool, TriggerDeployTool};
 pub use deploy_logs::GetDeploymentLogsTool;
 pub use env::{ListEnvVarsTool, UpsertEnvVarsTool};
