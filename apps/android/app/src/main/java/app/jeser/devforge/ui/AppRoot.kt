@@ -16,6 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -53,8 +55,8 @@ private fun HomeTab.icon(): ImageVector = when (this) {
 }
 
 /**
- * Accueil : barre de navigation en bas (téléphone) ou rail (tablette) avec Apps, Braise, Alertes, Réglages.
- * La page d'une app s'ouvre en plein écran (la discussion garde toute la place).
+ * Accueil : barre de navigation en bas (téléphone) ou rail (tablette) avec Apps, Braise, Réglages.
+ * La page d'une app et la mémoire s'ouvrent au-dessus de l'onglet, la navigation reste visible.
  */
 @Composable
 fun HomeRoot(
@@ -87,25 +89,36 @@ fun HomeRoot(
     }
     var draftFor by rememberSaveable { mutableStateOf<String?>(null) }
     var memoryOpen by rememberSaveable { mutableStateOf(false) }
-    if (memoryOpen && selected == null) {
-        BackHandler { memoryOpen = false }
-        MemoryRoute(graph, onBack = { memoryOpen = false })
-        return
+    // Écran plein (app, mémoire) : la barre Apps / Braise / Réglages reste visible dessous.
+    val screen: (@Composable (Modifier) -> Unit)? = when {
+        selected != null -> { m ->
+            BackHandler { draftFor = null; onSelect(null) }
+            Box(m) {
+                ProjectRoute(
+                    graph, selected,
+                    onBack = { draftFor = null; onSelect(null) },
+                    onChanged = { appsVm.refresh(); hubVm.refreshConversations() },
+                    openDraft = draftFor == selected,
+                )
+            }
+        }
+        memoryOpen -> { m ->
+            BackHandler { memoryOpen = false }
+            Box(m) { MemoryRoute(graph, onBack = { memoryOpen = false }) }
+        }
+        else -> null
     }
-    if (selected != null) {
-        BackHandler { draftFor = null; onSelect(null) }
-        ProjectRoute(
-            graph, selected,
-            onBack = { draftFor = null; onSelect(null) },
-            onChanged = { appsVm.refresh(); hubVm.refreshConversations() },
-            openDraft = draftFor == selected,
-        )
-        return
-    }
-    if (tab != HomeTab.Apps) BackHandler { tab = HomeTab.Apps }
+    if (screen == null && tab != HomeTab.Apps) BackHandler { tab = HomeTab.Apps }
     HomeShell(
         tab = tab,
-        onTab = { tab = it },
+        onTab = {
+            // Toucher un onglet depuis une app / la mémoire : on ferme l'écran et on va sur l'onglet.
+            draftFor = null
+            memoryOpen = false
+            if (selected != null) onSelect(null)
+            tab = it
+        },
+        screen = screen,
         apps = apps,
         hub = hub,
         onRefreshApps = { appsVm.refresh() },
@@ -151,12 +164,14 @@ fun HomeShell(
     onOpenMemory: () -> Unit = {},
     onSignOut: () -> Unit = {},
     initialInboxOpen: Boolean = false,
+    /** Écran ouvert par-dessus l'onglet (page d'app, mémoire…) ; la navigation reste visible. */
+    screen: (@Composable (Modifier) -> Unit)? = null,
 ) {
     val badges = mapOf(
         HomeTab.Braise to hub.waiting.size,
         HomeTab.Settings to if (hub.updateAvailable) 1 else 0,
     )
-    val content: @Composable (Modifier) -> Unit = { m ->
+    val content: @Composable (Modifier) -> Unit = screen ?: { m ->
         Box(m) {
             when (tab) {
                 HomeTab.Apps -> AppsScreen(
@@ -171,12 +186,27 @@ fun HomeShell(
             }
         }
     }
+    MainNavFrame(tab = tab, onTab = onTab, badges = badges, content = content)
+}
+
+/**
+ * Navigation principale toujours visible : barre du bas (téléphone) ou rail (tablette).
+ * Sur téléphone, la barre se replie seulement quand le clavier est ouvert (la saisie reste visible).
+ */
+@Composable
+fun MainNavFrame(
+    tab: HomeTab,
+    onTab: (HomeTab) -> Unit,
+    badges: Map<HomeTab, Int> = emptyMap(),
+    content: @Composable (Modifier) -> Unit,
+) {
     BoxWithConstraints(Modifier.fillMaxSize().background(DfColors.Bg)) {
         if (maxWidth >= 600.dp) {
             Row(Modifier.fillMaxSize()) {
                 NavigationRail(
                     containerColor = DfColors.Bg,
-                    modifier = Modifier.fillMaxHeight().windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Vertical + WindowInsetsSides.Start)),
+                    modifier = Modifier.fillMaxHeight().testTag("main-nav")
+                        .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Vertical + WindowInsetsSides.Start)),
                 ) {
                     Spacer(Modifier.height(8.dp))
                     HomeTab.entries.forEach { t ->
@@ -190,21 +220,29 @@ fun HomeShell(
                     }
                 }
                 VerticalDivider(color = DfColors.Line)
-                content(Modifier.weight(1f).fillMaxHeight())
+                // Le rail gère le bord gauche : le contenu ne le réserve pas une 2e fois.
+                content(Modifier.weight(1f).fillMaxHeight().consumeWindowInsets(WindowInsets.systemBars.only(WindowInsetsSides.Start)))
             }
         } else {
+            // Hauteur réelle du clavier (isImeVisible vaut vrai tant qu'aucun inset n'est reçu).
+            val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
             Column(Modifier.fillMaxSize()) {
                 // La barre du bas gère l'encoche de navigation : le contenu ne la réserve pas une 2e fois.
-                content(Modifier.weight(1f).fillMaxWidth().consumeWindowInsets(WindowInsets.navigationBars))
-                NavigationBar(containerColor = DfColors.BgElevated, tonalElevation = 0.dp) {
-                    HomeTab.entries.forEach { t ->
-                        NavigationBarItem(
-                            selected = t == tab,
-                            onClick = { onTab(t) },
-                            icon = { TabIcon(t, badges[t] ?: 0) },
-                            label = { Text(t.label, maxLines = 1) },
-                            colors = NavigationBarItemDefaults.colors(indicatorColor = DfColors.AccentSoft, selectedIconColor = DfColors.Accent, selectedTextColor = DfColors.Ink),
-                        )
+                content(
+                    Modifier.weight(1f).fillMaxWidth()
+                        .then(if (imeOpen) Modifier else Modifier.consumeWindowInsets(WindowInsets.navigationBars)),
+                )
+                if (!imeOpen) {
+                    NavigationBar(containerColor = DfColors.BgElevated, tonalElevation = 0.dp, modifier = Modifier.testTag("main-nav")) {
+                        HomeTab.entries.forEach { t ->
+                            NavigationBarItem(
+                                selected = t == tab,
+                                onClick = { onTab(t) },
+                                icon = { TabIcon(t, badges[t] ?: 0) },
+                                label = { Text(t.label, maxLines = 1) },
+                                colors = NavigationBarItemDefaults.colors(indicatorColor = DfColors.AccentSoft, selectedIconColor = DfColors.Accent, selectedTextColor = DfColors.Ink),
+                            )
+                        }
                     }
                 }
             }

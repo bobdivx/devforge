@@ -1,5 +1,6 @@
 package app.jeser.devforge.ui.project
 
+import app.jeser.devforge.ui.components.NavSheet
 import app.jeser.devforge.data.cleanLogs
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -46,8 +47,7 @@ import app.jeser.devforge.ui.theme.DfColors
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InfoSheet(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = DfColors.Surface) {
+    NavSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -282,10 +282,9 @@ private fun SheetAction(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RuntimeLogsSheet(state: ProjectUiState, onDismiss: () -> Unit, onRefresh: () -> Unit, onAskRepair: () -> Unit) {
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var tab by rememberSaveable { mutableIntStateOf(if (state.lastFailed) 1 else 0) }
     val rt = state.runtimeLogs ?: return
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = DfColors.Surface) {
+    NavSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Logs", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))

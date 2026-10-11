@@ -1,5 +1,6 @@
 package app.jeser.devforge.ui.project
 
+import app.jeser.devforge.ui.components.NavSheet
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -191,9 +192,8 @@ fun NewFeatureSheet(busy: Boolean, onDismiss: () -> Unit, onSubmit: (String, Str
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogsSheet(state: LogsState, onDismiss: () -> Unit, onAskRepair: () -> Unit) {
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val (label, color) = deployLabel(state.deployment)
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = DfColors.Surface) {
+    NavSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(state.deployment.gitMessage?.lineSequence()?.firstOrNull() ?: "Mise en ligne", style = MaterialTheme.typography.titleMedium)
             Text(label, color = color, fontWeight = FontWeight.SemiBold)
@@ -230,8 +230,7 @@ fun LogsSheet(state: LogsState, onDismiss: () -> Unit, onAskRepair: () -> Unit) 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SpecSheet(state: SpecState, onDismiss: () -> Unit, onDecide: (Boolean) -> Unit) {
-    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(onDismissRequest = { if (!state.deciding) onDismiss() }, sheetState = sheet, containerColor = DfColors.Surface) {
+    NavSheet(onDismissRequest = { if (!state.deciding) onDismiss() }) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 PersonaAvatar(Persona.Braise, 36.dp)
