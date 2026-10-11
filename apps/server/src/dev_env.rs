@@ -819,8 +819,14 @@ pub(crate) async fn poll_dev(state: &AppState, project: &Project) {
     let gh = crate::routes::project_github(state, &project.workspace_uuid).await;
     if let Ok(c) = gh.compare(&owner, &repo, &base, branch).await {
         if c.ahead_by > 0 {
+            let tip = c.commits.last().map(|c| c.sha.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| c.head_sha.clone());
+            if crate::auto_deploy_guard::gate(state, project, "dev", &tip).await != crate::auto_deploy_guard::Gate::Go {
+                return;
+            }
             let msg = format!("DEV · auto-deploy ({} commit(s))", c.ahead_by);
-            let _ = start_dev_deploy(state, project, &msg, None).await;
+            if let Ok(dep) = start_dev_deploy(state, project, &msg, None).await {
+                crate::auto_deploy_guard::set_target_sha(&state.pool, &dep, &tip).await;
+            }
         }
     }
 }

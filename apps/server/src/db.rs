@@ -166,6 +166,7 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         .await;
 
     crate::wake_causes::migrate(pool).await?;
+    crate::auto_deploy_guard::migrate(pool).await?;
 
     sqlx::query(
         r#"
