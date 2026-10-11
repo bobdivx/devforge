@@ -3,6 +3,7 @@ import { api, type InstanceDomain } from '../lib/api';
 import { AcmeEmailTile } from './AcmeEmailTile';
 import { AppShell } from './AppShell';
 import { LlmProvidersPanel } from './LlmProvidersPanel';
+import { MemorySettingsPanel } from './MemorySettingsPanel';
 import {
   Alert,
   Badge,
@@ -42,9 +43,9 @@ type GhUser = {
   avatar_url?: string | null;
 };
 
-type SettingsSection = 'domaine' | 'github' | 'llm';
+type SettingsSection = 'domaine' | 'github' | 'llm' | 'memory';
 
-const SECTION_KEYS: SettingsSection[] = ['domaine', 'github', 'llm'];
+const SECTION_KEYS: SettingsSection[] = ['domaine', 'github', 'llm', 'memory'];
 
 const ADMIN_TAB_REDIRECT: Record<string, string> = {
   general: '/app/admin?tab=sante',
@@ -81,6 +82,12 @@ const SETTINGS_CARDS: SettingCardMeta[] = [
     description: 'Providers IA (OpenAI, Anthropic, local)',
     icon: 'brain',
   },
+  {
+    key: 'memory',
+    title: 'Mémoire',
+    description: 'Ce que tes agents retiennent : voir, corriger, oublier',
+    icon: 'archive',
+  },
 ];
 
 function readSection(): SettingsSection | null {
@@ -94,6 +101,7 @@ const SECTION_TITLES: Record<SettingsSection, string> = {
   domaine: 'Domaine',
   github: 'GitHub',
   llm: 'Agents / LLM',
+  memory: 'Mémoire',
 };
 
 function adminRedirectTarget(): string | null {
@@ -575,6 +583,12 @@ function SettingsPageInner() {
               </form>
             )}
           </Card>
+        </FadeIn>
+      )}
+
+      {section === 'memory' && (
+        <FadeIn>
+          <MemorySettingsPanel />
         </FadeIn>
       )}
 

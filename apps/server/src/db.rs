@@ -1002,6 +1002,9 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         .await?;
     }
 
+    // Mémoire durable des agents (P3-01) : table, index, pg_trgm facultatif.
+    devforge_memory::migrate(pool).await?;
+
     Ok(())
 }
 

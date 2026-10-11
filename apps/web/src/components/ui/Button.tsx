@@ -41,6 +41,8 @@ type Props = {
   children: ComponentChildren;
   onClick?: JSX.MouseEventHandler<HTMLButtonElement>;
   'aria-label'?: string;
+  'aria-expanded'?: boolean;
+  'aria-pressed'?: boolean;
   title?: string;
 };
 
@@ -58,6 +60,8 @@ export function Button({
   children,
   onClick,
   'aria-label': ariaLabel,
+  'aria-expanded': ariaExpanded,
+  'aria-pressed': ariaPressed,
   title,
 }: Props) {
   const cls = cn(
@@ -91,6 +95,8 @@ export function Button({
       disabled={disabled}
       onClick={onClick}
       aria-label={ariaLabel}
+      aria-expanded={ariaExpanded}
+      aria-pressed={ariaPressed}
       title={title}
       animate={animate}
     >

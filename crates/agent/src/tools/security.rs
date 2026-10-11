@@ -290,43 +290,51 @@ fn collect(root: &Path, current: &Path, out: &mut Vec<PathBuf>, truncated: &mut 
 }
 
 fn secret_rules() -> Vec<SecretRule> {
-    let compile = |p: &str| Regex::new(p).expect("regex secret");
+    // Motifs partagés avec le filtre de secrets de la mémoire (P3-04).
+    let compile = |rule: &str| {
+        let p = devforge_memory::secrets::PROVIDER_PATTERNS
+            .iter()
+            .find(|(r, _)| *r == rule)
+            .map(|(_, p)| *p)
+            .expect("motif secret partagé");
+        Regex::new(p).expect("regex secret")
+    };
     vec![
         SecretRule {
             rule: "aws_access_key",
             severity: "high",
             message: "Jeton AWS détecté (masqué). Retire-le du dépôt et fais-le tourner.",
-            pattern: compile(r"\bAKIA[0-9A-Z]{16}\b"),
+            pattern: compile("aws_access_key"),
         },
         SecretRule {
             rule: "github_token",
             severity: "high",
             message: "Jeton GitHub détecté (masqué). Retire-le du dépôt et révoque-le.",
-            pattern: compile(r"\b(?:ghp|gho|github_pat)_[A-Za-z0-9_]{20,}\b"),
+            pattern: compile("github_token"),
         },
         SecretRule {
             rule: "openai_key",
             severity: "high",
             message: "Clé API détectée (masquée). Retire-la du dépôt et fais-la tourner.",
-            pattern: compile(r"\bsk-[A-Za-z0-9]{20,}\b"),
+            pattern: compile("openai_key"),
         },
         SecretRule {
             rule: "stripe_live",
             severity: "high",
             message: "Clé Stripe live détectée (masquée). Retire-la du dépôt et fais-la tourner.",
-            pattern: compile(r"\bsk_live_[A-Za-z0-9]{8,}\b"),
+            pattern: compile("stripe_live"),
         },
         SecretRule {
             rule: "slack_token",
             severity: "high",
             message: "Jeton Slack détecté (masqué). Retire-le du dépôt et révoque-le.",
-            pattern: compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+            pattern: compile("slack_token"),
         },
         SecretRule {
             rule: "private_key",
             severity: "high",
             message: "Clé privée détectée (masquée). Retire-la du dépôt et fais-la tourner.",
-            pattern: compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+            pattern: compile("private_key"),
         },
     ]
 }

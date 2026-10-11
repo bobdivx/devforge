@@ -117,6 +117,7 @@ fun HomeRoot(
         },
         onUpdate = { hubVm.apkUrl()?.let { runCatching { uri.openUri(it) } } },
         onOpenWeb = { hub.instance?.let { runCatching { uri.openUri(it) } } },
+        onOpenMemory = { hub.instance?.let { runCatching { uri.openUri(it.trimEnd('/') + "/app/settings?tab=memory") } } },
         onSignOut = onSignOut,
     )
 }
@@ -138,6 +139,7 @@ fun HomeShell(
     onOpenSystemNotif: () -> Unit = {},
     onUpdate: () -> Unit = {},
     onOpenWeb: () -> Unit = {},
+    onOpenMemory: () -> Unit = {},
     onSignOut: () -> Unit = {},
     initialInboxOpen: Boolean = false,
 ) {
@@ -155,7 +157,7 @@ fun HomeShell(
                 HomeTab.Braise -> BraiseScreen(hub, onRefresh = onRefreshBraise, onOpen = onOpen, onOpenDraft = onOpenDraft)
                 HomeTab.Settings -> SettingsScreen(
                     hub, apps.me, onToggle = onToggleNotif, onOpenSystemNotif = onOpenSystemNotif,
-                    onUpdate = onUpdate, onOpenWeb = onOpenWeb, onSignOut = onSignOut,
+                    onUpdate = onUpdate, onOpenWeb = onOpenWeb, onOpenMemory = onOpenMemory, onSignOut = onSignOut,
                 )
             }
         }

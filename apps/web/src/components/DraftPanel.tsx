@@ -109,6 +109,51 @@ export function DraftBanner({ draft, onOpen, class: className }: { draft: DraftS
   );
 }
 
+/**
+ * Variante « ligne d'état » du bandeau, pour l'en-tête du chat : même hauteur que le sous-titre
+ * qu'elle remplace, donc rien ne bouge quand un brouillon apparaît en fin de run.
+ * `null` quand il n'y a rien à signaler (le sous-titre habituel reste affiché).
+ */
+export function draftStatusText(draft: DraftStatus | null): { text: string; tone: 'warn' | 'muted' } | null {
+  if (!draft?.available) return null;
+  if (draft.dirty) {
+    const behind =
+      draft.behind > 0 ? ` · GitHub a avancé de ${draft.behind} commit${draft.behind > 1 ? 's' : ''}` : '';
+    return { text: `Brouillon · ${filesLabel(draft.count)}${behind}`, tone: 'warn' };
+  }
+  if (draft.backups?.length) return { text: 'Brouillon supprimé récemment · restaurable 7 jours', tone: 'muted' };
+  return null;
+}
+
+export function DraftStatusLine({ draft, onOpen }: { draft: DraftStatus | null; onOpen: () => void }) {
+  const st = draftStatusText(draft);
+  if (!st) return null;
+  const when = draft?.dirty ? relativeFr(draft.updated_at) : null;
+  return (
+    <button
+      type="button"
+      data-testid="draft-status-line"
+      class={cn(
+        'df-tap-skip df-hit df-fade-in -mx-1 flex h-4 max-w-full items-center gap-1.5 rounded px-1 text-left text-xs leading-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]',
+        st.tone === 'warn' ? 'text-[var(--color-warn)]' : 'text-[var(--color-ink-faint)]',
+      )}
+      onClick={onOpen}
+      aria-label={`${st.text}. Voir et gérer le brouillon.`}
+    >
+      {st.tone === 'warn' ? (
+        <FileDiff size={12} class="shrink-0" aria-hidden />
+      ) : (
+        <History size={12} class="shrink-0" aria-hidden />
+      )}
+      <span class="truncate">
+        {st.text}
+        {when ? <span class="text-[var(--color-ink-faint)]"> · {when}</span> : null}
+      </span>
+      <ChevronRight size={12} class="shrink-0 opacity-70" aria-hidden />
+    </button>
+  );
+}
+
 type Step = 'list' | 'file' | 'validate' | 'validated' | 'discard';
 
 type ModalProps = {

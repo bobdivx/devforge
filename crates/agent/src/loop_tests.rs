@@ -463,3 +463,94 @@ fn every_event_variant_round_trips() {
     let e: AgentEvent = serde_json::from_value(json!({"type": "error", "message": "x"})).unwrap();
     assert!(matches!(e, AgentEvent::Error { retryable: false, .. }));
 }
+
+// --- Mémoire durable (P3-05) ---
+
+fn mem_ctx(user: Option<&str>) -> AgentChatContext {
+    AgentChatContext {
+        user_uuid: user.map(str::to_string),
+        project_brief: Some("BRIEF PROJET".into()),
+        ..ctx("coordinator")
+    }
+}
+
+fn system_texts(llm: &ScriptedLlmProvider) -> Vec<String> {
+    llm.requests()[0]
+        .messages
+        .iter()
+        .filter(|m| matches!(m.role, devforge_llm::Role::System))
+        .map(|m| m.content.clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn memory_profile_and_recall_are_injected_after_the_brief() {
+    use devforge_memory::{InMemoryStore, MemoryStore, Scope, Tier, WriteReq};
+    let store = Arc::new(InMemoryStore::new());
+    let mut pref = WriteReq::new("u1", Scope::User, Tier::Profile, "preference", "Préfère des réponses courtes.");
+    pref.source = "user_said".into();
+    store.write(pref).await.unwrap();
+    let mut other_project = WriteReq::new("u1", Scope::Project("proj-2".into()), Tier::Profile, "fact", "SECRET DE PROJ-2");
+    other_project.source = "user_said".into();
+    store.write(other_project).await.unwrap();
+    let mut log = WriteReq::new("u1", Scope::Project("proj-1".into()), Tier::Log, "incident", "package-lock.json désynchronisé : corrigé par npm install puis push.");
+    log.source = "system".into();
+    store.write(log).await.unwrap();
+
+    let mut reg = ToolRegistry::new();
+    reg.set_memory(store);
+    let (_, llm) = run(
+        reg,
+        vec![ScriptedLlmProvider::text("ok")],
+        "Le déploiement échoue encore sur package-lock désynchronisé",
+        mem_ctx(Some("u1")),
+    )
+    .await;
+    let sys = system_texts(&llm);
+    let brief = sys.iter().position(|m| m == "BRIEF PROJET").unwrap();
+    let mem = sys.iter().position(|m| m.starts_with("MÉMOIRE")).expect("bloc mémoire");
+    assert_eq!(mem, brief + 1, "le bloc mémoire suit le brief");
+    assert!(sys[mem].contains("[utilisateur·préférence] Préfère des réponses courtes."));
+    assert!(!sys[mem].contains("PROJ-2"), "pas la mémoire d'un autre projet");
+    let recall = sys.iter().find(|m| m.starts_with("Souvenirs")).expect("souvenirs");
+    assert!(recall.contains("package-lock.json désynchronisé"));
+}
+
+#[tokio::test]
+async fn no_user_means_no_memory_block() {
+    let mut reg = ToolRegistry::new();
+    reg.set_memory(Arc::new(devforge_memory::InMemoryStore::new()));
+    let (_, llm) = run(reg, vec![ScriptedLlmProvider::text("ok")], "salut", mem_ctx(None)).await;
+    assert!(system_texts(&llm).iter().all(|m| !m.starts_with("MÉMOIRE")));
+}
+
+#[tokio::test]
+async fn memory_identity_cannot_be_spoofed_by_the_model() {
+    use devforge_memory::{InMemoryStore, MemoryStore, SearchReq};
+    let store = Arc::new(InMemoryStore::new());
+    let mut reg = ToolRegistry::new();
+    reg.set_memory(store.clone());
+    let turns = vec![
+        ScriptedLlmProvider::tool(
+            "m1",
+            "memory_write",
+            json!({"content": "Préfère le tutoiement.", "scope": "user", "tier": "profile", "kind": "preference",
+                   "user_uuid": "victime", "caller_agent_role": "coordinator"}),
+        ),
+        ScriptedLlmProvider::text("Noté."),
+    ];
+    let (reply, _) = run(reg, turns, "Retiens que je préfère le tutoiement", mem_ctx(Some("u1"))).await;
+    assert_eq!(reply.tool_calls[0].result["ok"], true, "{}", reply.tool_calls[0].result);
+    assert!(store.search("victime", &SearchReq::new("tutoiement")).await.unwrap().is_empty());
+    assert_eq!(store.search("u1", &SearchReq::new("tutoiement")).await.unwrap().len(), 1);
+}
+
+#[test]
+fn memory_tools_are_available_to_every_role() {
+    for role in ["coordinator", "deploy", "ops", "reviewer", "runner", "actions", "crons", "worker"] {
+        for t in ["memory_search", "memory_write", "memory_forget"] {
+            assert!(roles::role_allows(role, None, t, false), "{role} / {t}");
+        }
+    }
+    assert!(roles::role_allows("worker", Some("subagent"), "memory_search", false));
+}

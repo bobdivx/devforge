@@ -23,6 +23,9 @@ pub const ALL_TOOLS: &[&str] = &[
     "mcp_call_tool",
     "mcp_list_remote_tools",
     "mcp_list_servers",
+    "memory_forget",
+    "memory_search",
+    "memory_write",
     "propose_plan",
     "publish_to_github",
     "read_github_file",
@@ -39,8 +42,10 @@ pub const ALL_TOOLS: &[&str] = &[
     "write_project_file",
 ];
 
-/// Toujours disponibles (lecture du fil). `memory_search` arrivera avec la phase mémoire.
-pub const ALWAYS: &[&str] = &["list_agent_messages", "memory_search"];
+/// Toujours disponibles : lecture du fil et mémoire durable. Les rôles de surveillance
+/// (runner / actions / crons) n'écrivent qu'en journal et n'oublient rien : règle appliquée
+/// dans l'outil (`tools/memory.rs`), les sous-agents n'écrivent en portée user qu'en journal.
+pub const ALWAYS: &[&str] = &["list_agent_messages", "memory_search", "memory_write", "memory_forget"];
 
 const WORKER: &[&str] = &[
     // workdir

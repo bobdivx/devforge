@@ -2298,6 +2298,8 @@ pub(crate) async fn handle_deploy_failure(
         decision = ?cause.decision,
         "échec de déploiement"
     );
+    // Journal durable (P3-06) : une ligne à jour par cause, retrouvable par memory_search.
+    crate::memory_routes::record_wake_cause(state, project_uuid, dep_uuid, &cause, &summary).await;
     let hint_line = if hint.is_empty() {
         String::new()
     } else {
@@ -2410,6 +2412,13 @@ async fn post_deploy_smoke(state: &AppState, project_uuid: &str, dep_uuid: &str,
     if let Some(summary) = verdict {
         tracing::warn!(project_uuid, dep_uuid, url, %summary, "vérification post-déploiement KO");
         let _ = handle_deploy_failure(state, project_uuid, dep_uuid, &summary, "", false).await;
+    } else {
+        let smoke = last
+            .get("status")
+            .and_then(|v| v.as_u64())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "OK".into());
+        crate::memory_routes::record_deploy_success(state, project_uuid, dep_uuid, &smoke).await;
     }
 }
 
@@ -2871,6 +2880,9 @@ async fn load_agent_context(
         git_repo: None,
         git_branch: None,
         history: vec![],
+        user_uuid: None,
+        memory_profile: None,
+        memory_recall: None,
     };
     if let Ok(Some((name, role, kind))) = sqlx::query_as::<_, (String, String, String)>(
         "SELECT name, role, COALESCE(kind, '') FROM project_agents WHERE uuid = $1",
@@ -2884,6 +2896,8 @@ async fn load_agent_context(
         ctx.agent_kind = Some(kind).filter(|k| !k.is_empty());
     }
     ctx.history = crate::agent_runs::recent_history(&state.pool, agent_uuid).await;
+    // Réveil sans utilisateur courant : mémoire du propriétaire du projet (P3-05).
+    ctx.user_uuid = crate::memory_routes::project_owner(&state.pool, project_uuid).await;
     if let Ok(brief) = build_project_agent_brief(state, project_uuid).await {
         ctx.git_owner = brief.git_owner;
         ctx.git_repo = brief.git_repo;
@@ -3140,6 +3154,9 @@ async fn agent_chat(
         git_repo: None,
         git_branch: None,
         history: vec![],
+        user_uuid: Some(user.uuid.clone()),
+        memory_profile: None,
+        memory_recall: None,
     };
 
     // Arguments may also carry project/agent (UI historique).

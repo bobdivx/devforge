@@ -25,19 +25,22 @@ use tools::{
     GitHubListPrsTool, GitHubWorkflowRunsTool, HttpSmokeTool, ListAgentMessagesTool,
     ListAgentToolFailuresTool, ListEnvVarsTool, ListProjectAgentsTool, ListProjectFilesTool,
     ListProjectsTool, LocalPreviewStatusTool, McpCallTool, McpListRemoteToolsTool,
-    McpListServersTool, ProposePlanTool, PublishToGitHubTool, ReadGitHubFileTool,
+    McpListServersTool, MemoryForgetTool, MemorySearchTool, MemoryWriteTool, ProposePlanTool, PublishToGitHubTool, ReadGitHubFileTool,
     ReadProjectFileTool, ReviewProjectSecurityTool, RunApplicationTestsTool, RunWorkdirCommandTool,
     SddLoopTool, StartLocalPreviewTool,
     StopLocalPreviewTool, SyncWorkdirToGitHubTool, TriggerDeployTool, ListDeploymentsTool, CancelDeploymentTool, UpsertEnvVarsTool,
     WriteProjectFileTool,
 };
 
-pub use tools::{post_deploy_verdict, smoke_url};
+pub use tools::{memory_item_json, post_deploy_verdict, smoke_url};
+pub mod memory_ctx;
 
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
     /// Accord de publication (P1-01). Absent = toute action distante est refusée.
     gate: Option<Arc<dyn guard::PublishGate>>,
+    /// Mémoire durable (P3) : profil injecté + pré-chargement du journal.
+    memory: Option<Arc<dyn devforge_memory::MemoryStore>>,
 }
 
 impl ToolRegistry {
@@ -45,7 +48,20 @@ impl ToolRegistry {
         Self {
             tools: HashMap::new(),
             gate: None,
+            memory: None,
         }
+    }
+
+    /// Branche la mémoire : outils `memory_*` + injection dans le prompt.
+    pub fn set_memory(&mut self, store: Arc<dyn devforge_memory::MemoryStore>) {
+        self.register(Arc::new(MemorySearchTool { store: store.clone() }));
+        self.register(Arc::new(MemoryWriteTool { store: store.clone() }));
+        self.register(Arc::new(MemoryForgetTool { store: store.clone() }));
+        self.memory = Some(store);
+    }
+
+    pub fn memory(&self) -> Option<Arc<dyn devforge_memory::MemoryStore>> {
+        self.memory.clone()
     }
 
     pub fn set_publish_gate(&mut self, gate: Arc<dyn guard::PublishGate>) {
@@ -212,6 +228,7 @@ pub fn build_core_registry(
     registry.register(Arc::new(CreateProjectAgentTool { pool: pool.clone() }));
     registry.register(Arc::new(ReviewProjectSecurityTool { pool: pool.clone() }));
     registry.set_publish_gate(Arc::new(guard::PgPublishGate { pool: pool.clone() }));
+    registry.set_memory(Arc::new(devforge_memory::PgMemoryStore::new((*pool).clone())));
     registry.register(Arc::new(SddLoopTool { pool }));
     registry
 }
@@ -328,6 +345,12 @@ pub struct AgentChatContext {
     pub git_repo: Option<String>,
     pub git_branch: Option<String>,
     pub history: Vec<(String, String)>,
+    /// Propriétaire de la mémoire (utilisateur courant, ou propriétaire du projet pour un réveil).
+    pub user_uuid: Option<String>,
+    /// Bloc `MÉMOIRE` déjà calculé (sinon chargé depuis le store au début du run).
+    pub memory_profile: Option<String>,
+    /// Bloc « Souvenirs possiblement utiles » déjà calculé.
+    pub memory_recall: Option<String>,
 }
 
 pub struct AgentRunner {
@@ -425,7 +448,7 @@ impl AgentRunner {
                 },
             );
             let mut args = force_args.unwrap_or_else(|| json!({}));
-            inject_tool_defaults(&mut args, &ctx);
+            inject_tool_defaults(tool, &mut args, &ctx);
             if let Some(schema) = self.registry.schema(tool) {
                 coerce::coerce_args(&schema, &mut args);
             }
@@ -500,6 +523,18 @@ impl AgentRunner {
             messages.push(ChatMessage::system(format!(
                 "Contexte projet courant : project_uuid={uuid}. Prefère cet uuid pour les tools."
             )));
+        }
+        // Mémoire durable (P3-05) : profil toujours injecté juste après le brief, puis souvenirs datés.
+        let (memory_profile, memory_recall) = match (&ctx.memory_profile, self.registry.memory()) {
+            (Some(p), _) => (Some(p.clone()), ctx.memory_recall.clone()),
+            (None, Some(store)) => memory_ctx::load_blocks(store.as_ref(), &ctx, message).await,
+            (None, None) => (None, ctx.memory_recall.clone()),
+        };
+        if let Some(block) = memory_profile {
+            messages.push(ChatMessage::system(block));
+        }
+        if let Some(block) = memory_recall {
+            messages.push(ChatMessage::system(block));
         }
         for (role, content) in &ctx.history {
             match role.as_str() {
@@ -636,7 +671,7 @@ impl AgentRunner {
             messages.push(ChatMessage::assistant_tools(turn.content.clone(), turn.tool_calls.clone()));
             for call in turn.tool_calls {
                 let mut args = call.arguments.clone();
-                inject_tool_defaults(&mut args, &ctx);
+                inject_tool_defaults(&call.name, &mut args, &ctx);
                 if let Some(schema) = self.registry.schema(&call.name) {
                     coerce::coerce_args(&schema, &mut args);
                 }
@@ -872,8 +907,25 @@ fn refuse_bare_spec_approval(tool: &str, args: &Value, user_message: &str) -> Op
     }))
 }
 
-fn inject_tool_defaults(args: &mut Value, ctx: &AgentChatContext) {
+fn inject_tool_defaults(tool: &str, args: &mut Value, ctx: &AgentChatContext) {
     let Some(obj) = args.as_object_mut() else { return; };
+    if tool.starts_with("memory_") {
+        // Identité imposée par le serveur : jamais celle fournie par le modèle.
+        for k in tools::MEMORY_IDENTITY_ARGS {
+            obj.remove(*k);
+        }
+        let set = |obj: &mut serde_json::Map<String, Value>, k: &str, v: &Option<String>| {
+            if let Some(v) = v.as_deref().filter(|v| !v.is_empty()) {
+                obj.insert(k.into(), json!(v));
+            }
+        };
+        set(obj, "user_uuid", &ctx.user_uuid);
+        set(obj, "project_uuid", &ctx.project_uuid);
+        set(obj, "caller_agent_uuid", &ctx.agent_uuid);
+        set(obj, "caller_agent_role", &ctx.agent_role);
+        set(obj, "caller_agent_kind", &ctx.agent_kind);
+        return;
+    }
     if let Some(uuid) = &ctx.project_uuid {
         let provided = obj.get("project_uuid").and_then(|v| v.as_str()).unwrap_or("").trim();
         if provided.is_empty() || provided != uuid {
