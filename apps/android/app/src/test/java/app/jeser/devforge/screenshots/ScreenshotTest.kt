@@ -304,8 +304,8 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
     /* Chat riche (P5) : question ouverte (options 48 dp), réactions, image jointe. */
     @Test fun projectChatRich() {
         compose.setContent { Shot { ProjectScreen(SampleData.projectRich, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Chat) } }
-        compose.onNodeWithTag("question-card").assertExists()
-        val opt = compose.onNodeWithTag("question-option-yes").getBoundsInRoot()
+        compose.onAllNodesWithTag("question-card").onFirst().assertExists()
+        val opt = compose.onAllNodesWithTag("question-option-yes").onFirst().getBoundsInRoot()
         assertTrue("option < 48 dp", (opt.bottom - opt.top).value >= 48f)
         compose.onAllNodesWithTag("reactions").onFirst().assertExists()
         shot("project-chat-rich")
@@ -314,7 +314,7 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
     /* Question répondue : lecture seule « Tu as choisi : … » + bulle « ✓ ». */
     @Test fun projectChatAnswered() {
         compose.setContent { Shot { ProjectScreen(SampleData.projectRichAnswered, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Chat) } }
-        compose.onNodeWithTag("answer-bubble").assertExists()
+        compose.onAllNodesWithTag("answer-bubble").onFirst().assertExists()
         shot("project-chat-answered")
     }
 }
