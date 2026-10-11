@@ -1005,6 +1005,9 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
     // Événements de run persistés et runs en fond (P4-01).
     crate::run_events::migrate(pool).await?;
 
+    // Chat riche (P5) : réactions, pièces jointes, citations, routines d'agent.
+    crate::rich_chat::migrate(pool).await?;
+
     // Mémoire durable des agents (P3-01) : table, index, pg_trgm facultatif.
     devforge_memory::migrate(pool).await?;
 

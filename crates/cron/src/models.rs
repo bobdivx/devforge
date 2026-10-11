@@ -16,6 +16,27 @@ pub struct ProjectCron {
     pub next_run_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// `command` (docker exec) | `agent` (routine exécutée par un agent, P5-05).
+    #[sqlx(default)]
+    pub kind: Option<String>,
+    #[sqlx(default)]
+    pub agent_uuid: Option<String>,
+    #[sqlx(default)]
+    pub prompt: Option<String>,
+    /// `user` | `agent:<uuid>`.
+    #[sqlx(default)]
+    pub created_by: Option<String>,
+    /// `always` | `on_change` | `on_failure`.
+    #[sqlx(default)]
+    pub notify: Option<String>,
+    #[sqlx(default)]
+    pub last_summary_hash: Option<String>,
+}
+
+impl ProjectCron {
+    pub fn is_agent_routine(&self) -> bool {
+        self.kind.as_deref() == Some("agent")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -78,6 +99,59 @@ pub fn next_run_time(expr: &str, timezone: Option<&str>) -> Option<DateTime<Utc>
     schedule.upcoming(tz).next().map(|dt| dt.with_timezone(&Utc))
 }
 
+/// Fuseau IANA connu (ex. « Europe/Paris »).
+pub fn timezone_is_known(tz: &str) -> bool {
+    tz.parse::<chrono_tz::Tz>().is_ok()
+}
+
+/// Plus petit écart (minutes) entre deux déclenchements sur les ~200 prochains (fréquence réelle).
+pub fn min_interval_minutes(expr: &str) -> Option<i64> {
+    let normalized = normalize_cron_expression(expr);
+    let schedule = cron::Schedule::from_str(&normalized).ok()?;
+    let times: Vec<DateTime<Utc>> = schedule.upcoming(Utc).take(200).collect();
+    times.windows(2).map(|w| (w[1] - w[0]).num_minutes()).min()
+}
+
+/// Expression à 5 champs exactement (minute heure jour mois jour-semaine).
+pub fn is_five_fields(expr: &str) -> bool {
+    expr.split_whitespace().count() == 5
+}
+
+/// Faut-il poster le résultat d'une routine dans le fil ? (`on_change` : seulement si le résumé change.)
+pub fn should_notify(notify: &str, previous_hash: Option<&str>, new_hash: &str, failed: bool) -> bool {
+    match notify {
+        "always" => true,
+        "on_failure" => failed,
+        // on_change (défaut) : premier passage, ou résultat différent du précédent.
+        _ => previous_hash != Some(new_hash),
+    }
+}
+
+/// Empreinte stable d'un résumé (chiffres et horodatages ignorés : « 200 en 120 ms » ≈ « 200 en 98 ms »).
+pub fn summary_hash(summary: &str) -> String {
+    let mut digits_folded = String::with_capacity(summary.len());
+    for c in summary.to_lowercase().chars() {
+        if c.is_ascii_digit() {
+            if !digits_folded.ends_with('#') {
+                digits_folded.push('#');
+            }
+        } else {
+            digits_folded.push(c);
+        }
+    }
+    let norm: String = digits_folded
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    // FNV-1a 64 bits : suffisant pour comparer deux résumés successifs.
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in norm.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("{h:016x}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,6 +162,30 @@ mod tests {
         assert!(validate_cron_expression("0 0 * * *").is_ok());
         assert!(validate_cron_expression("0 */2 * * *").is_ok());
         assert!(validate_cron_expression("invalid").is_err());
+    }
+
+    #[test]
+    fn on_change_logic() {
+        let a = summary_hash("OK : popcornn.app répond 200 en 120 ms");
+        let b = summary_hash("OK : popcornn.app répond 200 en 98 ms");
+        let c = summary_hash("ÉCHEC : popcornn.app répond 502");
+        assert_eq!(a, b, "les chiffres ne comptent pas");
+        assert_ne!(a, c);
+        assert!(should_notify("on_change", None, &a, false), "premier passage");
+        assert!(!should_notify("on_change", Some(&a), &b, false));
+        assert!(should_notify("on_change", Some(&a), &c, true));
+        assert!(!should_notify("on_failure", None, &a, false));
+        assert!(should_notify("on_failure", Some(&a), &a, true));
+        assert!(should_notify("always", Some(&a), &a, false));
+    }
+
+    #[test]
+    fn min_interval() {
+        assert_eq!(min_interval_minutes("*/15 * * * *"), Some(15));
+        assert_eq!(min_interval_minutes("*/5 * * * *"), Some(5));
+        assert_eq!(min_interval_minutes("0 8 * * *"), Some(24 * 60));
+        assert_eq!(min_interval_minutes("0,10 8 * * *"), Some(10));
+        assert!(min_interval_minutes("nope").is_none());
     }
 
     #[test]

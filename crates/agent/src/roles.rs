@@ -3,11 +3,14 @@
 
 /// Tous les outils du registre cœur (vérifié par test contre `build_core_registry`).
 pub const ALL_TOOLS: &[&str] = &[
+    "ask_user",
     "cancel_deployment",
     "create_github_fix",
     "create_github_repo",
     "create_project_agent",
+    "create_routine",
     "delegate_task",
+    "delete_routine",
     "get_deployment_logs",
     "get_project",
     "github_list_prs",
@@ -20,6 +23,7 @@ pub const ALL_TOOLS: &[&str] = &[
     "list_project_agents",
     "list_project_files",
     "list_projects",
+    "list_routines",
     "local_preview_status",
     "mcp_call_tool",
     "mcp_list_remote_tools",
@@ -46,7 +50,7 @@ pub const ALL_TOOLS: &[&str] = &[
 /// Toujours disponibles : lecture du fil et mémoire durable. Les rôles de surveillance
 /// (runner / actions / crons) n'écrivent qu'en journal et n'oublient rien : règle appliquée
 /// dans l'outil (`tools/memory.rs`), les sous-agents n'écrivent en portée user qu'en journal.
-pub const ALWAYS: &[&str] = &["list_agent_messages", "memory_search", "memory_write", "memory_forget"];
+pub const ALWAYS: &[&str] = &["list_agent_messages", "memory_search", "memory_write", "memory_forget", "ask_user"];
 
 const WORKER: &[&str] = &[
     // workdir
@@ -100,6 +104,9 @@ const DEPLOY: &[&str] = &[
 ];
 
 const OPS: &[&str] = &[
+    "create_routine",
+    "list_routines",
+    "delete_routine",
     "get_project",
     "get_deployment_logs",
     "list_deployments",
@@ -119,7 +126,7 @@ const REVIEWER: &[&str] = &[
     "read_github_file",
 ];
 
-const WATCHER: &[&str] = &["get_project", "github_workflow_runs", "github_list_prs", "http_smoke"];
+const WATCHER: &[&str] = &["get_project", "github_workflow_runs", "github_list_prs", "http_smoke", "list_routines"];
 
 /// Liste des outils autorisés pour un rôle. `None` = tous (coordinateur, rôle inconnu absent).
 pub fn tools_for_role(role: &str, kind: Option<&str>) -> Option<&'static [&'static str]> {
@@ -139,6 +146,10 @@ pub fn tools_for_role(role: &str, kind: Option<&str>) -> Option<&'static [&'stat
 
 /// Outil exposé à ce rôle ? (`review_project_security` côté coordinateur : sur demande seulement.)
 pub fn role_allows(role: &str, kind: Option<&str>, tool: &str, security_review: bool) -> bool {
+    // Un worker en arrière-plan ne pose pas de question (personne ne la verrait) : il conclut.
+    if tool == "ask_user" && kind == Some("subagent") {
+        return false;
+    }
     if ALWAYS.contains(&tool) {
         return true;
     }
@@ -188,6 +199,14 @@ mod tests {
     fn subagent_kind_is_a_worker() {
         assert!(role_allows("custom", Some("subagent"), "write_project_file", false));
         assert!(!role_allows("deploy", Some("subagent"), "upsert_env_var", false));
+    }
+
+    #[test]
+    fn ask_user_everywhere_but_background_workers() {
+        for role in ["coordinator", "ops", "deploy", "reviewer", "custom", "runner"] {
+            assert!(role_allows(role, None, "ask_user", false), "{role}");
+        }
+        assert!(!role_allows("custom", Some("subagent"), "ask_user", false));
     }
 
     #[test]

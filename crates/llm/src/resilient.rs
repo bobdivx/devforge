@@ -59,6 +59,21 @@ impl RetryPolicy {
 }
 
 /// Tries each provider in order. On error (or empty content without tools), falls through.
+/// Requête adaptée au fournisseur : sans vision, les images deviennent « [image jointe : nom] ».
+fn for_entry(entry: &ChainEntry, req: &ChatRequest) -> ChatRequest {
+    let mut req = req.clone();
+    if !entry.provider.supports_vision() {
+        for m in &mut req.messages {
+            if m.images.is_empty() {
+                continue;
+            }
+            let names: Vec<String> = m.images.drain(..).map(|i| format!("[image jointe : {}]", i.name)).collect();
+            m.content = format!("{}\n{}", m.content, names.join("\n"));
+        }
+    }
+    req
+}
+
 pub struct ResilientLlmProvider {
     chain: Vec<ChainEntry>,
     policy: RetryPolicy,
@@ -82,7 +97,7 @@ impl ResilientLlmProvider {
     async fn chat_with_retries(&self, entry: &ChainEntry, req: &ChatRequest) -> Result<AssistantTurn> {
         let mut attempt: u32 = 0;
         loop {
-            match entry.provider.chat(req.clone()).await {
+            match entry.provider.chat(for_entry(entry, req)).await {
                 Ok(turn) => return Ok(turn),
                 Err(e) => {
                     let kind = classify(&e);
@@ -116,7 +131,7 @@ impl ResilientLlmProvider {
     ) -> Result<AssistantTurn> {
         let mut attempt: u32 = 0;
         loop {
-            match entry.provider.chat_stream(req.clone(), sink).await {
+            match entry.provider.chat_stream(for_entry(entry, req), sink).await {
                 Ok(turn) => return Ok(turn),
                 Err(e) => {
                     let kind = classify(&e);
@@ -153,6 +168,10 @@ fn retry_label(kind: &LlmErrorKind) -> String {
 impl LlmProvider for ResilientLlmProvider {
     fn name(&self) -> &str {
         "resilient"
+    }
+
+    fn supports_vision(&self) -> bool {
+        self.chain.first().is_some_and(|e| e.provider.supports_vision())
     }
 
     async fn chat(&self, req: ChatRequest) -> Result<AssistantTurn> {

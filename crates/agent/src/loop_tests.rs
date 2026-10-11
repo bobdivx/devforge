@@ -35,6 +35,7 @@ fn spy(reg: &mut ToolRegistry, name: &'static str, result: Value) -> Arc<AtomicU
 
 fn ctx(role: &str) -> AgentChatContext {
     AgentChatContext {
+        images: Vec::new(),
         project_uuid: Some("proj-1".into()),
         agent_uuid: Some("agent-1".into()),
         agent_role: Some(role.into()),
@@ -468,6 +469,7 @@ fn every_event_variant_round_trips() {
 
 fn mem_ctx(user: Option<&str>) -> AgentChatContext {
     AgentChatContext {
+        images: Vec::new(),
         user_uuid: user.map(str::to_string),
         project_brief: Some("BRIEF PROJET".into()),
         ..ctx("coordinator")
@@ -676,4 +678,52 @@ async fn cancel_before_the_first_call_does_nothing() {
     let (reply, llm) = run(reg, vec![ScriptedLlmProvider::text("x")], "go", c).await;
     assert_eq!(llm.requests().len(), 0);
     assert_eq!(reply.reply, "Arrêté à ta demande, avant toute action.");
+}
+
+#[tokio::test]
+async fn ask_user_ends_the_turn_with_the_question() {
+    let mut reg = ToolRegistry::new();
+    reg.register(Arc::new(tools::AskUserTool));
+    let after = spy(&mut reg, "get_project", json!({"ok": true}));
+    let args = json!({
+        "question": "Je pousse le correctif lockfile sur fix/lockfile ?",
+        "options": [
+            {"id": "publish", "label": "Oui, publier", "action": "approve_publish", "style": "primary"},
+            {"id": "local", "label": "Non, garder en local"}
+        ]
+    });
+    let turns = vec![
+        ScriptedLlmProvider::tools(vec![("c1", "ask_user", args), ("c2", "get_project", json!({}))]),
+        ScriptedLlmProvider::text("ne doit pas être atteint"),
+    ];
+    let (reply, llm) = run(reg, turns, "corrige le lockfile", ctx("coordinator")).await;
+    assert_eq!(reply.reply, "Je pousse le correctif lockfile sur fix/lockfile ?");
+    assert_eq!(reply.tool_calls.len(), 1, "le tour s'arrête à la question");
+    assert_eq!(reply.tool_calls[0].result["options"][0]["action"], "approve_publish");
+    assert_eq!(after.load(Ordering::SeqCst), 0);
+    assert_eq!(llm.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn invalid_ask_user_lets_the_model_fix_it() {
+    let mut reg = ToolRegistry::new();
+    reg.register(Arc::new(tools::AskUserTool));
+    let turns = vec![
+        ScriptedLlmProvider::tool("c1", "ask_user", json!({"question": "Publier ?", "options": [{"id": "a", "label": "Oui"}]})),
+        ScriptedLlmProvider::text("Je reste en local."),
+    ];
+    let (reply, _) = run(reg, turns, "publie ?", ctx("coordinator")).await;
+    assert_eq!(reply.tool_calls[0].result["ok"], false);
+    assert_eq!(reply.reply, "Je reste en local.");
+}
+
+#[tokio::test]
+async fn images_go_multimodal_only_for_vision_models() {
+    let mut c = ctx("coordinator");
+    c.images = vec![devforge_llm::ImagePart { name: "capture.png".into(), data_url: "data:image/png;base64,AA".into() }];
+    let (_, llm) = run(ToolRegistry::new(), vec![ScriptedLlmProvider::text("Je vois un bouton.")], "et ça ?", c).await;
+    let last = llm.requests()[0].messages.last().cloned().unwrap();
+    // Le fournisseur scripté ne voit pas : mention texte, pas d'image.
+    assert!(last.images.is_empty());
+    assert!(last.content.contains("[image jointe : capture.png]"), "{}", last.content);
 }

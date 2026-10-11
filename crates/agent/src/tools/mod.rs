@@ -1,3 +1,5 @@
+pub mod ask_user;
+mod routines;
 mod agent_threads;
 mod delegate;
 mod deploy;
@@ -35,6 +37,8 @@ pub use http::{post_deploy_verdict, smoke_url, HttpSmokeTool};
 pub use mcp::{McpCallTool, McpListRemoteToolsTool, McpListServersTool};
 pub use memory::{item_json as memory_item_json, MemoryForgetTool, MemorySearchTool, MemoryWriteTool, IDENTITY_ARGS as MEMORY_IDENTITY_ARGS};
 pub use plan::ProposePlanTool;
+pub use routines::{CreateRoutineTool, DeleteRoutineTool, ListRoutinesTool, IDENTITY_ARGS as ROUTINE_IDENTITY_ARGS};
+pub use ask_user::{answer_text as ask_user_answer_text, AskUserTool, ASK_USER};
 pub use preview::{LocalPreviewStatusTool, StartLocalPreviewTool, StopLocalPreviewTool};
 pub use project_files::{ListProjectFilesTool, ReadProjectFileTool, WriteProjectFileTool};
 #[cfg(test)]

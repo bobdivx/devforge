@@ -32,6 +32,7 @@ mod mcp_oauth;
 mod mobile_routes;
 mod mcp_routes;
 mod memory_routes;
+mod rich_chat;
 mod paths;
 mod platform_sso;
 #[cfg(test)]
@@ -241,6 +242,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     run_routes::install_launcher(&state);
     routes::resume_agent_runs(state.clone());
     memory_routes::spawn_maintenance(state.clone());
+    rich_chat::install_routine_runner(state.clone());
 
     // Background sync for GitHub runners (Docker + Actions status → SQLite snapshot).
     {
@@ -337,6 +339,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(infra_routes::router())
         .merge(memory_routes::router())
         .merge(run_routes::router())
+        .merge(rich_chat::router())
         .merge(backup_routes::router())
         .merge(sso_routes::router())
         .merge(acme_routes::router())

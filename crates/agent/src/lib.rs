@@ -32,7 +32,8 @@ use tools::{
     WriteProjectFileTool,
 };
 
-pub use tools::{memory_item_json, post_deploy_verdict, set_worker_launcher, smoke_url, DelegateTaskTool, WorkerLauncher, MAX_ACTIVE_WORKERS};
+pub use tools::{ask_user_answer_text, ASK_USER,
+    memory_item_json, post_deploy_verdict, set_worker_launcher, smoke_url, DelegateTaskTool, WorkerLauncher, MAX_ACTIVE_WORKERS};
 pub use tokio_util::sync::CancellationToken;
 pub mod memory_ctx;
 
@@ -198,6 +199,7 @@ pub fn build_core_registry(
         pool: pool.clone(),
     }));
     registry.register(Arc::new(ProposePlanTool));
+    registry.register(Arc::new(tools::AskUserTool));
     registry.register(Arc::new(SyncWorkdirToGitHubTool {
         github: github.clone(),
         pool: pool.clone(),
@@ -228,6 +230,9 @@ pub fn build_core_registry(
     registry.register(Arc::new(ListAgentToolFailuresTool { pool: pool.clone() }));
     registry.register(Arc::new(CreateProjectAgentTool { pool: pool.clone() }));
     registry.register(Arc::new(tools::DelegateTaskTool { pool: pool.clone() }));
+    registry.register(Arc::new(tools::CreateRoutineTool { pool: pool.clone() }));
+    registry.register(Arc::new(tools::ListRoutinesTool { pool: pool.clone() }));
+    registry.register(Arc::new(tools::DeleteRoutineTool { pool: pool.clone() }));
     registry.register(Arc::new(ReviewProjectSecurityTool { pool: pool.clone() }));
     registry.set_publish_gate(Arc::new(guard::PgPublishGate { pool: pool.clone() }));
     registry.set_memory(Arc::new(devforge_memory::PgMemoryStore::new((*pool).clone())));
@@ -375,6 +380,8 @@ pub struct AgentChatContext {
     pub run_uuid: Option<String>,
     /// Annulation demandée par l'utilisateur (P4-05) : vérifiée entre chaque appel LLM et outil.
     pub cancel: Option<CancellationToken>,
+    /// Images jointes au message (P5-02) : multimodal si le modèle voit, sinon « [image jointe : …] ».
+    pub images: Vec<devforge_llm::ImagePart>,
 }
 
 pub struct AgentRunner {
@@ -566,7 +573,6 @@ impl AgentRunner {
                 _ => messages.push(ChatMessage::user(content.clone())),
             }
         }
-        messages.push(ChatMessage::user(message));
         let role = ctx.agent_role.clone().unwrap_or_else(|| "ops".into());
         let kind = ctx.agent_kind.clone();
         let security_review = is_security_review_request(message);
@@ -591,6 +597,8 @@ impl AgentRunner {
             let g = self.llm.read().await;
             (g.0.clone(), g.1.clone())
         };
+        // P5-02 : images jointes → contenu multimodal si le modèle voit, sinon mention texte.
+        messages.push(user_turn(message, &ctx.images, llm.supports_vision()));
         for round in 0..self.max_rounds {
             if is_cancelled(&cancel) {
                 return Ok(cancelled_reply(records, &last_step, provider));
@@ -824,6 +832,13 @@ impl AgentRunner {
                         executed_plan,
                     });
                 }
+                // P5-04 : question posée → fin du tour, la carte de question attend la réponse.
+                if call.name == tools::ASK_USER && ok {
+                    let question = result.get("question").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    records.push(ToolCallRecord { id: call.id.clone(), name: call.name.clone(), arguments: args, result });
+                    let executed_plan = executed_plan(&records);
+                    return Ok(AgentReply { reply: question, tool_calls: records, provider, executed_plan });
+                }
                 if push_limited {
                     let reply = result
                         .get("message_fr")
@@ -887,6 +902,18 @@ impl AgentRunner {
             Some(guard::remote_write_blocked(tool, args))
         }
     }
+}
+
+/// Dernier message utilisateur, avec ses images si le modèle les voit.
+fn user_turn(message: &str, images: &[devforge_llm::ImagePart], vision: bool) -> ChatMessage {
+    if images.is_empty() {
+        return ChatMessage::user(message);
+    }
+    if vision {
+        return ChatMessage::user(message).with_images(images.to_vec());
+    }
+    let names: Vec<String> = images.iter().map(|i| format!("[image jointe : {}]", i.name)).collect();
+    ChatMessage::user(format!("{message}\n{}", names.join("\n")))
 }
 
 pub const POST_DEPLOY_NUDGE: &str = "Avant de conclure : attends la fin du déploiement (list_deployments / get_deployment_logs avec l'uuid renvoyé) puis http_smoke sur production_url. Ne dis « en ligne » que si http_smoke renvoie un status 2xx/3xx, et cite ce status.";
@@ -1013,6 +1040,18 @@ fn inject_tool_defaults(tool: &str, args: &mut Value, ctx: &AgentChatContext) {
         set(obj, "caller_agent_kind", &ctx.agent_kind);
         return;
     }
+    if matches!(tool, "create_routine" | "list_routines" | "delete_routine") {
+        // Projet et créateur imposés par le serveur.
+        for k in tools::ROUTINE_IDENTITY_ARGS {
+            obj.remove(*k);
+        }
+        for (k, v) in [("project_uuid", &ctx.project_uuid), ("caller_agent_uuid", &ctx.agent_uuid)] {
+            if let Some(v) = v.as_deref().filter(|v| !v.is_empty()) {
+                obj.insert(k.into(), json!(v));
+            }
+        }
+        return;
+    }
     if tool == "delegate_task" {
         // Fil, projet et run parent imposés par le serveur.
         for k in ["project_uuid", "caller_agent_uuid", "parent_run_uuid"] {
@@ -1099,9 +1138,9 @@ fn read_only_rules() -> String {
     format!("Tu n'as pas d'outil d'écriture dans le code : pour modifier l'application, explique ce qu'il faut changer et délègue au Coordinateur.\n{REMOTE_LOCK}")
 }
 
-const STYLE: &str = "FORMAT DE RÉPONSE :\n- 1re phrase = le résultat (ce qui marche / ce qui casse / ce qui reste), sans préambule.\n- Puis au plus 3 puces factuelles (fichiers, commande, preuve : status HTTP, public_ok).\n- Une seule question à la fin, seulement si une décision de l'utilisateur est nécessaire.\n- Ne répète pas le plan ni la liste des outils appelés : l'interface les affiche déjà.\n- Chaque affirmation de succès cite sa preuve (sortie d'outil de CE tour).";
+const STYLE: &str = "FORMAT DE RÉPONSE :\n- 1re phrase = le résultat (ce qui marche / ce qui casse / ce qui reste), sans préambule.\n- Puis au plus 3 puces factuelles (fichiers, commande, preuve : status HTTP, public_ok).\n- Une seule question à la fin, seulement si une décision de l'utilisateur est nécessaire (de préférence via ask_user).\n- Ne répète pas le plan ni la liste des outils appelés : l'interface les affiche déjà.\n- Chaque affirmation de succès cite sa preuve (sortie d'outil de CE tour).";
 
-const AUTONOMY: &str = "AUTONOMIE :\nAgis sans demander pour tout ce qui est local et réversible (lire, écrire en local, build, tests, preview).\nDemande une seule fois pour ce qui est distant ou destructif (publication, déploiement, suppression, variables prod) : l'interface affiche le bouton de validation.\nEn cas d'échec : une cause → un correctif → re-vérifie. Après 2 échecs identiques, arrête et explique ce qui bloque.";
+const AUTONOMY: &str = "AUTONOMIE :\nAgis sans demander pour tout ce qui est local et réversible (lire, écrire en local, build, tests, preview).\nDemande une seule fois pour ce qui est distant ou destructif (publication, déploiement, suppression, variables prod) : l'interface affiche le bouton de validation.\nQuand une décision de l'utilisateur est indispensable (publier ou garder en local, choisir entre deux approches), appelle ask_user (2 à 5 options courtes) au lieu d'écrire la question : l'interface affiche des boutons. Pour publier : une option action=approve_publish. Puis arrête-toi.\nEn cas d'échec : une cause → un correctif → re-vérifie. Après 2 échecs identiques, arrête et explique ce qui bloque.";
 
 fn sdd_overlay(role: &str, latest: &str) -> String {
     if latest.contains("SDD-SPECIFY:") {

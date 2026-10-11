@@ -5,6 +5,22 @@ use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 
+/// Exécution d'une routine d'agent (P5-05), fournie par le serveur au démarrage.
+/// Renvoie `(statut, sortie)` : statut `success` | `failed`.
+pub trait AgentRoutineRunner: Send + Sync {
+    fn run<'a>(
+        &'a self,
+        cron: &'a crate::models::ProjectCron,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = (String, String)> + Send + 'a>>;
+}
+
+static ROUTINE_RUNNER: std::sync::OnceLock<Arc<dyn AgentRoutineRunner>> = std::sync::OnceLock::new();
+
+/// Installe l'exécuteur des routines d'agent (une fois, au boot).
+pub fn set_agent_routine_runner(runner: Arc<dyn AgentRoutineRunner>) {
+    let _ = ROUTINE_RUNNER.set(runner);
+}
+
 pub struct CronScheduler {
     service: Arc<CronService>,
     executor: Arc<dyn RemoteExecutor>,
@@ -77,6 +93,27 @@ impl CronScheduler {
         );
 
         let run_id = self.service.record_run_start(cron).await?;
+
+        // Routine d'agent : une consigne exécutée par un agent, pas une commande dans le conteneur.
+        if cron.is_agent_routine() {
+            // Un tour d'agent peut durer plusieurs minutes : en tâche de fond, prochain passage fixé tout de suite.
+            let next = self.compute_next_run(cron);
+            self.service.update_cron_status(&cron.id, "running", next.as_deref()).await?;
+            let service = self.service.clone();
+            let cron = cron.clone();
+            tokio::spawn(async move {
+                let (status, output) = match ROUTINE_RUNNER.get() {
+                    Some(r) => r.run(&cron).await,
+                    None => ("failed".to_string(), "exécuteur de routines indisponible".to_string()),
+                };
+                if let Err(e) = service.record_run_finish(&run_id, &status, Some(&output), None).await {
+                    error!(error = %e, "fin de routine");
+                }
+                let _ = service.update_cron_status(&cron.id, &status, next.as_deref()).await;
+                info!(cron_id = %cron.id, status = %status, "Routine d'agent terminée");
+            });
+            return Ok(());
+        }
 
         // Récupère le nom du conteneur du projet.
         let container_name = self.get_project_container_name(&cron.project_uuid).await?;

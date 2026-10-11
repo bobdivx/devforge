@@ -301,6 +301,14 @@ impl OpenAiCompatibleProvider {
                     "role": role,
                     "content": m.content,
                 });
+                // P5-02 : message utilisateur avec images → contenu multimodal (texte + image_url).
+                if matches!(m.role, Role::User) && !m.images.is_empty() {
+                    let mut parts = vec![json!({"type": "text", "text": m.content})];
+                    for img in &m.images {
+                        parts.push(json!({"type": "image_url", "image_url": {"url": img.data_url}}));
+                    }
+                    obj["content"] = json!(parts);
+                }
                 if let Some(id) = &m.tool_call_id {
                     obj["tool_call_id"] = json!(id);
                 }
@@ -424,6 +432,10 @@ impl OpenAiCompatibleProvider {
 impl LlmProvider for OpenAiCompatibleProvider {
     fn name(&self) -> &str {
         "openai-compatible"
+    }
+
+    fn supports_vision(&self) -> bool {
+        crate::model_supports_vision(&self.model)
     }
 
     async fn chat(&self, req: ChatRequest) -> Result<AssistantTurn> {
@@ -1416,5 +1428,23 @@ Some random text here that should be ignored
         let input4 = r#"{"key": "value"}"#;
         let result4 = strip_markdown_fences(input4);
         assert_eq!(result4, r#"{"key": "value"}"#);
+    }
+}
+
+#[cfg(test)]
+mod multimodal_tests {
+    use super::*;
+    use crate::{ChatMessage, ImagePart};
+
+    #[test]
+    fn user_images_become_image_url_parts() {
+        let msgs = vec![
+            ChatMessage::system("s"),
+            ChatMessage::user("regarde").with_images(vec![ImagePart { name: "a.png".into(), data_url: "data:image/png;base64,AA".into() }]),
+        ];
+        let out = OpenAiCompatibleProvider::map_messages(&msgs);
+        assert_eq!(out[0]["content"], "s");
+        assert_eq!(out[1]["content"][0]["type"], "text");
+        assert_eq!(out[1]["content"][1]["image_url"]["url"], "data:image/png;base64,AA");
     }
 }
