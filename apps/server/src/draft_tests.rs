@@ -288,3 +288,43 @@ fn suggested_message_from_files() {
     );
     assert_eq!(suggested_message(&[]), "");
 }
+
+
+#[test]
+fn insight_overlap_and_duplicates() {
+    let fx = fixture("insight");
+    let seed = fx.root.join("seed2");
+    sh(&fx.root, &["clone", "-q", "-b", "main", fx.remote.to_str().unwrap(), seed.to_str().unwrap()]);
+    // GitHub avance : README modifié + nouveau fichier identique à celui du brouillon.
+    std::fs::write(seed.join("README.md"), "remote\n").unwrap();
+    std::fs::write(seed.join("same.txt"), "pareil\n").unwrap();
+    sh(&seed, &["add", "-A"]);
+    sh(&seed, &["commit", "-qm", "remote"]);
+    sh(&seed, &["push", "-q", "origin", "main"]);
+    // Brouillon local : README (conflit), same.txt (déjà sur GitHub), new.txt (neuf).
+    std::fs::write(fx.wd.join("README.md"), "local\n").unwrap();
+    std::fs::write(fx.wd.join("same.txt"), "pareil\n").unwrap();
+    std::fs::write(fx.wd.join("new.txt"), "neuf\n").unwrap();
+    let st = status(&fx.wd, "main", Some(fx.remote.to_str().unwrap()));
+    assert_eq!(st.behind, 1);
+    let x = remote_insight(&fx.wd, "main", &st);
+    assert_eq!(x.overlap, vec!["README.md".to_string()]);
+    assert_eq!(x.already_on_github, vec!["same.txt".to_string()]);
+    let a = advise(&AdviceInput { count: st.files.len(), insight: Some(&x), ..Default::default() });
+    assert_eq!(a.level, "review");
+    assert!(a.reason.contains("conflit"), "{}", a.reason);
+}
+
+#[test]
+fn advice_rules() {
+    let all_dup = RemoteInsight { behind: 1, overlap: vec![], already_on_github: vec!["a".into(), "b".into()] };
+    assert_eq!(advise(&AdviceInput { count: 2, insight: Some(&all_dup), ..Default::default() }).level, "delete");
+    let a = advise(&AdviceInput { count: 1, repair_obsolete_since: Some("2026-10-10T21:00:00Z".into()), ..Default::default() });
+    assert_eq!(a.level, "delete");
+    assert!(a.reason.contains("réussi depuis"));
+    assert_eq!(advise(&AdviceInput { count: 1, lockfile_only: true, ..Default::default() }).level, "delete");
+    assert_eq!(advise(&AdviceInput { count: 3, age_days: Some(12), ..Default::default() }).label, "À vérifier");
+    let fresh = advise(&AdviceInput { count: 3, age_days: Some(0), ..Default::default() });
+    assert_eq!((fresh.level, fresh.label), ("keep", "Garder"));
+    assert!(is_lockfile("web/package-lock.json") && is_lockfile("Cargo.lock") && !is_lockfile("src/lock.ts"));
+}

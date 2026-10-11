@@ -13,7 +13,10 @@ import app.jeser.devforge.data.GitSync
 import app.jeser.devforge.data.GitWorkdir
 import app.jeser.devforge.data.PreviewStatus
 import app.jeser.devforge.data.Deployment
+import app.jeser.devforge.data.DraftAdvice
 import app.jeser.devforge.data.DraftBackup
+import app.jeser.devforge.data.DraftInsight
+import app.jeser.devforge.data.DraftOrigin
 import app.jeser.devforge.data.DraftDiffFile
 import app.jeser.devforge.data.DraftFile
 import app.jeser.devforge.data.DraftPreview
@@ -144,6 +147,23 @@ object SampleData {
         junkCount = 2, updatedAt = ago(42), suggestedMessage = "feat: met à jour contact.astro, Footer.astro, old-banner.png",
         preview = DraftPreview(true, "https://vigie-preview.jeser.app"),
         backups = listOf(DraftBackup("20261007T120000Z", ago(60 * 5), "discard", listOf("src/old.ts"), emptyList())),
+        origin = DraftOrigin("feature", runUuid = "run-1", agentUuid = "a-coord", agentName = "Coordinateur"),
+        originKinds = listOf("feature"),
+        advice = DraftAdvice("keep", "Garder", "Travail récent, pas encore sur GitHub, sans conflit."),
+        insight = DraftInsight(behind = 0),
+    )
+    /** Correctif Rustine devenu inutile (la mise en ligne a réussi depuis). */
+    val draftObsoleteRepair = draft.copy(
+        count = 1,
+        files = listOf(DraftFile("package-lock.json", "modified", origin = DraftOrigin("repair", agentUuid = "a-coord", agentName = "Coordinateur"))),
+        origin = DraftOrigin("repair", runUuid = "run-2", agentUuid = "a-coord", agentName = "Coordinateur", deploymentUuid = "dep-1"),
+        originKinds = listOf("repair"),
+        behind = 2,
+        insight = DraftInsight(behind = 2, overlap = listOf("package-lock.json")),
+        repairSucceededAt = ago(60 * 3),
+        advice = DraftAdvice("delete", "Peut être supprimé", "Correctif d’une mise en ligne ratée, mais une mise en ligne a réussi depuis (le 11/10 à 04:12) : il n’est sans doute plus utile."),
+        preview = DraftPreview(false, null),
+        backups = emptyList(),
     )
     val draftDiff = listOf(
         DraftDiffFile(
@@ -157,6 +177,8 @@ object SampleData {
         DraftDiffFile("public/old-banner.png", "deleted"),
     )
     val projectDraft = projectUpToDate.copy(draft = draft, draftDiff = draftDiff)
+    val projectObsoleteDraft = projectUpToDate.copy(draft = draftObsoleteRepair, draftDiff = emptyList())
+    val projectClean = projectUpToDate.copy(draft = DraftStatus(available = true, dirty = false, hasRemote = true))
 
     val hub = HubUiState(
         conversations = listOf(
@@ -173,8 +195,10 @@ object SampleData {
         ),
         conversationsLoading = false,
         drafts = listOf(
-            DraftSummary("p-vigie", "Vigie", "vigie.jeser.app", count = 3, updatedAt = ago(42)),
-            DraftSummary("p-tesla", "tesla", "teslasphere.app", count = 1, behind = 2, updatedAt = ago(60 * 30)),
+            DraftSummary("p-vigie", "Vigie", "vigie.jeser.app", count = 3, updatedAt = ago(42),
+                origin = DraftOrigin("feature"), advice = DraftAdvice("keep", "Garder", "")),
+            DraftSummary("p-tesla", "tesla", "teslasphere.app", count = 1, behind = 2, updatedAt = ago(60 * 30),
+                origin = DraftOrigin("repair"), advice = DraftAdvice("delete", "Peut être supprimé", "")),
         ),
         alerts = inbox + listOf(
             InboxEvent("deploy:old", "deploy_failed", "p-pop", "popcornn", "Mise en ligne échouée · popcornn",

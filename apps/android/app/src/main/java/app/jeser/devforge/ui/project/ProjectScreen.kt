@@ -120,7 +120,7 @@ data class ProjectActions(
 )
 
 /** Feuilles de la page app (une seule ouverte à la fois). */
-enum class ProjectSheet { None, Details, Deploys, Stop, Restart, Deploy, NewFeature, Draft, DraftFile, DraftValidate, DraftDiscard, Chat }
+enum class ProjectSheet { None, Details, Deploys, Stop, Restart, Deploy, NewFeature, Workspace, Draft, DraftFile, DraftValidate, DraftDiscard, Chat }
 
 private data class Chip(val key: String, val label: String, val danger: Boolean = false)
 
@@ -158,7 +158,19 @@ fun ProjectScreen(
     }
 
     val project = state.project
+    // Fermer le brouillon ramène au Workspace s'il a été ouvert depuis là.
+    var draftFromWorkspace by rememberSaveable { mutableStateOf(false) }
     val openDraft = { actions.onOpenDraft(); sheet = ProjectSheet.Draft }
+    // Tuile Workspace : brouillon en attente → directement le brouillon ; sinon les tuiles du Workspace.
+    val openWorkspace = {
+        actions.onOpenDraft()
+        if (state.draft?.dirty == true) {
+            draftFromWorkspace = true
+            sheet = ProjectSheet.Draft
+        } else {
+            sheet = ProjectSheet.Workspace
+        }
+    }
     Scaffold(
         modifier = modifier,
         containerColor = DfColors.Bg,
@@ -222,7 +234,7 @@ fun ProjectScreen(
                             cols = cols,
                             showBraise = showBraise,
                             onBraise = { sheet = ProjectSheet.Chat },
-                            onWorkspace = openDraft,
+                            onWorkspace = openWorkspace,
                             onDeploys = { sheet = ProjectSheet.Deploys },
                             onSettings = { sheet = ProjectSheet.Details },
                         )
@@ -287,9 +299,17 @@ fun ProjectScreen(
                 onDismiss = close,
                 onSubmit = { t, d -> actions.onCreateSpec(t, d) { sheet = ProjectSheet.None } },
             )
-            ProjectSheet.Draft -> DraftSheet(
+            ProjectSheet.Workspace -> WorkspaceSheet(
                 state,
                 onDismiss = close,
+                onDraft = { draftFromWorkspace = true; openDraft() },
+                onPreview = { actions.onOpenPreview(); close() },
+                onBraise = { sheet = ProjectSheet.Chat },
+            )
+            ProjectSheet.Draft -> DraftSheet(
+                state,
+                onDismiss = { if (draftFromWorkspace) { draftFromWorkspace = false; sheet = ProjectSheet.Workspace } else close() },
+                onOpenDiscussion = { sheet = ProjectSheet.Chat },
                 onOpenFile = { p -> draftPath = p; sheet = ProjectSheet.DraftFile },
                 onValidate = { actions.onDraftValidatedSeen(); sheet = ProjectSheet.DraftValidate },
                 onDiscard = { sheet = ProjectSheet.DraftDiscard },

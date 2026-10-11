@@ -133,11 +133,15 @@ private fun DraftCard(d: DraftSummary, onOpen: (String) -> Unit) {
                 Text(d.projectName, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val whenText = relativeTime(d.updatedAt)
                 Text(
-                    "${d.count} fichier${if (d.count > 1) "s" else ""} pas encore sur GitHub" +
-                        (if (whenText.isNotBlank()) " · $whenText" else "") +
-                        (if (d.behind > 0) " · GitHub a avancé" else ""),
-                    color = DfColors.Warn, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    (d.origin?.let { app.jeser.devforge.ui.project.originMeta(it.kind).first + " · " } ?: "") +
+                        "${d.count} fichier${if (d.count > 1) "s" else ""}" +
+                        (if (whenText.isNotBlank()) " · $whenText" else ""),
+                    color = DfColors.InkMuted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 )
+                d.advice?.let { a ->
+                    Spacer(Modifier.height(4.dp))
+                    app.jeser.devforge.ui.project.AdviceChip(a)
+                }
             }
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = DfColors.InkFaint)
         }

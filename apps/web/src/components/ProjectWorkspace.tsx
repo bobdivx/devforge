@@ -9,8 +9,26 @@ import {
 } from './workspace/WorkspaceTopBar';
 import { PreviewModal } from './workspace/PreviewModal';
 import { WorkspaceAtelier } from './workspace/WorkspaceAtelier';
-import { FadeIn } from './ui';
+import { FadeIn, HubGrid, HubTile, Modal, Switch, Button, Spinner } from './ui';
 import type { Project } from '../lib/api';
+import { ChevronLeft, FileCode2, FileDiff, MessageSquare, MonitorPlay } from 'lucide-preact';
+import { AdviceChip, DraftModal, filesLabel, relativeFr, useDraft } from './DraftPanel';
+
+type WorkspaceView = 'hub' | 'chat';
+
+function readWorkspaceQuery(): { view: WorkspaceView; draft: boolean } {
+  if (typeof window === 'undefined') return { view: 'hub', draft: false };
+  const q = new URLSearchParams(window.location.search);
+  // Lien direct vers une discussion (?agent=…) : on ouvre le fil, pas la grille.
+  const view: WorkspaceView = q.get('view') === 'chat' || q.has('agent') ? 'chat' : 'hub';
+  return { view, draft: q.get('draft') === '1' };
+}
+
+function setQuery(mutate: (u: URL) => void) {
+  const u = new URL(window.location.href);
+  mutate(u);
+  window.history.replaceState(null, '', u.toString());
+}
 
 type Props = {
   projectUuid: string;
@@ -24,6 +42,12 @@ type Props = {
  * Dev server = process npm run dev (pas de conteneur df-dev-*).
  */
 export function ProjectWorkspace({ projectUuid, project, builderMode, builderAgentUuid }: Props) {
+  const initialQuery = readWorkspaceQuery();
+  const [view, setView] = useState<WorkspaceView>(initialQuery.view);
+  const [draftOpen, setDraftOpen] = useState(initialQuery.draft);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [previewInfoOpen, setPreviewInfoOpen] = useState(false);
+  const { draft, refresh: refreshDraft } = useDraft(projectUuid);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [mobilePane, setMobilePane] = useState<'chat' | 'atelier'>('chat');
   const [atelierTab, setAtelierTab] = useState<'preview' | 'files'>('preview');
@@ -182,8 +206,161 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
     setMobilePane('atelier');
   }
 
+  const draftModal = (
+    <DraftModal
+      open={draftOpen}
+      onClose={() => {
+        setDraftOpen(false);
+        setQuery((u) => u.searchParams.delete('draft'));
+      }}
+      uuid={projectUuid}
+      name={project?.name ?? 'cette app'}
+      draft={draft}
+      onChanged={() => refreshDraft(true)}
+    />
+  );
+
+  if (view === 'hub') {
+    const running = previewStatus === 'running';
+    const draftSubtitle = draft?.dirty ? (
+      <div class="mt-1 flex min-w-0 flex-col items-center gap-1">
+        <span class="max-w-full truncate text-[11px] text-[var(--color-warn)]">
+          {filesLabel(draft.count)}
+          {relativeFr(draft.updated_at) ? ` · ${relativeFr(draft.updated_at)}` : ''}
+        </span>
+        <AdviceChip advice={draft.advice} class="max-w-full text-[10.5px]" />
+      </div>
+    ) : (
+      <div class="mt-1 truncate text-[11px] text-[var(--color-ink-muted)]">
+        {draft?.backups?.length ? 'Vide · sauvegarde restaurable' : 'Rien en attente'}
+      </div>
+    );
+    return (
+      <FadeIn>
+        <HubGrid cols={4}>
+          <HubTile
+            index={0}
+            title="Brouillon"
+            icon={<FileDiff size={26} aria-hidden />}
+            subtitle={draftSubtitle}
+            onClick={() => {
+              setDraftOpen(true);
+              setQuery((u) => u.searchParams.set('draft', '1'));
+            }}
+          />
+          <HubTile
+            index={1}
+            title="Aperçu"
+            icon={<MonitorPlay size={26} aria-hidden />}
+            subtitle={
+              <div class={cn('mt-1 truncate text-[11px]', running ? 'text-[var(--color-ok)]' : 'text-[var(--color-ink-muted)]')}>
+                {previewBusy ? 'Patiente…' : running ? 'En marche' : previewStatus === 'starting' ? 'Démarrage…' : 'Arrêté'}
+              </div>
+            }
+            footer={
+              <Switch
+                checked={running || previewStatus === 'starting'}
+                disabled={previewBusy}
+                label={running ? 'Arrêter l’aperçu' : 'Démarrer l’aperçu'}
+                onToggle={() => void (running ? handleStopServer() : handleStartServer(false))}
+              />
+            }
+            onClick={() => (running && localPreviewUrl ? setPreviewOpen(true) : setPreviewInfoOpen(true))}
+          />
+          <HubTile
+            index={2}
+            title="Fichiers"
+            icon={<FileCode2 size={26} aria-hidden />}
+            description="Code du dossier de travail"
+            onClick={() => setFilesOpen(true)}
+          />
+          <HubTile
+            index={3}
+            title="Braise"
+            icon={<MessageSquare size={26} aria-hidden />}
+            description="Fils de travail et workers"
+            onClick={() => {
+              setView('chat');
+              setQuery((u) => u.searchParams.set('view', 'chat'));
+            }}
+          />
+        </HubGrid>
+        {draftModal}
+        <Modal
+          open={filesOpen}
+          onClose={() => setFilesOpen(false)}
+          title="Fichiers"
+          description="Le code du dossier de travail (brouillon compris)."
+          size="xl"
+        >
+          <div class="h-[min(70vh,40rem)] overflow-hidden rounded-xl border border-[var(--color-line)]">
+            <WorkspaceAtelier
+              projectUuid={projectUuid}
+              tab="files"
+              onTab={() => {}}
+              previewUrl={localPreviewUrl}
+              previewStatus={previewStatus}
+              onExpandPreview={() => {}}
+            />
+          </div>
+        </Modal>
+        <Modal
+          open={previewInfoOpen}
+          onClose={() => setPreviewInfoOpen(false)}
+          title="Aperçu du brouillon"
+          description="Lance l’app depuis le dossier de travail pour voir le brouillon avant de le valider."
+          size="md"
+          footer={
+            <Button
+              size="sm"
+              class="max-lg:h-11"
+              disabled={previewBusy}
+              onClick={() =>
+                void handleStartServer(false).then(() => {
+                  setPreviewInfoOpen(false);
+                })
+              }
+            >
+              {previewBusy ? <Spinner /> : <MonitorPlay size={14} aria-hidden />}
+              Démarrer l’aperçu
+            </Button>
+          }
+        >
+          {previewError ? (
+            <div class="text-sm text-[var(--color-danger)]">
+              <p>{previewError}</p>
+              {previewErrorDetail && (
+                <pre class="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] text-[var(--color-ink-muted)]">
+                  {previewErrorDetail}
+                </pre>
+              )}
+            </div>
+          ) : (
+            <p class="text-sm text-[var(--color-ink-muted)]">L’aperçu est arrêté.</p>
+          )}
+        </Modal>
+        <PreviewModal open={previewOpen} onClose={() => setPreviewOpen(false)} previewUrl={localPreviewUrl} isProduction={false} />
+      </FadeIn>
+    );
+  }
+
   return (
     <FadeIn>
+      <button
+        type="button"
+        class="df-hit mb-2 inline-flex min-h-[40px] items-center gap-1.5 text-sm text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
+        onClick={() => {
+          setView('hub');
+          setQuery((u) => {
+            u.searchParams.delete('view');
+            u.searchParams.delete('agent');
+          });
+        }}
+      >
+        <ChevronLeft size={16} aria-hidden />
+        Workspace
+      </button>
+      {draftModal}
       <div
         class={cn(
           'flex flex-col overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-card)] shadow-[0_16px_48px_rgb(0_0_0/0.28)]',

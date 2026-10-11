@@ -32,10 +32,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.jeser.devforge.data.DraftAdvice
 import app.jeser.devforge.data.DraftDiffFile
+import app.jeser.devforge.data.DraftOrigin
 import app.jeser.devforge.data.DraftFile
 import app.jeser.devforge.data.DraftStatus
+import app.jeser.devforge.ui.components.DfTile
 import app.jeser.devforge.ui.components.relativeTime
+import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextAlign
 import app.jeser.devforge.ui.theme.DfColors
 
 fun filesLabel(n: Int) = "$n fichier${if (n > 1) "s" else ""} modifié${if (n > 1) "s" else ""}"
@@ -91,6 +98,146 @@ fun DraftBanner(draft: DraftStatus?, onClick: () -> Unit, modifier: Modifier = M
     }
 }
 
+
+/* ---------------- Origine + recommandation ---------------- */
+
+/** Libellé + couleur de l'origine d'un brouillon. */
+fun originMeta(kind: String?): Pair<String, Color> = when (kind) {
+    "repair" -> "Réparation · Rustine" to DfColors.Danger
+    "feature" -> "Fonctionnalité · Braise" to DfColors.Accent
+    "routine" -> "Routine d'agent" to DfColors.Warn
+    "sync" -> "Dépendances (lockfile)" to DfColors.InkMuted
+    else -> "Modif. manuelle" to DfColors.InkMuted
+}
+
+fun adviceColor(level: String?): Color = when (level) {
+    "keep" -> DfColors.Ok
+    "delete" -> DfColors.Danger
+    else -> DfColors.Warn
+}
+
+@Composable
+fun Chip(text: String, color: Color, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        color = color,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier
+            .background(color.copy(alpha = .13f), RoundedCornerShape(50))
+            .padding(horizontal = 10.dp, vertical = 3.dp),
+    )
+}
+
+@Composable
+fun AdviceChip(advice: DraftAdvice?, modifier: Modifier = Modifier) {
+    advice ?: return
+    Chip(advice.label, adviceColor(advice.level), modifier.testTag("draft-advice"))
+}
+
+/** « Garder ou supprimer ? » : recommandation, faits, origine et lien vers la discussion. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun DraftDecisionCard(draft: DraftStatus, onOpenDiscussion: (DraftOrigin) -> Unit) {
+    val facts = buildList {
+        relativeTime(draft.updatedAt).takeIf { it.isNotBlank() }?.let { add("Modifié $it") }
+        val behind = draft.insight?.behind ?: draft.behind
+        if (behind > 0) add("GitHub a $behind commit${if (behind > 1) "s" else ""} de plus")
+        else if (draft.hasRemote) add("À jour avec GitHub")
+        draft.insight?.overlap?.takeIf { it.isNotEmpty() }?.let { o ->
+            add("Mêmes fichiers touchés sur GitHub : " + o.take(3).joinToString(", ") { it.substringAfterLast('/') } + if (o.size > 3) "…" else "")
+        }
+        draft.insight?.alreadyOnGithub?.takeIf { it.isNotEmpty() }?.let { d ->
+            add("${d.size} fichier${if (d.size > 1) "s" else ""} déjà identique${if (d.size > 1) "s" else ""} sur GitHub")
+        }
+        draft.repairSucceededAt?.let { add("Mise en ligne réussie depuis l'échec (${relativeTime(it)})") }
+    }
+    val kinds = draft.originKinds.ifEmpty { listOfNotNull(draft.origin?.kind) }
+    Surface(color = DfColors.Card, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, DfColors.Line), modifier = Modifier.testTag("draft-decision")) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                AdviceChip(draft.advice)
+                kinds.forEach { k -> val (l, c) = originMeta(k); Chip(l, c) }
+            }
+            draft.advice?.reason?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 14.sp, lineHeight = 19.sp) }
+            facts.forEach { Text("· $it", color = DfColors.InkMuted, fontSize = 12.5.sp) }
+            val origin = draft.origin
+            if (origin?.agentUuid != null) {
+                TextButton(onClick = { onOpenDiscussion(origin) }, modifier = Modifier.heightIn(min = 48.dp), contentPadding = PaddingValues(horizontal = 4.dp)) {
+                    Text("Voir la discussion" + (origin.agentName?.let { " · $it" } ?: ""), color = DfColors.Accent, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+/* ---------------- Workspace : tuiles ---------------- */
+
+/** Workspace en tuiles : Brouillon, Aperçu, Braise. Chaque tuile ouvre sa feuille. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun WorkspaceSheet(
+    state: ProjectUiState,
+    onDismiss: () -> Unit,
+    onDraft: () -> Unit,
+    onPreview: () -> Unit,
+    onBraise: () -> Unit,
+) {
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet, containerColor = DfColors.Surface) {
+        BoxWithConstraints(Modifier.fillMaxWidth().testTag("workspace-sheet")) {
+            val cols = if (maxWidth >= 600.dp) 3 else 2
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("Workspace", style = MaterialTheme.typography.titleLarge)
+                Text("Le travail local de l'app, avant GitHub.", color = DfColors.InkMuted)
+                val draft = state.draft
+                val dirty = draft?.dirty == true
+                val pv = state.preview
+                val running = pv?.running == true
+                data class T(val key: String, val title: String, val sub: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val tone: Color, val onClick: () -> Unit, val extra: (@Composable () -> Unit)? = null)
+                val tiles = listOf(
+                    T(
+                        "draft", "Brouillon",
+                        if (dirty) filesLabel(draft!!.count) + (relativeTime(draft.updatedAt).takeIf { it.isNotBlank() }?.let { " · $it" } ?: "")
+                        else "Rien en attente",
+                        Icons.Filled.Description, if (dirty) DfColors.Warn else DfColors.InkMuted, onDraft,
+                        if (dirty && draft?.advice != null) ({ AdviceChip(draft.advice) }) else null,
+                    ),
+                    T("preview", "Aperçu", if (state.previewStarting) "Démarrage…" else if (running) "En marche" else "Arrêté",
+                        Icons.Filled.PlayCircle, if (running) DfColors.Ok else DfColors.InkMuted, onPreview),
+                    T("braise", "Braise", "Discuter du brouillon", Icons.Filled.LocalFireDepartment, DfColors.Accent, onBraise),
+                )
+                tiles.chunked(cols).forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        row.forEach { t ->
+                            DfTile(
+                                onClick = t.onClick,
+                                tone = if (t.key == "draft" && dirty) t.tone else null,
+                                minHeight = 128.dp,
+                                contentDescription = "${t.title} : ${t.sub}",
+                                modifier = Modifier.weight(1f).testTag("ws-tile-${t.key}"),
+                            ) {
+                                Box(Modifier.size(44.dp).background(t.tone.copy(alpha = .14f), RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+                                    Icon(t.icon, contentDescription = null, tint = t.tone, modifier = Modifier.size(22.dp))
+                                }
+                                Text(t.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(t.sub, color = DfColors.InkMuted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                                t.extra?.invoke()
+                            }
+                        }
+                        repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /* ---------------- Feuilles ---------------- */
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -125,6 +272,7 @@ fun DraftSheet(
     onUpdate: () -> Unit,
     onRestore: (String) -> Unit,
     onOpenPreview: () -> Unit,
+    onOpenDiscussion: (DraftOrigin) -> Unit = {},
 ) {
     val draft = state.draft
     val busy = state.draftBusy
@@ -136,6 +284,7 @@ fun DraftSheet(
             color = DfColors.InkMuted,
         )
         ErrorBox(state.draftError)
+        if (draft?.dirty == true) DraftDecisionCard(draft, onOpenDiscussion)
         if (draft?.dirty == true) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                 OutlinedButton(
@@ -183,7 +332,7 @@ fun DraftSheet(
                 Column {
                     draft.files.forEachIndexed { i, f ->
                         if (i > 0) HorizontalDivider(color = DfColors.Line)
-                        DraftFileRow(f, state.draftDiff?.firstOrNull { it.path == f.path }, onClick = { onOpenFile(f.path) })
+                        DraftFileRow(f, state.draftDiff?.firstOrNull { it.path == f.path }, showOrigin = draft.originKinds.size > 1, onClick = { onOpenFile(f.path) })
                     }
                 }
             }
@@ -215,13 +364,17 @@ fun DraftSheet(
 }
 
 @Composable
-private fun DraftFileRow(f: DraftFile, diff: DraftDiffFile?, onClick: () -> Unit) {
+private fun DraftFileRow(f: DraftFile, diff: DraftDiffFile?, showOrigin: Boolean = false, onClick: () -> Unit) {
     Surface(onClick = onClick, color = Color.Transparent, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
         Row(Modifier.padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(f.path, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 17.sp)
                 if (diff != null && (diff.additions > 0 || diff.deletions > 0)) {
                     Text("+${diff.additions}  −${diff.deletions}", fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = DfColors.InkFaint)
+                }
+                if (showOrigin && f.origin != null) {
+                    val (l, c) = originMeta(f.origin.kind)
+                    Text(l, color = c, fontSize = 11.sp)
                 }
             }
             Spacer(Modifier.width(8.dp))

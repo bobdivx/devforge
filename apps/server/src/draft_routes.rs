@@ -37,11 +37,11 @@ struct Ctx {
     branch: String,
 }
 
-fn branch_of(p: &Project) -> String {
+pub(crate) fn branch_of(p: &Project) -> String {
     p.git_branch.clone().filter(|b| !b.trim().is_empty()).unwrap_or_else(|| "main".into())
 }
 
-fn workdir_of(p: &Project) -> Option<PathBuf> {
+pub(crate) fn workdir_of(p: &Project) -> Option<PathBuf> {
     let configured = p.workdir.as_deref().unwrap_or("").trim();
     if configured.is_empty() {
         return None;
@@ -105,6 +105,40 @@ fn status_json(st: &draft::DraftStatus) -> Value {
     v
 }
 
+fn age_days(updated_at: Option<&str>) -> Option<i64> {
+    let t = chrono::DateTime::parse_from_rfc3339(updated_at?).ok()?;
+    Some((chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_days().max(0))
+}
+
+/// Origine, comparaison GitHub et recommandation (garder / à vérifier / supprimer).
+async fn enrich(state: &AppState, project_uuid: &str, st: &draft::DraftStatus, insight: Option<&draft::RemoteInsight>, out: &mut Value) {
+    if !st.dirty {
+        return;
+    }
+    let known = crate::draft_origin::load(&state.pool, project_uuid).await;
+    let origins = crate::draft_origin::per_file(&st.files, &known);
+    if let Some(files) = out.get_mut("files").and_then(|f| f.as_array_mut()) {
+        for (f, o) in files.iter_mut().zip(origins.iter()) {
+            f["origin"] = json!(o);
+        }
+    }
+    let obsolete = crate::draft_origin::repair_obsolete_since(&state.pool, &origins).await;
+    let advice = draft::advise(&draft::AdviceInput {
+        count: st.files.len(),
+        insight,
+        age_days: age_days(st.updated_at.as_deref()),
+        lockfile_only: st.files.iter().all(|f| draft::is_lockfile(&f.path)),
+        repair_obsolete_since: obsolete.clone(),
+    });
+    out["origin"] = json!(crate::draft_origin::summary(&origins));
+    out["origin_kinds"] = json!(crate::draft_origin::kinds(&origins));
+    out["repair_succeeded_at"] = json!(obsolete);
+    out["advice"] = json!(advice);
+    if let Some(x) = insight {
+        out["insight"] = json!(x);
+    }
+}
+
 #[derive(Deserialize, Default)]
 struct StatusQuery {
     /// `1` : rafraîchit d'abord la branche GitHub (réseau).
@@ -121,10 +155,16 @@ async fn get_draft(
     let fetch = matches!(q.fetch.as_deref(), Some("1" | "true"));
     let url = if fetch { remote_url(&state, &c).await } else { None };
     let (wd, br) = (c.workdir.clone(), c.branch.clone());
-    let st = blocking(move || Ok(draft::status(&wd, &br, url.as_deref()))).await?;
+    let (st, insight) = blocking(move || {
+        let st = draft::status(&wd, &br, url.as_deref());
+        let insight = st.dirty.then(|| draft::remote_insight(&wd, &br, &st));
+        Ok((st, insight))
+    })
+    .await?;
     let root = backups_root(&c.project.uuid);
     let backups = tokio::task::spawn_blocking(move || draft::list_backups(&root)).await.unwrap_or_default();
     let mut out = status_json(&st);
+    enrich(&state, &uuid, &st, insight.as_ref(), &mut out).await;
     out["ok"] = json!(true);
     out["backups"] = json!(backups);
     out["preview"] = if st.dirty { preview_info(&state, &uuid).await } else { json!({ "running": false, "url": null }) };
@@ -174,6 +214,7 @@ async fn validate(
     let res = blocking(move || draft::validate(&wd, &br, &url, &message, (&name, &email))).await;
     match res {
         Ok(v) => {
+            crate::draft_origin::forget(&state.pool, &c.project.uuid, None).await;
             audit(&state, &c, "validated", &v.sha, &format!("{} fichier(s) envoyés sur GitHub ({})", v.files, v.branch)).await;
             Ok(Json(json!({ "ok": true, "sha": v.sha, "files": v.files, "branch": v.branch })))
         }
@@ -232,6 +273,7 @@ async fn discard(
                 state.registry.execute("stop_local_preview", json!({ "project_uuid": uuid })),
             )
             .await;
+            crate::draft_origin::forget(&state.pool, &c.project.uuid, None).await;
             audit(&state, &c, "discarded", &b.id, &format!("{n} fichier(s) supprimés, sauvegarde 7 jours")).await;
             Ok(Json(json!({ "ok": true, "backup_id": b.id, "files": n, "head": head })))
         }
@@ -298,6 +340,7 @@ async fn revert_file(
         Ok(b)
     })
     .await?;
+    crate::draft_origin::forget(&state.pool, &c.project.uuid, Some(&path)).await;
     audit(&state, &c, "file_reverted", &b.id, &path).await;
     Ok(Json(json!({ "ok": true, "backup_id": b.id, "path": path })))
 }
@@ -330,7 +373,7 @@ async fn list_drafts(State(state): State<AppState>, headers: HeaderMap) -> Resul
         .fetch_all(&state.pool)
         .await
         .map_err(ApiError::from)?;
-    let items = tokio::task::spawn_blocking(move || {
+    let found = tokio::task::spawn_blocking(move || {
         projects
             .into_iter()
             .filter_map(|p| {
@@ -338,27 +381,38 @@ async fn list_drafts(State(state): State<AppState>, headers: HeaderMap) -> Resul
                 if !wd.is_dir() {
                     return None;
                 }
-                let st = draft::status(&wd, &branch_of(&p), None);
+                let br = branch_of(&p);
+                let st = draft::status(&wd, &br, None);
                 if !st.dirty {
                     return None;
                 }
-                Some(json!({
-                    "project_uuid": p.uuid,
-                    "project_name": p.name,
-                    "production_url": p.production_url,
-                    "git_repository": p.git_repository,
-                    "branch": st.branch,
-                    "count": st.files.len(),
-                    "added": st.files.iter().filter(|f| f.status == "added").count(),
-                    "deleted": st.files.iter().filter(|f| f.status == "deleted").count(),
-                    "behind": st.behind,
-                    "updated_at": st.updated_at,
-                    "sample": st.files.iter().take(3).map(|f| f.path.clone()).collect::<Vec<_>>(),
-                }))
+                let insight = draft::remote_insight(&wd, &br, &st);
+                Some((p, st, insight))
             })
             .collect::<Vec<_>>()
     })
     .await
     .map_err(|e| ApiError::message(e.to_string()))?;
+    let mut items = Vec::new();
+    for (p, st, insight) in found {
+        let mut full = status_json(&st);
+        enrich(&state, &p.uuid, &st, Some(&insight), &mut full).await;
+        items.push(json!({
+            "project_uuid": p.uuid,
+            "project_name": p.name,
+            "production_url": p.production_url,
+            "git_repository": p.git_repository,
+            "branch": st.branch,
+            "count": st.files.len(),
+            "added": st.files.iter().filter(|f| f.status == "added").count(),
+            "deleted": st.files.iter().filter(|f| f.status == "deleted").count(),
+            "behind": st.behind,
+            "updated_at": st.updated_at,
+            "sample": st.files.iter().take(3).map(|f| f.path.clone()).collect::<Vec<_>>(),
+            "origin": full.get("origin").cloned().unwrap_or(Value::Null),
+            "origin_kinds": full.get("origin_kinds").cloned().unwrap_or(json!([])),
+            "advice": full.get("advice").cloned().unwrap_or(Value::Null),
+        }));
+    }
     Ok(Json(json!({ "ok": true, "drafts": items })))
 }

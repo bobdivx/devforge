@@ -22,6 +22,7 @@ mod dns;
 mod dns_failover;
 mod domain_catalog;
 mod draft;
+mod draft_origin;
 mod draft_routes;
 mod git_routes;
 mod group_routes;
