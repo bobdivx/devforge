@@ -3216,6 +3216,13 @@ function splitMount(spec: string): { host: string; target: string } {
   return { host: spec.slice(0, i), target: spec.slice(i + 1) };
 }
 
+/** Source d'un montage : chemin hôte absolu ou volume Docker nommé `df-…` (même règle que le serveur). */
+function isValidMountSource(source: string): boolean {
+  if (source.includes('..')) return false;
+  if (source.startsWith('/')) return true;
+  return source.length <= 128 && /^df-[A-Za-z0-9_.-]+$/.test(source);
+}
+
 function volumeMountsOf(project: Project): string[] {
   const raw = project.volumes_json;
   if (!raw) return [];
@@ -4218,13 +4225,13 @@ function ProjectSettingsPanel({
         <Card>
           <CardHeader
             title="Ajouter un dossier"
-            description="Chemin du nœud vers un chemin dans le conteneur. Les deux commencent par /."
+            description="Source : chemin absolu du nœud (/…) ou volume Docker nommé df-… (persistant, créé au premier déploiement, partagé entre déploiements). Cible : chemin absolu dans le conteneur."
           />
           <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div class="min-w-0 flex-1">
               <Input
-                label="Hôte"
-                placeholder="/media/Media/Popcornn/media"
+                label="Hôte ou volume df-…"
+                placeholder="/media/Media/Popcornn/media ou df-mon-cache"
                 value={volumeHost}
                 onInput={(e) => setVolumeHost((e.target as HTMLInputElement).value)}
               />
@@ -4244,10 +4251,11 @@ function ProjectSettingsPanel({
               onClick={() => {
                 const host = volumeHost.trim();
                 const target = volumeTarget.trim();
-                if (!host.startsWith('/') || !target.startsWith('/')) {
+                if (!isValidMountSource(host) || !target.startsWith('/')) {
                   toast.push({
-                    title: 'Chemins absolus',
-                    detail: 'Les deux chemins commencent par /',
+                    title: 'Montage invalide',
+                    detail:
+                      'Source : chemin absolu (/…) ou volume nommé df-… (lettres, chiffres, _ . -). Cible : chemin absolu.',
                     tone: 'warn',
                   });
                   return;
