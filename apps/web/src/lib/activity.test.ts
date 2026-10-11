@@ -81,3 +81,16 @@ describe('activityItems / applyMilestone / fmtElapsed', () => {
     expect(fmtElapsed(65_000)).toBe('1 min 05 s');
   });
 });
+
+import { visibleActions } from './activity';
+describe('visibleActions', () => {
+  it('masque la carte de job et les refus après délégation', () => {
+    const list = [
+      { name: 'delegate_task', result: { ok: true } },
+      { name: 'run_workdir_command', result: { ok: false, code: 'delegated' } },
+      { name: 'job_result', result: { ok: true } },
+      { name: 'get_project', result: { ok: false } },
+    ];
+    expect(visibleActions(list).map((a) => a.name)).toEqual(['delegate_task', 'get_project']);
+  });
+});

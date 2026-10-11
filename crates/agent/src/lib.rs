@@ -32,7 +32,8 @@ use tools::{
     WriteProjectFileTool,
 };
 
-pub use tools::{memory_item_json, post_deploy_verdict, smoke_url};
+pub use tools::{memory_item_json, post_deploy_verdict, set_worker_launcher, smoke_url, DelegateTaskTool, WorkerLauncher, MAX_ACTIVE_WORKERS};
+pub use tokio_util::sync::CancellationToken;
 pub mod memory_ctx;
 
 pub struct ToolRegistry {
@@ -226,6 +227,7 @@ pub fn build_core_registry(
     }));
     registry.register(Arc::new(ListAgentToolFailuresTool { pool: pool.clone() }));
     registry.register(Arc::new(CreateProjectAgentTool { pool: pool.clone() }));
+    registry.register(Arc::new(tools::DelegateTaskTool { pool: pool.clone() }));
     registry.register(Arc::new(ReviewProjectSecurityTool { pool: pool.clone() }));
     registry.set_publish_gate(Arc::new(guard::PgPublishGate { pool: pool.clone() }));
     registry.set_memory(Arc::new(devforge_memory::PgMemoryStore::new((*pool).clone())));
@@ -326,6 +328,24 @@ pub enum AgentEvent {
 
 pub type AgentProgressTx = tokio::sync::mpsc::UnboundedSender<AgentEvent>;
 
+/// Après `delegate_task` : une phrase, puis fin du tour (P4-03).
+pub const DELEGATED_NUDGE: &str = "Tâche déléguée au worker. Réponds maintenant en une phrase ce que tu as lancé (sans détailler la suite) et arrête-toi : n'appelle plus d'outil.";
+
+fn is_cancelled(c: &Option<CancellationToken>) -> bool {
+    c.as_ref().is_some_and(|c| c.is_cancelled())
+}
+
+/// Réponse d'un run arrêté par l'utilisateur (P4-05).
+pub fn cancelled_reply(records: Vec<ToolCallRecord>, last_step: &str, provider: String) -> AgentReply {
+    let reply = if last_step.is_empty() {
+        "Arrêté à ta demande, avant toute action.".to_string()
+    } else {
+        format!("Arrêté à ta demande après « {last_step} ».")
+    };
+    let executed_plan = executed_plan(&records);
+    AgentReply { reply, tool_calls: records, provider, executed_plan }
+}
+
 fn emit(progress: &Option<AgentProgressTx>, event: AgentEvent) {
     if let Some(tx) = progress {
         let _ = tx.send(event);
@@ -351,6 +371,10 @@ pub struct AgentChatContext {
     pub memory_profile: Option<String>,
     /// Bloc « Souvenirs possiblement utiles » déjà calculé.
     pub memory_recall: Option<String>,
+    /// Run en cours (`agent_runs.uuid`) : parent des workers délégués (P4-03).
+    pub run_uuid: Option<String>,
+    /// Annulation demandée par l'utilisateur (P4-05) : vérifiée entre chaque appel LLM et outil.
+    pub cancel: Option<CancellationToken>,
 }
 
 pub struct AgentRunner {
@@ -556,6 +580,11 @@ impl AgentRunner {
         let mut records: Vec<ToolCallRecord> = Vec::new();
         let mut claim_nudged = false;
         let mut post_deploy_nudged = false;
+        // P4-05 : annulation ; P4-03 : délégation qui rend la main.
+        let cancel = ctx.cancel.clone();
+        let mut last_step = String::new();
+        let mut delegated: Option<String> = None;
+        let mut delegated_refusals = 0usize;
         let (llm, provider) = if let Some(pair) = llm_override {
             pair
         } else {
@@ -563,6 +592,9 @@ impl AgentRunner {
             (g.0.clone(), g.1.clone())
         };
         for round in 0..self.max_rounds {
+            if is_cancelled(&cancel) {
+                return Ok(cancelled_reply(records, &last_step, provider));
+            }
             if round >= 2 {
                 if let Some(nudge) = detect_duplicate_calls(&records) {
                     messages.push(ChatMessage::system(nudge));
@@ -591,23 +623,33 @@ impl AgentRunner {
             };
             let round_no = round + 1;
             let streamed = std::sync::atomic::AtomicBool::new(false);
-            let turn: AssistantTurn = match &progress {
-                Some(tx) => {
-                    let tx_retry = tx.clone();
-                    // Nouvel essai LLM (P1-09) : libellé de l'étape en cours.
-                    let notify: devforge_llm::RetryNotifier = Arc::new(move |label: String| {
-                        let _ = tx_retry.send(AgentEvent::Thinking { round: round_no, label, detail: String::new() });
-                    });
-                    let tx_delta = tx.clone();
-                    let streamed_ref = &streamed;
-                    // P2-02 : chaque morceau de texte part tout de suite vers le front.
-                    let sink = move |d: &str| {
-                        streamed_ref.store(true, std::sync::atomic::Ordering::SeqCst);
-                        let _ = tx_delta.send(AgentEvent::Delta { text: d.to_string(), round: round_no });
-                    };
-                    devforge_llm::with_retry_notifier(notify, llm.chat_stream(req, &sink)).await?
+            let llm_call = async {
+                match &progress {
+                    Some(tx) => {
+                        let tx_retry = tx.clone();
+                        // Nouvel essai LLM (P1-09) : libellé de l'étape en cours.
+                        let notify: devforge_llm::RetryNotifier = Arc::new(move |label: String| {
+                            let _ = tx_retry.send(AgentEvent::Thinking { round: round_no, label, detail: String::new() });
+                        });
+                        let tx_delta = tx.clone();
+                        let streamed_ref = &streamed;
+                        // P2-02 : chaque morceau de texte part tout de suite vers le front.
+                        let sink = move |d: &str| {
+                            streamed_ref.store(true, std::sync::atomic::Ordering::SeqCst);
+                            let _ = tx_delta.send(AgentEvent::Delta { text: d.to_string(), round: round_no });
+                        };
+                        devforge_llm::with_retry_notifier(notify, llm.chat_stream(req, &sink)).await
+                    }
+                    None => llm.chat(req).await,
                 }
-                None => llm.chat(req).await?,
+            };
+            let turn: AssistantTurn = match &cancel {
+                Some(c) => tokio::select! {
+                    biased;
+                    _ = c.cancelled() => return Ok(cancelled_reply(records, &last_step, provider)),
+                    t = llm_call => t?,
+                },
+                None => llm_call.await?,
             };
             let streamed = streamed.load(std::sync::atomic::Ordering::SeqCst);
             // Texte d'un tour qui appelle des outils = raisonnement intermédiaire → bloc réflexion.
@@ -675,7 +717,13 @@ impl AgentRunner {
                 if let Some(schema) = self.registry.schema(&call.name) {
                     coerce::coerce_args(&schema, &mut args);
                 }
-                let refusal = if let Some(blocked) = refuse_bare_spec_approval(&call.name, &args, message) {
+                if is_cancelled(&cancel) {
+                    return Ok(cancelled_reply(records, &last_step, provider));
+                }
+                let refusal = if delegated.is_some() && call.name != "delegate_task" {
+                    delegated_refusals += 1;
+                    Some(json!({"ok": false, "code": "delegated", "error": tools::DELEGATED_REFUSAL}))
+                } else if let Some(blocked) = refuse_bare_spec_approval(&call.name, &args, message) {
                     Some(blocked)
                 } else if let Some(blocked) = refuse_spec_publish(&call.name, message) {
                     Some(blocked)
@@ -704,6 +752,10 @@ impl AgentRunner {
                 });
                 let started = std::time::Instant::now();
                 let executed = refusal.is_none();
+                if executed {
+                    last_step = events::tool_label(&call.name, &args);
+                }
+                let mut interrupted = false;
                 let result = match refusal {
                     Some(blocked) => blocked,
                     None => {
@@ -713,7 +765,20 @@ impl AgentRunner {
                         if guard::is_github_push(&call.name, &args) {
                             pushes += 1;
                         }
-                        match self.registry.execute(&call.name, args.clone()).await {
+                        let exec = self.registry.execute(&call.name, args.clone());
+                        let res = match &cancel {
+                            // Abandon du futur = arrêt de l'outil (processus enfant tué, P4-05).
+                            Some(c) => tokio::select! {
+                                biased;
+                                _ = c.cancelled() => {
+                                    interrupted = true;
+                                    Ok(json!({"ok": false, "cancelled": true, "error": "Arrêté à ta demande."}))
+                                }
+                                r = exec => r,
+                            },
+                            None => exec.await,
+                        };
+                        match res {
                             Ok(v) => v,
                             Err(e) => match e {
                                 devforge_shared::DevForgeError::NeedsUserAction { kind, message_fr, settings_href, resume_hint } => {
@@ -739,6 +804,25 @@ impl AgentRunner {
                     for (label, status) in milestones.on_tool_done(&call.name, &args, ok, &result) {
                         emit(&progress, AgentEvent::Milestone { label: label.into(), status });
                     }
+                }
+                if interrupted {
+                    records.push(ToolCallRecord { id: call.id.clone(), name: call.name.clone(), arguments: args, result });
+                    return Ok(cancelled_reply(records, &last_step, provider));
+                }
+                if call.name == "delegate_task" && ok && delegated.is_none() {
+                    let title = result.get("title").and_then(|v| v.as_str()).unwrap_or("la tâche").to_string();
+                    delegated = Some(title);
+                }
+                if delegated_refusals >= 2 {
+                    let title = delegated.clone().unwrap_or_default();
+                    records.push(ToolCallRecord { id: call.id.clone(), name: call.name.clone(), arguments: args, result });
+                    let executed_plan = executed_plan(&records);
+                    return Ok(AgentReply {
+                        reply: format!("J'ai lancé un worker : « {title} ». Je te mets le résultat ici dès qu'il a fini."),
+                        tool_calls: records,
+                        provider,
+                        executed_plan,
+                    });
                 }
                 if push_limited {
                     let reply = result
@@ -771,6 +855,9 @@ impl AgentRunner {
                     post_deploy_nudged = true;
                     messages.push(ChatMessage::system(POST_DEPLOY_NUDGE));
                 }
+            }
+            if delegated.is_some() && !messages.iter().any(|m| m.content == DELEGATED_NUDGE) {
+                messages.push(ChatMessage::system(DELEGATED_NUDGE));
             }
         }
         let executed_plan = executed_plan(&records);
@@ -926,6 +1013,18 @@ fn inject_tool_defaults(tool: &str, args: &mut Value, ctx: &AgentChatContext) {
         set(obj, "caller_agent_kind", &ctx.agent_kind);
         return;
     }
+    if tool == "delegate_task" {
+        // Fil, projet et run parent imposés par le serveur.
+        for k in ["project_uuid", "caller_agent_uuid", "parent_run_uuid"] {
+            obj.remove(k);
+        }
+        for (k, v) in [("project_uuid", &ctx.project_uuid), ("caller_agent_uuid", &ctx.agent_uuid), ("parent_run_uuid", &ctx.run_uuid)] {
+            if let Some(v) = v.as_deref().filter(|v| !v.is_empty()) {
+                obj.insert(k.into(), json!(v));
+            }
+        }
+        return;
+    }
     if let Some(uuid) = &ctx.project_uuid {
         let provided = obj.get("project_uuid").and_then(|v| v.as_str()).unwrap_or("").trim();
         if provided.is_empty() || provided != uuid {
@@ -1063,7 +1162,7 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
         "ops" => format!("Tu es l'agent Ops. Priorité : santé du projet, logs, variables d'environnement, smoke HTTP (get_project, get_deployment_logs, list_env_vars, http_smoke).\n{local}"),
         // Coordinateur = fil permanent du projet. Les tâches lourdes passent par des subagents éphémères.
         "coordinator" => format!(
-            "Tu es le Coordinateur — fil permanent de ce projet. Tu accumules le contexte, restes proactif sur les événements (échec deploy, santé dégradée), et orchestres.\nWORKERS : pour une tâche lourde ou isolée, appelle l’outil create_project_agent (kind=subagent, parent_agent_uuid=ton uuid injecté par défaut). Ne crée PAS un nouveau fil permanent / required par tâche. Optionnel : initial_message pour démarrer le worker. Tu coordonnes Deploy / Ops / Reviewer sans les remplacer.\n{sdd}{local}"
+            "Tu es le Coordinateur — fil permanent de ce projet. Tu accumules le contexte, restes proactif sur les événements (échec deploy, santé dégradée), et orchestres.\nWORKERS : pour une tâche longue ou isolée (refonte d'une page, chantier de plusieurs fichiers, réparation longue), appelle delegate_task (title, instructions avec un critère de fin vérifiable) : le worker travaille en arrière-plan, le résultat revient dans ce fil sous forme de carte. Après delegate_task, réponds en une phrase ce que tu as lancé et arrête-toi. Les petites demandes (une question, une retouche d'un fichier) se font directement. Ne crée PAS un nouveau fil permanent / required par tâche. Tu coordonnes Deploy / Ops / Reviewer sans les remplacer.\n{sdd}{local}"
         ),
         _ => format!("Tu es un agent DevForge : planifie, agis dans le workdir, preview, puis PR sur validation.\n{sdd}{local}"),
     };

@@ -200,4 +200,38 @@ object SampleData {
         production = app.jeser.devforge.data.ProdBranch("main", "https://vigie.jeser.app"),
         dev = app.jeser.devforge.data.DevBranch(enabled = false, url = "https://dev-vigie.jeser.app"),
     )
+
+    /* Mémoire (écran natif Réglages → Mémoire). */
+    private fun inDays(d: Long) = OffsetDateTime.now(ZoneOffset.UTC).plusDays(d).toString()
+    val memoryProfile = listOf(
+        app.jeser.devforge.data.MemoryItem("mem-1", "user", tier = "profile", kind = "preference", content = "Réponds-moi en français, de façon courte et concrète.", source = "user_said", pinned = true, createdBy = "user", updatedAt = ago(60 * 26)),
+        app.jeser.devforge.data.MemoryItem("mem-2", "user", tier = "profile", kind = "infra", content = "Le NAS ZimaOS héberge les apps ; le GPU est partagé avec Ollama (file d'attente).", source = "agent_inferred", inferred = true, createdBy = "agent:a-1", createdByName = "Braise", updatedAt = ago(60 * 3)),
+        app.jeser.devforge.data.MemoryItem("mem-3", "project", projectName = "Vigie", tier = "profile", kind = "fact", content = "Vigie utilise Astro 5 et Tailwind 4 ; le build sort dans dist/.", source = "user_said", createdBy = "agent:a-1", createdByName = "Braise", updatedAt = ago(40)),
+    )
+    val memory = app.jeser.devforge.ui.memory.MemoryUiState(
+        items = memoryProfile,
+        budget = app.jeser.devforge.data.MemoryBudget(used = 1180, max = 1500),
+        loading = false,
+    )
+    val memoryNotes = app.jeser.devforge.ui.memory.MemoryUiState(
+        tab = app.jeser.devforge.ui.memory.MemoryTab.Note,
+        items = listOf(
+            app.jeser.devforge.data.MemoryItem("mem-9", "agent", agentName = "Braise", tier = "note", kind = "context", content = "Déjà tenté : npm ci échoue tant que package-lock n'est pas resynchronisé.", source = "agent_inferred", createdBy = "agent:a-1", createdByName = "Braise", updatedAt = ago(20), expiresAt = inDays(3)),
+        ),
+        loading = false,
+    )
+
+    /* Cartes de job dans Braise (P4). */
+    val projectJobs = project.copy(
+        messages = messages.take(3) + ChatItem(
+            "m5", "assistant", "C'est lancé en arrière-plan : je te préviens à la fin. Tu peux continuer à me parler.", ago(5),
+            jobs = listOf(
+                app.jeser.devforge.data.JobInfo("run-1", "worker", "Refonte de la page d'accueil", "running",
+                    milestones = listOf(app.jeser.devforge.data.RunMilestone("Lecture du code", "done"), app.jeser.devforge.data.RunMilestone("Modifications", "running"))),
+            ),
+        ) + ChatItem(
+            "m6", "assistant", "Worker « Page contact » terminé : formulaire ajouté, build OK.", ago(1),
+            jobs = listOf(app.jeser.devforge.data.JobInfo("run-0", "worker", "Page contact", "done", "Formulaire ajouté, build OK.", files = 3)),
+        ),
+    )
 }

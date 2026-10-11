@@ -51,6 +51,10 @@ pub fn tool_label(name: &str, args: &Value) -> String {
         "stop_local_preview" => "Arrêt de la preview".into(),
         "local_preview_status" => "État de la preview".into(),
         "trigger_deploy" => "Déploiement".into(),
+        "delegate_task" => {
+            let t = arg(args, "title");
+            if t.is_empty() { "Délégation à un worker".into() } else { format!("Délégation « {} »", clip(t, 50)) }
+        }
         "cancel_deployment" => "Annulation du déploiement".into(),
         "list_deployments" => "Liste des déploiements".into(),
         "get_deployment_logs" => "Logs de déploiement".into(),
@@ -189,6 +193,7 @@ pub fn milestone_for(name: &str, args: &Value) -> Option<&'static str> {
         "sync_workdir_to_github" | "create_github_fix" | "publish_to_github" => Some("Publication"),
         "trigger_deploy" => Some("Déploiement"),
         "http_smoke" => Some("Vérification en ligne"),
+        "delegate_task" => Some("Délégation"),
         _ => None,
     }
 }

@@ -7,6 +7,7 @@ pub const ALL_TOOLS: &[&str] = &[
     "create_github_fix",
     "create_github_repo",
     "create_project_agent",
+    "delegate_task",
     "get_deployment_logs",
     "get_project",
     "github_list_prs",

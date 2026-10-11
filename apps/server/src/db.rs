@@ -1002,6 +1002,9 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         .await?;
     }
 
+    // Événements de run persistés et runs en fond (P4-01).
+    crate::run_events::migrate(pool).await?;
+
     // Mémoire durable des agents (P3-01) : table, index, pg_trgm facultatif.
     devforge_memory::migrate(pool).await?;
 

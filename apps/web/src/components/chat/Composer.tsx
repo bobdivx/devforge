@@ -173,8 +173,8 @@ export function Composer({
           <button
             type="button"
             class="df-tap-skip inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-ink)] text-[var(--color-bg)] transition hover:brightness-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] max-lg:h-11 max-lg:w-11"
-            aria-label="Arrêter l'affichage en direct"
-            title="Arrêter l'affichage en direct (le travail continue en fond)"
+            aria-label="Arrêter le travail en cours"
+            title="Arrêter le travail en cours (les commandes lancées sont stoppées)"
             onMouseDown={keepFocus}
             onClick={() => onStop()}
             animate={press}

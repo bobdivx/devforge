@@ -156,30 +156,32 @@ export function humanAgentHttpError(status: number, text: string): string {
   return trimmed || `Erreur HTTP ${status}`;
 }
 
-function parseSseBlock(block: string): { event: string; data: string } | null {
+function parseSseBlock(block: string): { event: string; data: string; id?: string } | null {
   const lines = block.split('\n');
   let event = 'message';
+  let id: string | undefined;
   const dataLines: string[] = [];
   for (const line of lines) {
     if (line.startsWith('event:')) event = line.slice(6).trim();
     else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+    else if (line.startsWith('id:')) id = line.slice(3).trim();
   }
   if (dataLines.length === 0) return null;
-  return { event, data: dataLines.join('\n') };
+  return { event, data: dataLines.join('\n'), id };
 }
 
 /**
  * Découpe un flux SSE en événements. Un événement peut être coupé entre deux paquets
  * réseau : le reste est gardé jusqu'au paquet suivant (indispensable avec les deltas).
  */
-export function createSseParser(onEvent: (event: string, data: string) => void) {
+export function createSseParser(onEvent: (event: string, data: string, id?: string) => void) {
   let buf = '';
   const drain = (final: boolean) => {
     const parts = buf.split('\n\n');
     buf = final ? '' : (parts.pop() ?? '');
     for (const part of parts) {
       const parsed = parseSseBlock(part.trim());
-      if (parsed) onEvent(parsed.event, parsed.data);
+      if (parsed) onEvent(parsed.event, parsed.data, parsed.id);
     }
   };
   return {
@@ -196,58 +198,20 @@ export function createSseParser(onEvent: (event: string, data: string) => void) 
   };
 }
 
-export async function streamAgentChat(
-  message: string,
-  extra: {
-    tool?: string;
-    arguments?: Record<string, unknown>;
-    project_uuid?: string;
-    agent_uuid?: string;
-  },
-  handlers: StreamHandlers = {},
-  signal?: AbortSignal,
-): Promise<AgentChatResult> {
-  const token = getToken();
-  const res = await fetch(`${SERVER_BASE}/agent/chat`, {
-    method: 'POST',
-    signal,
-    headers: {
-      Accept: 'text/event-stream',
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ message, stream: true, ...extra }),
-  });
+/** Suivi d'un run reprenable (P4-02) : dernier `seq` reçu, fin (`event: done`). */
+export type RunCursor = {
+  runUuid?: string;
+  lastSeq: number;
+  done: boolean;
+  status?: string;
+};
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(humanAgentHttpError(res.status, text));
-  }
-
-  const ctype = res.headers.get('content-type') || '';
-  if (!ctype.includes('text/event-stream')) {
-    const json = (await res.json()) as { data?: AgentChatResult };
-    const data = json.data ?? { reply: '', tool_calls: [] };
-    data.tool_calls = normalizeToolCalls(data.tool_calls);
-    const plan = planFromToolCalls(data.tool_calls ?? []);
-    if (plan) handlers.onPlan?.(plan);
-    const preview = previewUrlFromTools(data.tool_calls ?? []);
-    if (
-      preview ||
-      wroteLocalFiles(data.tool_calls ?? []) ||
-      (data.tool_calls ?? []).some((t) => t.name === 'start_local_preview')
-    ) {
-      notifyPreviewRefresh({ url: preview, reason: 'agent' });
-    }
-    return { ...data, plan };
-  }
-
-  const reader = res.body?.getReader();
-  if (!reader) {
-    throw new Error('Flux agent indisponible');
-  }
-
-  const decoder = new TextDecoder();
+/**
+ * Accumule les événements d'un run (flux POST /agent/chat ou GET /agent/runs/{id}/events).
+ * Les événements déjà vus (`id` ≤ dernier seq) sont ignorés : une reconnexion ne double rien.
+ */
+export function createRunAccumulator(handlers: StreamHandlers = {}, after = 0) {
+  const cursor: RunCursor = { lastSeq: after, done: false };
   let reply = '';
   let provider: string | undefined;
   let toolCalls: AgentToolCall[] = [];
@@ -260,7 +224,23 @@ export async function streamAgentChat(
   const roundText = new Map<number, string>();
   let seq = 0;
 
-  const onEvent = (event: string, data: string) => {
+  const onEvent = (event: string, data: string, id?: string) => {
+    if (event === 'done') {
+      cursor.done = true;
+      try {
+        cursor.status = String((JSON.parse(data) as { status?: string }).status || '') || undefined;
+      } catch {
+        /* ancien serveur : `{}` */
+      }
+      return;
+    }
+    if (id !== undefined && id !== '') {
+      const n = Number(id);
+      if (Number.isFinite(n)) {
+        if (n <= cursor.lastSeq) return;
+        cursor.lastSeq = n;
+      }
+    }
     let payload: Record<string, unknown> = {};
     try {
       payload = JSON.parse(data) as Record<string, unknown>;
@@ -269,6 +249,7 @@ export async function streamAgentChat(
     }
     const type = String(payload.type || event);
     if (type === 'run_started') {
+      if (payload.run_uuid) cursor.runUuid = String(payload.run_uuid);
       handlers.onRunStarted?.(String(payload.run_uuid || ''), String(payload.message_uuid || ''));
     } else if (type === 'ack') {
       handlers.onAck?.(String(payload.text || ''));
@@ -364,7 +345,53 @@ export async function streamAgentChat(
     }
   };
 
-  const parser = createSseParser(onEvent);
+  const result = (): AgentChatResult => {
+    if (streamError) throw new Error(streamError);
+    if (!toolCalls.length && liveTools.length) toolCalls = [...liveTools];
+    if (!reply && toolCalls.length === 0 && !plan) {
+      throw new Error(cursor.status === 'failed' ? 'Le run a échoué.' : 'Réponse agent vide');
+    }
+    const preview = previewUrlFromTools(toolCalls);
+    if (preview || wroteLocalFiles(toolCalls) || toolCalls.some((t) => t.name === 'start_local_preview')) {
+      notifyPreviewRefresh({ url: preview, reason: 'agent' });
+    }
+    return {
+      reply: reply || 'Terminé.',
+      provider,
+      tool_calls: toolCalls,
+      plan,
+      reflections,
+      executed_plan: executedPlan,
+    };
+  };
+
+  return { cursor, onEvent, result };
+}
+
+export type FollowOptions = {
+  /** Attente entre deux reconnexions (remplaçable en test). */
+  sleep?: (ms: number) => Promise<void>;
+  /** Abandon après ce nombre d'échecs consécutifs sans progrès. */
+  maxFailures?: number;
+};
+
+const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Délai de reconnexion : 1 s, 2 s, 4 s, 8 s puis 10 s. */
+export function reconnectDelay(failures: number): number {
+  return Math.min(1000 * 2 ** Math.max(0, failures - 1), 10_000);
+}
+
+function abortError(): Error {
+  const e = new Error('Aborted');
+  e.name = 'AbortError';
+  return e;
+}
+
+async function readInto(res: Response, parser: ReturnType<typeof createSseParser>) {
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('Flux agent indisponible');
+  const decoder = new TextDecoder();
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -372,24 +399,122 @@ export async function streamAgentChat(
   }
   parser.push(decoder.decode());
   parser.flush();
+}
 
-  if (streamError) throw new Error(streamError);
-  if (!toolCalls.length && liveTools.length) toolCalls = [...liveTools];
-  if (!reply && toolCalls.length === 0 && !plan) {
-    throw new Error('Réponse agent vide');
+/**
+ * Suit un run jusqu'à `event: done` via `GET /agent/runs/{id}/events?after=<seq>`, avec
+ * reconnexion exponentielle (1 s → 10 s). `fetch` + lecture de flux : l'auth Bearer n'est pas
+ * possible avec `EventSource`.
+ */
+export async function followRunInto(
+  runUuid: string,
+  acc: ReturnType<typeof createRunAccumulator>,
+  signal?: AbortSignal,
+  opts: FollowOptions = {},
+): Promise<void> {
+  const sleep = opts.sleep ?? defaultSleep;
+  const maxFailures = opts.maxFailures ?? 40;
+  let failures = 0;
+  while (!acc.cursor.done) {
+    if (signal?.aborted) throw abortError();
+    const before = acc.cursor.lastSeq;
+    try {
+      const token = getToken();
+      const res = await fetch(`${SERVER_BASE}/agent/runs/${encodeURIComponent(runUuid)}/events?after=${acc.cursor.lastSeq}`, {
+        signal,
+        headers: {
+          Accept: 'text/event-stream',
+          'Last-Event-ID': String(acc.cursor.lastSeq),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (res.status === 401 || res.status === 403 || res.status === 404) {
+        throw Object.assign(new Error(humanAgentHttpError(res.status, await res.text())), { fatal: true });
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await readInto(res, createSseParser(acc.onEvent));
+    } catch (e) {
+      if (signal?.aborted || (e as Error)?.name === 'AbortError') throw abortError();
+      if ((e as { fatal?: boolean }).fatal) throw e;
+    }
+    if (acc.cursor.done) break;
+    failures = acc.cursor.lastSeq > before ? 1 : failures + 1;
+    if (failures > maxFailures) throw new Error('Connexion au run perdue. Recharge la page pour voir la suite.');
+    await sleep(reconnectDelay(failures));
+  }
+}
+
+/** S'abonne à un run existant (onglet rouvert, réveil, worker) depuis `after`. */
+export async function subscribeRun(
+  runUuid: string,
+  handlers: StreamHandlers = {},
+  signal?: AbortSignal,
+  after = 0,
+  opts: FollowOptions = {},
+): Promise<AgentChatResult & { status?: string }> {
+  const acc = createRunAccumulator(handlers, after);
+  acc.cursor.runUuid = runUuid;
+  await followRunInto(runUuid, acc, signal, opts);
+  return { ...acc.result(), status: acc.cursor.status };
+}
+
+export async function streamAgentChat(
+  message: string,
+  extra: {
+    tool?: string;
+    arguments?: Record<string, unknown>;
+    project_uuid?: string;
+    agent_uuid?: string;
+  },
+  handlers: StreamHandlers = {},
+  signal?: AbortSignal,
+  opts: FollowOptions = {},
+): Promise<AgentChatResult> {
+  const token = getToken();
+  const res = await fetch(`${SERVER_BASE}/agent/chat`, {
+    method: 'POST',
+    signal,
+    headers: {
+      Accept: 'text/event-stream',
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ message, stream: true, ...extra }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(humanAgentHttpError(res.status, text));
   }
 
-  const preview = previewUrlFromTools(toolCalls);
-  if (preview || wroteLocalFiles(toolCalls) || toolCalls.some((t) => t.name === 'start_local_preview')) {
-    notifyPreviewRefresh({ url: preview, reason: 'agent' });
+  const ctype = res.headers.get('content-type') || '';
+  if (!ctype.includes('text/event-stream')) {
+    const json = (await res.json()) as { data?: AgentChatResult };
+    const data = json.data ?? { reply: '', tool_calls: [] };
+    data.tool_calls = normalizeToolCalls(data.tool_calls);
+    const plan = planFromToolCalls(data.tool_calls ?? []);
+    if (plan) handlers.onPlan?.(plan);
+    const preview = previewUrlFromTools(data.tool_calls ?? []);
+    if (
+      preview ||
+      wroteLocalFiles(data.tool_calls ?? []) ||
+      (data.tool_calls ?? []).some((t) => t.name === 'start_local_preview')
+    ) {
+      notifyPreviewRefresh({ url: preview, reason: 'agent' });
+    }
+    return { ...data, plan };
   }
 
-  return {
-    reply: reply || 'Terminé.',
-    provider,
-    tool_calls: toolCalls,
-    plan,
-    reflections,
-    executed_plan: executedPlan,
-  };
+  const acc = createRunAccumulator(handlers);
+  try {
+    await readInto(res, createSseParser(acc.onEvent));
+  } catch (e) {
+    // Coupure réseau en plein run : on reprend ci-dessous si le run est connu.
+    if (signal?.aborted || (e as Error)?.name === 'AbortError' || !acc.cursor.runUuid) throw e;
+  }
+  // Flux coupé avant la fin (réseau, proxy, veille) : reprise sans perte ni doublon (P4-02).
+  if (!acc.cursor.done && acc.cursor.runUuid) {
+    await followRunInto(acc.cursor.runUuid, acc, signal, opts);
+  }
+  return acc.result();
 }

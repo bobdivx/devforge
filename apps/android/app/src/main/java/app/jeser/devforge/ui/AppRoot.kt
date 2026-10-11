@@ -33,6 +33,9 @@ import app.jeser.devforge.ui.hub.BraiseScreen
 import app.jeser.devforge.ui.hub.HubUiState
 import app.jeser.devforge.ui.hub.HubViewModel
 import app.jeser.devforge.ui.hub.SettingsScreen
+import app.jeser.devforge.ui.memory.MemoryActions
+import app.jeser.devforge.ui.memory.MemoryScreen
+import app.jeser.devforge.ui.memory.MemoryViewModel
 import app.jeser.devforge.ui.project.ProjectActions
 import app.jeser.devforge.ui.project.ProjectScreen
 import app.jeser.devforge.ui.project.ProjectSheet
@@ -83,6 +86,12 @@ fun HomeRoot(
         }
     }
     var draftFor by rememberSaveable { mutableStateOf<String?>(null) }
+    var memoryOpen by rememberSaveable { mutableStateOf(false) }
+    if (memoryOpen && selected == null) {
+        BackHandler { memoryOpen = false }
+        MemoryRoute(graph, onBack = { memoryOpen = false })
+        return
+    }
     if (selected != null) {
         BackHandler { draftFor = null; onSelect(null) }
         ProjectRoute(
@@ -117,7 +126,7 @@ fun HomeRoot(
         },
         onUpdate = { hubVm.apkUrl()?.let { runCatching { uri.openUri(it) } } },
         onOpenWeb = { hub.instance?.let { runCatching { uri.openUri(it) } } },
-        onOpenMemory = { hub.instance?.let { runCatching { uri.openUri(it.trimEnd('/') + "/app/settings?tab=memory") } } },
+        onOpenMemory = { memoryOpen = true },
         onSignOut = onSignOut,
     )
 }
@@ -214,6 +223,26 @@ private fun TabIcon(tab: HomeTab, badge: Int) {
     }) { Icon(tab.icon(), contentDescription = null) }
 }
 
+/** Réglages → Mémoire : écran natif (plus de page web). */
+@Composable
+private fun MemoryRoute(graph: AppGraph, onBack: () -> Unit) {
+    val vm: MemoryViewModel = viewModel(key = "memory", factory = viewModelFactory { initializer { MemoryViewModel(graph) } })
+    val state by vm.state.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { vm.load() }
+    MemoryScreen(
+        state = state,
+        actions = MemoryActions(
+            onBack = onBack,
+            onTab = vm::load,
+            onRetry = { vm.load() },
+            onCorrect = vm::correct,
+            onForget = vm::forget,
+            onPin = vm::pin,
+            onNoticeShown = vm::noticeShown,
+        ),
+    )
+}
+
 @Composable
 private fun ProjectRoute(graph: AppGraph, uuid: String, onBack: (() -> Unit)?, onChanged: () -> Unit, openDraft: Boolean = false) {
     val vm: ProjectViewModel = viewModel(
@@ -232,6 +261,7 @@ private fun ProjectRoute(graph: AppGraph, uuid: String, onBack: (() -> Unit)?, o
             onBack = onBack,
             onRetry = vm::load,
             onSend = vm::send,
+            onCancelJob = vm::cancelJob,
             onDeploy = vm::deploy,
             onOpenLogs = vm::openLogs,
             onCloseLogs = vm::closeLogs,

@@ -3,7 +3,6 @@ use devforge_shared::{Result, Tool};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::path::Path;
-use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -177,18 +176,10 @@ impl Tool for RunWorkdirCommandTool {
         let wd = workdir.clone();
         let joined = parts.join(" ");
 
-        let run = tokio::time::timeout(
-            Duration::from_secs(timeout),
-            tokio::task::spawn_blocking(move || {
-                Command::new(&bin)
-                    .args(&args)
-                    .current_dir(&wd)
-                    .env("CI", "true")
-                    .output()
-            }),
-        )
-        .await;
-
+        // P4-05 : processus tué (avec ses enfants) au timeout ou à l'annulation du run
+        // (le futur est abandonné → `KillGroupOnDrop`).
+        let run = tokio::time::timeout(Duration::from_secs(timeout), run_killable(&bin, &args, &wd)).await;
+        let run = run.map(Ok::<_, std::io::Error>);
         let output = match run {
             Ok(Ok(Ok(o))) => o,
             Ok(Ok(Err(e))) => {
@@ -202,7 +193,7 @@ impl Tool for RunWorkdirCommandTool {
             Ok(Err(e)) => {
                 return Ok(json!({
                     "ok": false,
-                    "error": format!("join error : {e}"),
+                    "error": format!("erreur : {e}"),
                     "command": joined,
                     "workdir": workdir,
                 }));
@@ -265,5 +256,64 @@ mod tests {
     #[test]
     fn blocks_curl() {
         assert!(validate_command("curl https://x").is_err());
+    }
+}
+
+/// Tue le groupe de processus (npm et ses scripts enfants) si le futur est abandonné.
+struct KillGroupOnDrop {
+    #[cfg_attr(not(unix), allow(dead_code))]
+    pid: Option<u32>,
+    done: bool,
+}
+
+impl Drop for KillGroupOnDrop {
+    fn drop(&mut self) {
+        if self.done {
+            return;
+        }
+        #[cfg(unix)]
+        if let Some(pid) = self.pid {
+            // SAFETY: killpg sur le groupe créé pour ce seul enfant (process_group(0)).
+            unsafe {
+                libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+            }
+        }
+    }
+}
+
+pub(crate) async fn run_killable(bin: &str, args: &[String], wd: &str) -> std::io::Result<std::process::Output> {
+    let mut cmd = tokio::process::Command::new(bin);
+    cmd.args(args)
+        .current_dir(wd)
+        .env("CI", "true")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    cmd.process_group(0);
+    let child = cmd.spawn()?;
+    let mut guard = KillGroupOnDrop { pid: child.id(), done: false };
+    let out = child.wait_with_output().await;
+    guard.done = true;
+    out
+}
+
+#[cfg(all(test, unix))]
+mod kill_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn dropping_the_future_kills_the_process_group() {
+        let dir = std::env::temp_dir();
+        let marker = dir.join(format!("df-kill-{}", std::process::id()));
+        let _ = std::fs::remove_file(&marker);
+        let script = format!("sleep 2; touch {}", marker.display());
+        let argv = ["-c".to_string(), script];
+        let fut = run_killable("sh", &argv, dir.to_str().unwrap());
+        let r = tokio::time::timeout(Duration::from_millis(300), fut).await;
+        assert!(r.is_err(), "doit être interrompu");
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        assert!(!marker.exists(), "le processus enfant a été tué avant d'écrire");
     }
 }
