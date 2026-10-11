@@ -697,6 +697,150 @@ pub fn update_from_github(workdir: &Path, branch: &str, fetch_url: Option<&str>,
     Ok(Updated { merged: behind, head: head()? })
 }
 
+
+/* ---------------- Aide à la décision (garder / supprimer) ---------------- */
+
+/// Fichiers de dépendances régénérés par un install / un build (lockfiles, sorties de sync).
+pub fn is_lockfile(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    matches!(
+        name,
+        "package-lock.json"
+            | "npm-shrinkwrap.json"
+            | "yarn.lock"
+            | "pnpm-lock.yaml"
+            | "bun.lockb"
+            | "bun.lock"
+            | "Cargo.lock"
+            | "poetry.lock"
+            | "Pipfile.lock"
+            | "uv.lock"
+            | "composer.lock"
+            | "Gemfile.lock"
+            | "go.sum"
+            | "routeTree.gen.ts"
+    )
+}
+
+/// Ce que GitHub a de neuf par rapport au brouillon (lecture locale de `origin/<branche>`).
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+pub struct RemoteInsight {
+    /// Commits GitHub absents du workdir.
+    pub behind: u32,
+    /// Fichiers du brouillon que ces commits modifient aussi (risque de conflit).
+    pub overlap: Vec<String>,
+    /// Fichiers du brouillon dont le contenu est déjà identique sur GitHub.
+    pub already_on_github: Vec<String>,
+}
+
+fn same_as_remote(workdir: &Path, remote: &str, f: &DraftFile) -> bool {
+    let on_remote = |p: &str| git(workdir, &["rev-parse", "--verify", "--quiet", &format!("{remote}:{p}")]).ok().map(|s| s.trim().to_string());
+    if let Some(old) = f.old_path.as_deref() {
+        if on_remote(old).is_some() {
+            return false;
+        }
+    }
+    match f.status.as_str() {
+        "deleted" => on_remote(&f.path).is_none(),
+        _ => {
+            let Some(remote_blob) = on_remote(&f.path) else { return false };
+            git(workdir, &["hash-object", "--", &f.path]).map(|h| h.trim() == remote_blob).unwrap_or(false)
+        }
+    }
+}
+
+/// Compare le brouillon à `origin/<branche>` (déjà récupéré) : retard, fichiers en commun, doublons.
+pub fn remote_insight(workdir: &Path, branch: &str, st: &DraftStatus) -> RemoteInsight {
+    let mut out = RemoteInsight { behind: st.behind, ..Default::default() };
+    if !st.available || !st.has_remote {
+        return out;
+    }
+    let r = remote_ref(branch);
+    out.already_on_github = st.files.iter().take(300).filter(|f| same_as_remote(workdir, &r, f)).map(|f| f.path.clone()).collect();
+    if st.behind > 0 {
+        let incoming = git(workdir, &["diff", "--name-only", "-z", &format!("HEAD...{r}")]).map(|s| split_nul(&s)).unwrap_or_default();
+        // Identique des deux côtés : pas un conflit.
+        out.overlap = st
+            .files
+            .iter()
+            .filter(|f| !out.already_on_github.contains(&f.path))
+            .filter(|f| incoming.iter().any(|p| p == &f.path || f.old_path.as_deref() == Some(p.as_str())))
+            .map(|f| f.path.clone())
+            .collect();
+    }
+    out
+}
+
+/// Recommandation affichée sur le brouillon.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Advice {
+    /// `keep` | `review` | `delete`
+    pub level: &'static str,
+    /// « Garder » | « À vérifier » | « Peut être supprimé »
+    pub label: &'static str,
+    /// Raison en français simple.
+    pub reason: String,
+}
+
+/// Entrées de la recommandation (calculées par l'appelant).
+#[derive(Debug, Clone, Default)]
+pub struct AdviceInput<'a> {
+    pub count: usize,
+    pub insight: Option<&'a RemoteInsight>,
+    pub age_days: Option<i64>,
+    /// Tous les fichiers sont des lockfiles / fichiers générés.
+    pub lockfile_only: bool,
+    /// Correctif de mise en ligne : date (RFC 3339) d'une mise en ligne réussie depuis l'échec.
+    pub repair_obsolete_since: Option<String>,
+}
+
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n > 1 { many } else { one })
+}
+
+pub fn advise(i: &AdviceInput) -> Advice {
+    let keep = |r: String| Advice { level: "keep", label: "Garder", reason: r };
+    let review = |r: String| Advice { level: "review", label: "À vérifier", reason: r };
+    let delete = |r: String| Advice { level: "delete", label: "Peut être supprimé", reason: r };
+    let dup = i.insight.map(|x| x.already_on_github.len()).unwrap_or(0);
+    if i.count > 0 && dup >= i.count {
+        return delete("Tout ce contenu est déjà sur GitHub : le brouillon n’apporte plus rien.".into());
+    }
+    if let Some(when) = &i.repair_obsolete_since {
+        let d = chrono::DateTime::parse_from_rfc3339(when)
+            .map(|t| t.with_timezone(&chrono::Local).format("%d/%m à %H:%M").to_string())
+            .unwrap_or_default();
+        let at = if d.is_empty() { String::new() } else { format!(" (le {d})") };
+        return delete(format!("Correctif d’une mise en ligne ratée, mais une mise en ligne a réussi depuis{at} : il n’est sans doute plus utile."));
+    }
+    if i.lockfile_only {
+        return delete("Seulement des fichiers de dépendances (lockfile) : ils se régénèrent à la prochaine installation.".into());
+    }
+    if let Some(x) = i.insight {
+        if !x.overlap.is_empty() {
+            return review(format!(
+                "GitHub a {} qui touche{} aussi {} du brouillon : risque de conflit.",
+                plural(x.behind as usize, "commit", "commits"),
+                if x.behind > 1 { "nt" } else { "" },
+                plural(x.overlap.len(), "fichier", "fichiers"),
+            ));
+        }
+    }
+    if let Some(days) = i.age_days.filter(|d| *d >= 7) {
+        return review(format!("Pas touché depuis {days} jours : vérifie qu’il sert encore."));
+    }
+    if dup > 0 {
+        return review(format!("{} déjà identique{} sur GitHub, le reste est nouveau.", plural(dup, "fichier", "fichiers"), if dup > 1 { "s" } else { "" }));
+    }
+    if let Some(x) = i.insight.filter(|x| x.behind > 0) {
+        return keep(format!(
+            "Travail pas encore sur GitHub. GitHub a avancé de {} sans toucher ces fichiers : mets à jour puis valide.",
+            plural(x.behind as usize, "commit", "commits")
+        ));
+    }
+    keep("Travail récent, pas encore sur GitHub, sans conflit.".into())
+}
+
 #[cfg(test)]
 #[path = "draft_tests.rs"]
 mod tests;

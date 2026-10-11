@@ -301,6 +301,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    crate::draft_origin::migrate(pool).await?;
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS agent_conversation_shares (

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'preact/hooks';
-import { ArrowLeft, ChevronRight, CloudUpload, FileDiff, GitPullRequestArrow, History, RotateCcw, Trash2, Undo2 } from 'lucide-preact';
-import { api, type DraftDiffFile, type DraftFile, type DraftStatus } from '../lib/api';
+import { ArrowLeft, ChevronRight, CloudUpload, FileDiff, GitPullRequestArrow, History, MessageSquare, RotateCcw, Trash2, Undo2 } from 'lucide-preact';
+import { api, type DraftAdvice, type DraftDiffFile, type DraftFile, type DraftOrigin, type DraftStatus } from '../lib/api';
 import { cn } from '../lib/cn';
 import { InlinePatch } from './DiffViewer';
 import { Badge, Button, Modal, Spinner, useToast } from './ui';
@@ -23,6 +23,118 @@ const STATUS: Record<string, { label: string; tone: 'ok' | 'warn' | 'danger' | '
   deleted: { label: 'supprimé', tone: 'danger' },
   renamed: { label: 'renommé', tone: 'warn' },
 };
+
+/** Lien direct vers le brouillon d'une app (Workspace, modale ouverte). */
+export function draftHref(uuid: string): string {
+  return `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=workspace&draft=1`;
+}
+
+/** Discussion (fil d'agent) qui a écrit le brouillon. */
+export function discussionHref(uuid: string, origin?: DraftOrigin | null): string | null {
+  if (!origin?.agent_uuid) return null;
+  return `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=workspace&view=chat&agent=${encodeURIComponent(origin.agent_uuid)}`;
+}
+
+const ORIGIN: Record<string, { label: string; short: string; tone: 'ok' | 'warn' | 'danger' | 'accent' | 'neutral' }> = {
+  repair: { label: 'Réparation · Rustine', short: 'Réparation', tone: 'danger' },
+  feature: { label: 'Fonctionnalité · Braise', short: 'Fonctionnalité', tone: 'accent' },
+  routine: { label: 'Routine d’agent', short: 'Routine', tone: 'warn' },
+  manual: { label: 'Modif. manuelle', short: 'Manuelle', tone: 'neutral' },
+  sync: { label: 'Dépendances (lockfile)', short: 'Dépendances', tone: 'neutral' },
+};
+
+export function originLabel(kind?: string | null, short = false): string {
+  const o = ORIGIN[kind ?? ''] ?? ORIGIN.manual;
+  return short ? o.short : o.label;
+}
+
+export function OriginBadge({ kind, short }: { kind?: string | null; short?: boolean }) {
+  const o = ORIGIN[kind ?? ''] ?? ORIGIN.manual;
+  return (
+    <Badge tone={o.tone} class="shrink-0">
+      {short ? o.short : o.label}
+    </Badge>
+  );
+}
+
+const ADVICE_CLASS: Record<string, string> = {
+  keep: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+  review: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
+  delete: 'border-rose-500/30 bg-rose-500/10 text-rose-200',
+};
+
+/** Pastille Garder / À vérifier / Peut être supprimé. */
+export function AdviceChip({ advice, class: className }: { advice?: DraftAdvice | null; class?: string }) {
+  if (!advice) return null;
+  return (
+    <span
+      class={cn(
+        'inline-flex max-w-full shrink-0 items-center gap-1.5 truncate rounded-full border px-2.5 py-0.5 text-xs font-medium',
+        ADVICE_CLASS[advice.level] ?? ADVICE_CLASS.review,
+        className,
+      )}
+      title={advice.reason}
+      data-testid="draft-advice"
+    >
+      <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-current" aria-hidden />
+      {advice.label}
+    </span>
+  );
+}
+
+function plural(n: number, one: string, many: string) {
+  return `${n} ${n > 1 ? many : one}`;
+}
+
+/** Bloc « Garder ou supprimer ? » en tête du brouillon : recommandation + faits + origine. */
+export function DraftDecision({ uuid, draft }: { uuid: string; draft: DraftStatus }) {
+  const facts: string[] = [];
+  const when = relativeFr(draft.updated_at);
+  if (when) facts.push(`Modifié ${when}`);
+  const x = draft.insight;
+  const behind = x?.behind ?? draft.behind;
+  if (behind > 0) facts.push(`GitHub a ${plural(behind, 'commit', 'commits')} de plus`);
+  else if (draft.has_remote) facts.push('À jour avec GitHub');
+  if (x?.overlap?.length) {
+    const names = x.overlap.slice(0, 3).map((p) => p.split('/').pop()).join(', ');
+    facts.push(`Mêmes fichiers touchés sur GitHub : ${names}${x.overlap.length > 3 ? '…' : ''}`);
+  }
+  if (x?.already_on_github?.length) {
+    facts.push(`${plural(x.already_on_github.length, 'fichier', 'fichiers')} déjà identique${x.already_on_github.length > 1 ? 's' : ''} sur GitHub`);
+  }
+  if (draft.repair_succeeded_at) facts.push(`Mise en ligne réussie depuis l’échec (${relativeFr(draft.repair_succeeded_at)})`);
+  const discussion = discussionHref(uuid, draft.origin);
+  const kinds = draft.origin_kinds?.length ? draft.origin_kinds : draft.origin ? [draft.origin.kind] : [];
+  return (
+    <div class="space-y-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3" data-testid="draft-decision">
+      {(draft.advice || kinds.length > 0) && (
+        <div class="flex flex-wrap items-center gap-2">
+          <AdviceChip advice={draft.advice} />
+          {kinds.map((k) => (
+            <OriginBadge key={k} kind={k} />
+          ))}
+        </div>
+      )}
+      {draft.advice?.reason && <p class="text-sm leading-snug text-[var(--color-ink)]">{draft.advice.reason}</p>}
+      {facts.length > 0 && (
+        <ul class="space-y-0.5 text-xs text-[var(--color-ink-muted)]">
+          {facts.map((f) => (
+            <li key={f} class="break-words">· {f}</li>
+          ))}
+        </ul>
+      )}
+      {discussion && (
+        <a
+          href={discussion}
+          class="inline-flex min-h-[40px] items-center gap-2 rounded-lg px-1 text-sm font-medium text-[var(--color-accent)] hover:underline"
+        >
+          <MessageSquare size={14} aria-hidden />
+          Voir la discussion{draft.origin?.agent_name ? ` · ${draft.origin.agent_name}` : ''}
+        </a>
+      )}
+    </div>
+  );
+}
 
 export function DraftStatusBadge({ status }: { status: string }) {
   const s = STATUS[status] ?? STATUS.modified;
@@ -205,6 +317,7 @@ export function DraftModal({ open, onClose, uuid, name, draft, onChanged, onDepl
   }, [open, uuid, draftKey]);
 
   const files: DraftFile[] = draft?.files ?? [];
+  const mixedOrigins = (draft?.origin_kinds?.length ?? 0) > 1;
   const stat = (p: string) => diff?.find((d) => d.path === p);
   const file = current ? stat(current) ?? files.find((f) => f.path === current) : null;
 
@@ -394,6 +507,7 @@ export function DraftModal({ open, onClose, uuid, name, draft, onChanged, onDepl
 
       {step === 'list' && (
         <div class="space-y-4">
+          {draft?.dirty && <DraftDecision uuid={uuid} draft={draft} />}
           {draft?.dirty && draft.behind > 0 && (
             <div class="flex flex-col gap-2 rounded-xl border border-sky-500/25 bg-sky-500/[0.07] p-3 text-sm sm:flex-row sm:items-center">
               <p class="flex-1 text-[var(--color-ink-muted)]">
@@ -438,6 +552,11 @@ export function DraftModal({ open, onClose, uuid, name, draft, onChanged, onDepl
                       {s && (
                         <span class="hidden shrink-0 font-mono text-[11px] sm:inline">
                           <span class="text-emerald-400/90">+{s.additions}</span> <span class="text-rose-400/90">−{s.deletions}</span>
+                        </span>
+                      )}
+                      {mixedOrigins && f.origin && (
+                        <span class="hidden sm:inline-flex">
+                          <OriginBadge kind={f.origin.kind} short />
                         </span>
                       )}
                       <DraftStatusBadge status={f.status} />
@@ -616,7 +735,7 @@ export function DraftsSection({ class: className }: { class?: string }) {
         {items.map((d) => (
           <li key={d.project_uuid}>
             <a
-              href={`/app/projects/view?uuid=${encodeURIComponent(d.project_uuid)}&draft=1`}
+              href={draftHref(d.project_uuid)}
               class="flex min-h-[56px] items-center gap-3 rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] px-3.5 py-2.5 transition hover:border-amber-500/30 hover:bg-amber-500/[0.05]"
             >
               <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-sm font-bold text-[var(--color-warn)]">
@@ -625,11 +744,12 @@ export function DraftsSection({ class: className }: { class?: string }) {
               <span class="min-w-0 flex-1 leading-tight">
                 <span class="block truncate text-sm font-semibold text-[var(--color-ink)]">{d.project_name}</span>
                 <span class="block truncate text-xs text-[var(--color-ink-faint)]">
+                  {d.origin ? `${originLabel(d.origin.kind, true)} · ` : ''}
                   {filesLabel(d.count)}
                   {relativeFr(d.updated_at) ? ` · ${relativeFr(d.updated_at)}` : ''}
-                  {d.behind > 0 ? ' · GitHub a avancé' : ''}
                 </span>
               </span>
+              <AdviceChip advice={d.advice} class="max-w-[9rem]" />
               <ChevronRight size={16} class="shrink-0 text-[var(--color-ink-faint)]" aria-hidden />
             </a>
           </li>

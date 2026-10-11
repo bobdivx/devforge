@@ -184,6 +184,19 @@ class ScreenshotTest(private val device: String, private val qualifiers: String)
         shot("draft-sheet")
     }
 
+    @Test fun workspaceSheet() {
+        compose.setContent { Shot { ProjectScreen(SampleData.projectClean, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Workspace) } }
+        compose.onNodeWithTag("ws-tile-draft").assertExists()
+        compose.onNodeWithTag("ws-tile-braise").assertExists()
+        shot("workspace-sheet")
+    }
+
+    @Test fun draftSheetObsoleteRepair() {
+        compose.setContent { Shot { ProjectScreen(SampleData.projectObsoleteDraft, ProjectActions(onBack = {}), initialSheet = ProjectSheet.Draft) } }
+        compose.onNodeWithTag("draft-decision").assertExists()
+        shot("draft-sheet-obsolete")
+    }
+
     @Test fun draftFileSheet() {
         compose.setContent {
             Shot { ProjectScreen(SampleData.projectDraft, ProjectActions(onBack = {}), initialSheet = ProjectSheet.DraftFile, initialDraftPath = "src/components/Footer.astro") }

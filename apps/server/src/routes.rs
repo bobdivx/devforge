@@ -2792,6 +2792,8 @@ async fn execute_claimed_run_inner(
     .await
     .map_err(|e| e.to_string())?;
     drop(handle);
+    // Origine des fichiers du brouillon (badge + « Voir la discussion »).
+    crate::draft_origin::record_run(state, run, &tools_json).await;
     if status == "cancelled" {
         return Ok(());
     }

@@ -340,6 +340,29 @@ data class DraftFile(
     /** `added` | `modified` | `deleted` | `renamed` */
     val status: String = "modified",
     @SerialName("old_path") val oldPath: String? = null,
+    val origin: DraftOrigin? = null,
+)
+
+/** Qui a écrit le brouillon : `repair` | `feature` | `routine` | `manual` | `sync`. */
+@Serializable
+data class DraftOrigin(
+    val kind: String = "manual",
+    @SerialName("run_uuid") val runUuid: String? = null,
+    @SerialName("agent_uuid") val agentUuid: String? = null,
+    @SerialName("agent_name") val agentName: String? = null,
+    @SerialName("deployment_uuid") val deploymentUuid: String? = null,
+    @SerialName("recorded_at") val recordedAt: String? = null,
+)
+
+/** Recommandation : `keep` (Garder) | `review` (À vérifier) | `delete` (Peut être supprimé). */
+@Serializable
+data class DraftAdvice(val level: String = "review", val label: String = "", val reason: String = "")
+
+@Serializable
+data class DraftInsight(
+    val behind: Int = 0,
+    val overlap: List<String> = emptyList(),
+    @SerialName("already_on_github") val alreadyOnGithub: List<String> = emptyList(),
 )
 
 @Serializable
@@ -370,6 +393,11 @@ data class DraftStatus(
     @SerialName("suggested_message") val suggestedMessage: String = "",
     val backups: List<DraftBackup> = emptyList(),
     val preview: DraftPreview = DraftPreview(),
+    val origin: DraftOrigin? = null,
+    @SerialName("origin_kinds") val originKinds: List<String> = emptyList(),
+    val advice: DraftAdvice? = null,
+    val insight: DraftInsight? = null,
+    @SerialName("repair_succeeded_at") val repairSucceededAt: String? = null,
 )
 
 @Serializable
@@ -409,6 +437,8 @@ data class DraftSummary(
     val count: Int = 0,
     val behind: Int = 0,
     @SerialName("updated_at") val updatedAt: String? = null,
+    val origin: DraftOrigin? = null,
+    val advice: DraftAdvice? = null,
 )
 
 @Serializable

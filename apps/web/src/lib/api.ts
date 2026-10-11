@@ -413,7 +413,24 @@ export type AgentTriggerConfig = {
   event?: string;
 };
 
-export type DraftFile = { path: string; status: 'added' | 'modified' | 'deleted' | 'renamed' | string; old_path?: string | null };
+/** Origine d'un fichier / d'un brouillon : quel run d'agent l'a écrit. */
+export type DraftOriginKind = 'repair' | 'feature' | 'routine' | 'manual' | 'sync';
+export type DraftOrigin = {
+  kind: DraftOriginKind | string;
+  run_uuid?: string | null;
+  agent_uuid?: string | null;
+  agent_name?: string | null;
+  deployment_uuid?: string | null;
+  recorded_at?: string | null;
+};
+export type DraftAdvice = { level: 'keep' | 'review' | 'delete' | string; label: string; reason: string };
+export type DraftInsight = { behind: number; overlap: string[]; already_on_github: string[] };
+export type DraftFile = {
+  path: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | string;
+  old_path?: string | null;
+  origin?: DraftOrigin | null;
+};
 export type DraftBackup = { id: string; created_at: string; reason: string; files: string[]; deleted: string[] };
 export type DraftStatus = {
   ok: boolean;
@@ -431,6 +448,11 @@ export type DraftStatus = {
   suggested_message: string;
   backups: DraftBackup[];
   preview: { running: boolean; url?: string | null };
+  origin?: DraftOrigin | null;
+  origin_kinds?: string[];
+  advice?: DraftAdvice | null;
+  insight?: DraftInsight | null;
+  repair_succeeded_at?: string | null;
 };
 export type DraftDiffFile = DraftFile & { additions: number; deletions: number; patch?: string | null };
 export type DraftSummary = {
@@ -444,6 +466,9 @@ export type DraftSummary = {
   behind: number;
   updated_at?: string | null;
   sample: string[];
+  origin?: DraftOrigin | null;
+  origin_kinds?: string[];
+  advice?: DraftAdvice | null;
 };
 
 export const api = {

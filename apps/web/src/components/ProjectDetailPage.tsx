@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { draftHref, filesLabel, useDraft } from './DraftPanel';
 import { CRON_PRESETS, cronToFrench } from '../lib/cron-utils';
 import { deployProgressDetail, deployStatusLabel, deployStatusShort, isDeployInProgress, shortSha } from '../lib/deployStatus';
 import type { ComponentChildren } from 'preact';
@@ -79,7 +80,8 @@ function readQuery(): { uuid: string; tab: Tab; builder?: boolean; agent?: strin
   }
   const q = new URLSearchParams(window.location.search);
   // Sans ?tab : Tableau de bord (Overview). Les anciens ?tab= restent valides.
-  const tab = (q.get('tab') as Tab) || 'overview';
+  // Ancien lien direct « ?draft=1 » sans onglet : le brouillon vit dans le Workspace.
+  const tab = (q.get('tab') as Tab) || (q.get('draft') === '1' ? 'workspace' : 'overview');
   const allowed: Tab[] = [
     'home',
     'overview',
@@ -810,6 +812,7 @@ function ProjectOverview({
   workspaceEnabled?: boolean;
 }) {
   const toast = useToast();
+  const { draft } = useDraft(uuid);
   const [envCount, setEnvCount] = useState<number | null>(null);
   const [envKeys, setEnvKeys] = useState<string[]>([]);
   const [dbLinks, setDbLinks] = useState<
@@ -1138,9 +1141,12 @@ function ProjectOverview({
           {
             key: 'workspace',
             title: 'Workspace',
-            description: 'Brouillons, code et aperçu',
-            href: `${base}&tab=workspace`,
-            icon: <HealthIcon kind="git" tone="neutral" />,
+            // Brouillon en attente : la tuile ouvre directement le brouillon.
+            description: draft?.dirty
+              ? `Brouillon · ${filesLabel(draft.count)}${draft.advice ? ` · ${draft.advice.label}` : ''}`
+              : 'Brouillon, code et aperçu',
+            href: draft?.dirty ? draftHref(uuid) : `${base}&tab=workspace`,
+            icon: <HealthIcon kind="git" tone={draft?.dirty ? 'warn' : 'neutral'} />,
           },
         ]
       : []),
