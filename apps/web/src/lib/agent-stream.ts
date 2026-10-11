@@ -465,6 +465,12 @@ export async function streamAgentChat(
     arguments?: Record<string, unknown>;
     project_uuid?: string;
     agent_uuid?: string;
+    /** P5-04 : réponse structurée à une question `ask_user`. */
+    answer?: { message_uuid?: string; option_id?: string; label?: string; question?: string; text?: string };
+    /** P5-06 : message cité. */
+    reply_to?: string;
+    /** P5-02 : ids d'images déjà envoyées. */
+    attachments?: string[];
   },
   handlers: StreamHandlers = {},
   signal?: AbortSignal,

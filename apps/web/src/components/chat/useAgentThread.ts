@@ -6,9 +6,10 @@ import { cancelQueued, EMPTY_QUEUE, enqueue, flushOnIdle, type ComposerQueue } f
 import { markLaunchedStatus } from '../../lib/launched-agents';
 import { approveThenSend, PUBLISH_APPROVAL_KIND } from '../../lib/publish-approval';
 import { useToast } from '../ui';
-import { draftHandlers, draftMessage, finalizedMessage, fromServerMessages } from './messages';
+import { adoptServerUuids, draftHandlers, draftMessage, finalizedMessage, fromServerMessages } from './messages';
+import { useAttachments } from './useAttachments';
 import { storeThread } from './thread-meta';
-import type { ChatMessage } from './types';
+import type { Answer, ChatMessage } from './types';
 
 export type AgentThreadApi = {
   agentMessages: typeof api.agentMessages;
@@ -19,7 +20,22 @@ export type AgentThreadApi = {
   projectAgents: typeof api.projectAgents;
   stream: typeof streamAgentChat;
   subscribe: typeof subscribeRun;
+  reactToMessage?: typeof api.reactToMessage;
+  uploadAgentAttachment?: typeof api.uploadAgentAttachment;
 };
+
+/** Choix fait dans une carte de question (P5-04). */
+export type QuestionChoice = { optionId?: string; label: string; text?: string; action?: string };
+/** Message cité (P5-06). */
+export type ReplyTarget = { id: string; serverUuid: string; excerpt: string };
+
+export function answerModelText(question: string, label: string, text?: string): string {
+  const q = question.trim();
+  const free = (text ?? '').trim();
+  const l = label.trim();
+  const ans = free && l ? `${l} — ${free}` : free || l;
+  return q ? `Réponse à ta question « ${q} » : ${ans}` : `Réponse : ${ans}`;
+}
 
 const defaultClient: AgentThreadApi = {
   agentMessages: (p, a) => api.agentMessages(p, a),
@@ -30,6 +46,8 @@ const defaultClient: AgentThreadApi = {
   projectAgents: (p) => api.projectAgents(p),
   stream: streamAgentChat,
   subscribe: subscribeRun,
+  reactToMessage: (u, e, on) => api.reactToMessage(u, e, on),
+  uploadAgentAttachment: (p, a, f, n) => api.uploadAgentAttachment(p, a, f, n),
 };
 
 export type AgentThreadOptions = {
@@ -85,6 +103,19 @@ export function useAgentThread({
     queueRef.current = q;
     setQueueState(q);
   };
+  /** P5-02 : images du composer, envoyées dès l'ajout. */
+  const upload = client.uploadAgentAttachment;
+  const attachments = useAttachments(
+    selected && upload ? (blob, name) => upload(projectUuid, selected, blob, name) : null,
+    (msg) => toast.push({ title: 'Image non jointe', detail: msg, tone: 'danger' }),
+  );
+  /** P5-06 : réponse ciblée. */
+  const [replyTo, setReplyToState] = useState<ReplyTarget | null>(null);
+  const replyRef = useRef<ReplyTarget | null>(null);
+  const setReplyTo = (r: ReplyTarget | null) => {
+    replyRef.current = r;
+    setReplyToState(r);
+  };
   /** Ids de l'historique chargé au montage du fil : ceux-là ne sont pas animés. */
   const history = useRef<{ agent: string | null; ids: Set<string> }>({ agent: null, ids: new Set() });
 
@@ -97,19 +128,26 @@ export function useAgentThread({
   const finalize = (draftId: string, res: AgentChatResult, startedAt: number) =>
     updateMessage(draftId)((m) => finalizedMessage(m, res, startedAt));
 
-  async function loadMessages(agentUuid: string) {
+  async function loadMessages(agentUuid: string, opts: { adoptOnly?: boolean } = {}) {
     try {
       const r = await client.agentMessages(projectUuid, agentUuid);
       const next = fromServerMessages(r.data ?? []);
+      if (opts.adoptOnly) {
+        // Après un tour envoyé ici : uuids serveur seulement, l'affichage ne bouge pas.
+        setMessages((prev) => adoptServerUuids(prev, next));
+        return;
+      }
       // Premier chargement de ce fil : c'est l'historique, pas d'animation en cascade.
       if (history.current.agent !== agentUuid) history.current = { agent: agentUuid, ids: new Set(next.map((m) => m.id)) };
       setMessages((prev) => {
+        // Un run en direct a démarré entre-temps : ne pas écraser son brouillon.
+        if (prev.some((m) => m.streaming)) return adoptServerUuids(prev, next);
         const reconciled = reconcileMessageIds(prev, next);
-        // Même contenu ⇒ même tableau ⇒ aucun re-rendu.
-        return messagesSignature(reconciled) === messagesSignature(prev) && prev.length > 0 ? prev : reconciled;
+        // Même contenu ⇒ mêmes messages affichés ; seuls les uuids serveur sont adoptés.
+        return messagesSignature(reconciled) === messagesSignature(prev) && prev.length > 0 ? adoptServerUuids(prev, next) : reconciled;
       });
     } catch {
-      setMessages([]);
+      if (!opts.adoptOnly) setMessages([]);
     }
   }
 
@@ -226,10 +264,16 @@ export function useAgentThread({
     });
   }
 
-  async function send(text: string) {
+  async function send(text: string, opts: { answer?: { messageUuid?: string; question: string; choice: QuestionChoice } } = {}) {
     const trimmed = text.trim();
-    if (!trimmed || !selected) return;
+    const withImages = attachments.peekReady();
+    if ((!trimmed && !withImages && !opts.answer) || !selected) return;
+    if (attachments.isUploading()) {
+      toast.push({ title: 'Image en cours d’envoi', detail: 'Réessaie dans un instant, dès qu’elle est prête.', tone: 'info' });
+      return;
+    }
     if (busyRef.current || followRef.current) {
+      if (opts.answer || !trimmed) return;
       // Run en cours (ici ou repris) : la saisie reste libre, l'envoi part à la fin.
       setQueue(enqueue(queueRef.current, trimmed));
       setInput('');
@@ -239,6 +283,7 @@ export function useAgentThread({
     const controller = new AbortController();
     abortRef.current = controller;
     let aborted = false;
+    let replied = false;
     setBusy(true);
     markLaunchedStatus(selected, 'working');
     // Brouillon de réponse créé tout de suite : points de frappe, puis texte streamé (même id à la fin).
@@ -247,13 +292,42 @@ export function useAgentThread({
     runRef.current = null;
     liveDraftRef.current = draft.id;
     const emptyThread = messages.length === 0;
-    setMessages((m) => [...m, { id: localMessageId(), role: 'user', content: trimmed }, draft]);
+    const images = attachments.take();
+    const reply = replyRef.current;
+    setReplyTo(null);
+    const a = opts.answer;
+    const answer: Answer | undefined = a
+      ? { answerTo: a.messageUuid ?? null, optionId: a.choice.optionId ?? null, label: a.choice.label, text: a.choice.text ?? null }
+      : undefined;
+    const userMsg: ChatMessage = {
+      id: localMessageId(),
+      role: 'user',
+      content: a ? answerModelText(a.question, a.choice.label, a.choice.text) : trimmed,
+      attachments: images.length ? images : undefined,
+      replyTo: reply?.serverUuid,
+      answer,
+    };
+    setMessages((m) => [...m, userMsg, draft]);
     setInput('');
     onSent?.();
     await beforeSend?.(trimmed, emptyThread);
     try {
-      const res = await client.stream(trimmed, { project_uuid: projectUuid, agent_uuid: selected }, handlersFor(draft.id), controller.signal);
+      const res = await client.stream(
+        trimmed,
+        {
+          project_uuid: projectUuid,
+          agent_uuid: selected,
+          ...(a
+            ? { answer: { message_uuid: a.messageUuid, option_id: a.choice.optionId, label: a.choice.label, question: a.question, text: a.choice.text } }
+            : {}),
+          ...(reply ? { reply_to: reply.serverUuid } : {}),
+          ...(images.length ? { attachments: images.map((i) => i.id) } : {}),
+        },
+        handlersFor(draft.id),
+        controller.signal,
+      );
       finalize(draft.id, res, startedAt);
+      replied = true;
       onReplied?.(res);
       if ((res.tool_calls ?? []).some((t) => t.name === 'start_local_preview' && t.result?.public_ok === false)) setPollEnabled(true);
     } catch (err: unknown) {
@@ -282,9 +356,52 @@ export function useAgentThread({
         setQueue(EMPTY_QUEUE);
         if (pending) setInput((cur) => (cur.trim() ? `${pending}\n\n${cur}` : pending));
       } else {
+        // Uuids serveur du tour (réactions, citations) sans re-rendu du message affiché.
+        if (replied) void loadMessages(selected, { adoptOnly: true });
         flushQueue();
       }
     }
+  }
+
+  /** P5-04 : réponse à une question `ask_user` (accord de publication d'abord si l'option le demande). */
+  async function answerQuestion(m: ChatMessage, question: string, choice: QuestionChoice) {
+    if (choice.action === 'approve_publish') {
+      try {
+        await client.approvePublish(projectUuid);
+      } catch (e: unknown) {
+        toast.push({ title: 'Validation impossible', detail: String((e as Error)?.message || e), tone: 'danger' });
+        return;
+      }
+    }
+    await send('', { answer: { messageUuid: m.serverUuid ?? (isLocalId(m.id) ? undefined : m.id), question, choice } });
+  }
+
+  /** P5-03 : ajoute / retire une réaction (optimiste, corrigé par la réponse du serveur). */
+  async function react(id: string, emoji: string) {
+    const target = messagesRef.current.find((x) => x.id === id);
+    const uuid = target?.serverUuid;
+    if (!target || !uuid || !client.reactToMessage) return;
+    const before = target.reactions;
+    const mine = !!before?.find((r) => r.emoji === emoji)?.mine;
+    const toggled = (before ?? [])
+      .map((r) => (r.emoji === emoji ? { ...r, count: r.count + (mine ? -1 : 1), mine: !mine } : r))
+      .filter((r) => r.count > 0);
+    const optimistic = before?.some((r) => r.emoji === emoji) ? toggled : [...toggled, { emoji, count: 1, mine: true }];
+    setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, reactions: optimistic } : x)));
+    try {
+      const r = await client.reactToMessage(uuid, emoji, !mine);
+      setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, reactions: r.reactions } : x)));
+    } catch (e: unknown) {
+      setMessages((prev) => prev.map((x) => (x.id === id ? { ...x, reactions: before } : x)));
+      toast.push({ title: 'Réaction non enregistrée', detail: String((e as Error)?.message || e), tone: 'danger' });
+    }
+  }
+
+  /** P5-06 : « Répondre » sur une bulle. */
+  function startReply(m: ChatMessage) {
+    if (!m.serverUuid) return;
+    const excerpt = m.content.replace(/\s+/g, ' ').trim().slice(0, 140);
+    setReplyTo({ id: m.id, serverUuid: m.serverUuid, excerpt: excerpt || (m.attachments?.length ? 'Image' : '…') });
   }
 
   /** « Réessayer » sur une carte d'erreur : renvoie le dernier message utilisateur. */
@@ -329,7 +446,18 @@ export function useAgentThread({
     setMessages([]);
   }
 
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   // Callbacks stables pour les messages mémoïsés (toujours la dernière version).
+  const answerRef = useRef(answerQuestion);
+  answerRef.current = answerQuestion;
+  const reactRef = useRef(react);
+  reactRef.current = react;
+  const replyStartRef = useRef(startReply);
+  replyStartRef.current = startReply;
+  const onAnswer = useCallback((m: ChatMessage, q: string, c: QuestionChoice) => void answerRef.current(m, q, c), []);
+  const onReact = useCallback((id: string, emoji: string) => void reactRef.current(id, emoji), []);
+  const onReply = useCallback((m: ChatMessage) => replyStartRef.current(m), []);
   const sendRef = useRef(send);
   sendRef.current = send;
   const retryRef = useRef(retry);
@@ -374,5 +502,11 @@ export function useAgentThread({
     onRetry,
     onApprovePublish,
     onJobFinished,
+    onAnswer,
+    onReact,
+    onReply,
+    attachments,
+    replyTo,
+    cancelReply: () => setReplyTo(null),
   };
 }

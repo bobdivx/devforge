@@ -4,9 +4,23 @@ import type { Milestone } from '../../lib/activity';
 import type { NeedsUserAction } from '../../lib/publish-approval';
 import type { LiveAction } from '../agents/AgentActionCards';
 
+/** P5-02 : image jointe à un message. */
+export type Attachment = { id: string; url: string; name: string; mime: string; width: number; height: number; size?: number };
+/** P5-03 : réactions agrégées. */
+export type Reaction = { emoji: string; count: number; mine: boolean };
+/** P5-04 : réponse structurée à une question `ask_user`. */
+export type Answer = { answerTo?: string | null; optionId?: string | null; label: string; text?: string | null };
+
 export type ChatMessage = {
   /** uuid serveur, ou `local-…` pour un message optimiste (clé React stable). */
   id: string;
+  /** Uuid serveur (l'id reste local après réconciliation). */
+  serverUuid?: string;
+  attachments?: Attachment[];
+  reactions?: Reaction[];
+  /** P5-06 : uuid du message cité. */
+  replyTo?: string | null;
+  answer?: Answer;
   role: string;
   /** Erreur d'agent (réseau, 524…) : affichée en carte, jamais persistée. */
   error?: boolean;

@@ -305,6 +305,12 @@ export type ProjectCron = {
   next_run_at?: string | null;
   created_at: string;
   updated_at: string;
+  /** P5-05 : `agent` = routine exécutée par un agent (consigne `prompt`). */
+  kind?: 'command' | 'agent' | null;
+  agent_uuid?: string | null;
+  prompt?: string | null;
+  created_by?: string | null;
+  notify?: 'always' | 'on_change' | 'on_failure' | null;
 };
 
 export type CronRun = {
@@ -818,8 +824,45 @@ export const api = {
         provider?: string;
         tool_calls_json?: string;
         created_at: string;
+        attachments_json?: string;
+        reply_to_uuid?: string | null;
+        reactions_json?: string;
       }>;
     }>(`/projects/${projectUuid}/agents/${agentUuid}/messages`),
+  /** P5-03 : réaction emoji (liste blanche côté serveur). */
+  reactToMessage: (messageUuid: string, emoji: string, on: boolean) =>
+    request<{ ok: boolean; reactions: Array<{ emoji: string; count: number; mine: boolean }> }>(
+      `/messages/${encodeURIComponent(messageUuid)}/reactions/${encodeURIComponent(emoji)}`,
+      { method: on ? 'POST' : 'DELETE', body: on ? '{}' : undefined },
+    ),
+  /** P5-02 : image jointe (corps brut, ≤ 10 Mo, PNG/JPEG/WebP/GIF). */
+  uploadAgentAttachment: async (projectUuid: string, agentUuid: string, file: Blob, name: string) => {
+    const token = getToken();
+    const res = await fetch(`${SERVER_BASE}/projects/${projectUuid}/agents/${agentUuid}/attachments`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': file.type,
+        'X-Filename': encodeURIComponent(name),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: file,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let msg = text || res.statusText;
+      try {
+        msg = JSON.parse(text).error || msg;
+      } catch {
+        /* texte brut */
+      }
+      throw new Error(res.status === 413 ? 'Image trop lourde (10 Mo max)' : msg);
+    }
+    return (await res.json()) as {
+      ok: boolean;
+      data: { id: string; url: string; name: string; mime: string; width: number; height: number; size: number };
+    };
+  },
   /** P4-02 : run en cours d'un fil (pour reprendre son flux). */
   activeRun: (projectUuid: string, agentUuid: string) =>
     request<{ data: AgentRunInfo | null }>(`/projects/${projectUuid}/agents/${agentUuid}/active-run`),

@@ -1,6 +1,8 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useLayoutEffect, useRef } from 'preact/hooks';
-import { ArrowUp, Square, X } from 'lucide-preact';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { AlertCircle, ArrowUp, CornerDownRight, Loader2, Paperclip, Square, X } from 'lucide-preact';
+import { ACCEPTED_IMAGE_TYPES } from '../../lib/image-compress';
+import type { PendingAttachment } from './useAttachments';
 import { cn } from '../../lib/cn';
 import { pressScale, prefersReducedMotion } from '../../lib/motion';
 
@@ -23,7 +25,29 @@ export type ComposerProps = {
   class?: string;
   /** Contenu ajouté avant la zone de saisie (rare). */
   children?: ComponentChildren;
+  /** P5-02 : images jointes (coller, glisser-déposer, trombone). */
+  attachments?: PendingAttachment[];
+  onAddFiles?(files: File[]): void;
+  onRemoveAttachment?(localId: string): void;
+  /** P5-06 : bandeau « En réponse à ». */
+  replyTo?: { excerpt: string } | null;
+  onCancelReply?(): void;
 };
+
+/** Fichiers images d'un collage (captures d'écran comprises). */
+export function imageFilesFrom(data: { files?: FileList | File[] | null; items?: DataTransferItemList | null } | null): File[] {
+  if (!data) return [];
+  const files = Array.from(data.files ?? []);
+  if (!files.length && data.items) {
+    for (const it of Array.from(data.items)) {
+      if (it.kind === 'file') {
+        const f = it.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+  }
+  return files.filter((f) => f.type.startsWith('image/'));
+}
 
 export function isCoarsePointer(): boolean {
   if (typeof window === 'undefined' || !window.matchMedia) return false;
@@ -69,9 +93,18 @@ export function Composer({
   onCancelQueued,
   class: className,
   children,
+  attachments = [],
+  onAddFiles,
+  onRemoveAttachment,
+  replyTo,
+  onCancelReply,
 }: ComposerProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
-  const canSend = !disabled && value.trim().length > 0;
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const readyImages = attachments.some((a) => a.status === 'ready');
+  const uploading = attachments.some((a) => a.status === 'uploading');
+  const canSend = !disabled && !uploading && (value.trim().length > 0 || (!busy && readyImages));
 
   useLayoutEffect(() => {
     if (ref.current) autoResize(ref.current);
@@ -99,13 +132,98 @@ export function Composer({
 
   return (
     <form
-      class={cn('flex min-w-0 flex-col gap-2', className)}
+      class={cn('relative flex min-w-0 flex-col gap-2', className)}
       onSubmit={(e) => {
         e.preventDefault();
         submit();
       }}
+      onDragOver={
+        onAddFiles
+          ? (e) => {
+              if (!Array.from(e.dataTransfer?.types ?? []).includes('Files')) return;
+              e.preventDefault();
+              setDragging(true);
+            }
+          : undefined
+      }
+      onDragLeave={(e) => {
+        if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDragging(false);
+      }}
+      onDrop={
+        onAddFiles
+          ? (e) => {
+              const files = imageFilesFrom(e.dataTransfer);
+              setDragging(false);
+              if (!files.length) return;
+              e.preventDefault();
+              onAddFiles(files);
+            }
+          : undefined
+      }
     >
+      {dragging && (
+        <div class="pointer-events-none absolute inset-1 z-10 flex items-center justify-center rounded-2xl border-2 border-dashed border-[var(--color-accent)]/70 bg-[var(--color-bg)]/80 text-sm text-[var(--color-ink)]">
+          Dépose l’image ici
+        </div>
+      )}
       {children}
+      {replyTo && (
+        <div class="flex min-w-0 items-center gap-2 rounded-lg border-l-2 border-[var(--color-accent)] bg-white/[0.04] py-1 pl-2 pr-1 text-xs text-[var(--color-ink-muted)]" data-reply-banner>
+          <CornerDownRight size={13} class="shrink-0" aria-hidden />
+          <span class="min-w-0 flex-1 truncate">
+            <span class="text-[var(--color-ink-faint)]">En réponse à : </span>
+            {replyTo.excerpt}
+          </span>
+          {onCancelReply && (
+            <button
+              type="button"
+              class="df-hit df-tap-skip inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full hover:bg-white/10 hover:text-[var(--color-ink)]"
+              aria-label="Annuler la réponse ciblée"
+              onMouseDown={keepFocus}
+              onClick={() => onCancelReply()}
+            >
+              <X size={12} strokeWidth={2.2} aria-hidden />
+            </button>
+          )}
+        </div>
+      )}
+      {attachments.length > 0 && (
+        <div class="flex flex-wrap gap-2" data-composer-attachments>
+          {attachments.map((a) => (
+            <div
+              key={a.localId}
+              class={cn(
+                'relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-white/[0.04] ring-1 ring-inset',
+                a.status === 'error' ? 'ring-[var(--color-danger)]' : 'ring-[var(--color-line)]',
+              )}
+              title={a.error ?? a.name}
+            >
+              <img src={a.previewUrl} alt={a.name} class={cn('h-full w-full object-cover', a.status !== 'ready' && 'opacity-60')} />
+              {a.status === 'uploading' && (
+                <span class="absolute inset-0 flex items-center justify-center" role="status" aria-label="Envoi de l’image…">
+                  <Loader2 size={16} class="animate-spin text-white motion-reduce:animate-none" aria-hidden />
+                </span>
+              )}
+              {a.status === 'error' && (
+                <span class="absolute inset-0 flex items-center justify-center bg-black/40" aria-label={a.error ?? 'Échec'}>
+                  <AlertCircle size={16} class="text-[var(--color-danger)]" aria-hidden />
+                </span>
+              )}
+              {onRemoveAttachment && (
+                <button
+                  type="button"
+                  class="df-tap-skip absolute right-0.5 top-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white hover:bg-black"
+                  aria-label={`Retirer l’image ${a.name}`}
+                  onMouseDown={keepFocus}
+                  onClick={() => onRemoveAttachment(a.localId)}
+                >
+                  <X size={11} strokeWidth={2.4} aria-hidden />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       {queued ? (
         <div class="flex min-w-0 items-center gap-2 self-start rounded-full border border-[var(--color-line-strong)] bg-white/[0.04] py-1 pl-3 pr-1 text-xs text-[var(--color-ink-muted)] max-w-full">
           <span class="min-w-0 truncate">
@@ -127,6 +245,34 @@ export function Composer({
         </div>
       ) : null}
       <div class="flex min-w-0 items-end gap-2">
+        {onAddFiles && (
+          <>
+            <input
+              ref={fileRef}
+              type="file"
+              accept={ACCEPTED_IMAGE_TYPES.join(',')}
+              multiple
+              class="hidden"
+              data-composer-file
+              onChange={(e) => {
+                const files = Array.from(e.currentTarget.files ?? []);
+                e.currentTarget.value = '';
+                if (files.length) onAddFiles(files);
+              }}
+            />
+            <button
+              type="button"
+              disabled={disabled}
+              class="df-tap-skip inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] disabled:opacity-50 max-lg:h-11 max-lg:w-11"
+              aria-label="Joindre une image"
+              title="Joindre une image (ou coller une capture)"
+              onMouseDown={keepFocus}
+              onClick={() => fileRef.current?.click()}
+            >
+              <Paperclip size={18} strokeWidth={2} aria-hidden />
+            </button>
+          </>
+        )}
         <label for={inputId} class="sr-only">
           {placeholder}
         </label>
@@ -150,6 +296,16 @@ export function Composer({
             autoResize(el);
             onChange(el.value);
           }}
+          onPaste={
+            onAddFiles
+              ? (e) => {
+                  const files = imageFilesFrom(e.clipboardData);
+                  if (!files.length) return;
+                  e.preventDefault();
+                  onAddFiles(files);
+                }
+              : undefined
+          }
           onKeyDown={(e) => {
             if (shouldSubmitOnEnter({ key: e.key, shiftKey: e.shiftKey, isComposing: e.isComposing, keyCode: e.keyCode, coarse: isCoarsePointer() })) {
               e.preventDefault();

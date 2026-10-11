@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Check, Copy } from 'lucide-preact';
 import { copyText } from '../../lib/clipboard';
+import { highlightCode, normalizeLang, type CodeToken } from '../../lib/highlight';
 
 /** Bloc de code des messages : langue + bouton « Copier », défilement horizontal. */
 export function CodeBlock({ code, lang }: { code: string; lang?: string }) {
@@ -9,6 +10,23 @@ export function CodeBlock({ code, lang }: { code: string; lang?: string }) {
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  // P5-01 : coloration chargée à la demande ; texte brut d'ici là (même police : pas de saut).
+  const [tokens, setTokens] = useState<CodeToken[][] | null>(null);
+  useEffect(() => {
+    if (!normalizeLang(lang)) return;
+    let alive = true;
+    const t = window.setTimeout(() => {
+      void highlightCode(code, lang).then((tk) => {
+        if (alive) setTokens(tk);
+      });
+    }, 120);
+    return () => {
+      alive = false;
+      window.clearTimeout(t);
+    };
+  }, [code, lang]);
+  const shown = tokens && tokens.map((l) => l.map((t) => t.content).join('')).join('\n') === code ? tokens : null;
 
   async function onCopy() {
     const ok = await copyText(code);
@@ -44,7 +62,27 @@ export function CodeBlock({ code, lang }: { code: string; lang?: string }) {
         </button>
       </div>
       <pre class="max-h-[480px] max-w-full overflow-auto whitespace-pre px-3 py-2 font-mono text-[12.5px] leading-relaxed">
-        <code>{code}</code>
+        <code data-highlighted={shown ? 'true' : undefined}>
+          {shown
+            ? shown.map((line, i) => (
+                <span key={i}>
+                  {line.map((t, j) => (
+                    <span
+                      key={j}
+                      style={{
+                        color: t.color,
+                        fontStyle: t.fontStyle && t.fontStyle & 1 ? 'italic' : undefined,
+                        fontWeight: t.fontStyle && t.fontStyle & 2 ? 600 : undefined,
+                      }}
+                    >
+                      {t.content}
+                    </span>
+                  ))}
+                  {i < shown.length - 1 ? '\n' : ''}
+                </span>
+              ))
+            : code}
+        </code>
       </pre>
     </div>
   );

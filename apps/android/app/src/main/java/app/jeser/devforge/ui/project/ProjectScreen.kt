@@ -111,6 +111,12 @@ data class ProjectActions(
     val onDraftValidatedSeen: () -> Unit = {},
     val onUndoShown: () -> Unit = {},
     val onCancelJob: (String) -> Unit = {},
+    /* P5 : question `ask_user`, réactions, images jointes. */
+    val onAnswer: (ChatItem, app.jeser.devforge.data.QuestionOption?, String?) -> Unit = { _, _, _ -> },
+    val onReact: (ChatItem, String) -> Unit = { _, _ -> },
+    val onAttachImage: (ByteArray, String, String) -> Unit = { _, _, _ -> },
+    val onRemoveImage: (String) -> Unit = {},
+    val attachmentUrl: (String) -> String? = { null },
 )
 
 /** Feuilles de la page app (une seule ouverte à la fois). */
@@ -633,6 +639,8 @@ private fun ChatPane(
         add(Chip("design", "🎨 Design"))
     }
     val canChat = state.coordinatorUuid != null && !state.sending
+    // P5-04 : réponses aux questions, indexées par uuid du message de l'agent.
+    val answers = remember(state.messages) { state.messages.mapNotNull { m -> m.answer?.let { a -> a.answerTo?.let { it to a } } }.toMap() }
     val lastPlanKey = state.messages.lastOrNull { it.hasPlan }?.key
         ?.takeIf { key -> state.messages.lastOrNull { it.role == "assistant" }?.key == key }
 
@@ -653,7 +661,18 @@ private fun ChatPane(
                 }
             }
             items(state.messages, key = { it.key }) { m ->
-                MessageRow(m, showPlanAction = m.key == lastPlanKey && canChat, onBuild = { actions.onSend(ChipText.BUILD_PLAN) }, onCancelJob = actions.onCancelJob)
+                MessageRow(
+                    m,
+                    showPlanAction = m.key == lastPlanKey && canChat,
+                    onBuild = { actions.onSend(ChipText.BUILD_PLAN) },
+                    onCancelJob = actions.onCancelJob,
+                    rich = RichRowState(
+                        questionOpen = m.key == state.messages.lastOrNull()?.key && canChat,
+                        answer = m.uuid?.let { answers[it] },
+                        canReact = m.uuid != null && !state.sending,
+                    ),
+                    actions = actions,
+                )
             }
             if (state.sending) {
                 item(key = "thinking") { ThinkingRow(state.progress) }
@@ -695,11 +714,13 @@ private fun ChatPane(
                 }
             }
         }
+        if (state.pendingImages.isNotEmpty()) PendingImagesRow(state.pendingImages, onRemove = actions.onRemoveImage)
         Row(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            AttachImageButton(enabled = state.coordinatorUuid != null && state.pendingImages.size < 4, onPicked = actions.onAttachImage)
             OutlinedTextField(
                 value = input,
                 onValueChange = onInput,
@@ -722,7 +743,7 @@ private fun ChatPane(
                     actions.onSend(input)
                     onInput("")
                 },
-                enabled = canChat && input.isNotBlank(),
+                enabled = canChat && (input.isNotBlank() || state.pendingImages.any { it.status == "ready" }) && state.pendingImages.none { it.status == "uploading" },
                 modifier = Modifier.size(52.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = IconButtonDefaults.filledIconButtonColors(containerColor = DfColors.Accent, contentColor = DfColors.OnAccent),
@@ -738,10 +759,20 @@ private fun ChatPane(
 }
 
 @Composable
-private fun MessageRow(m: ChatItem, showPlanAction: Boolean, onBuild: () -> Unit, onCancelJob: (String) -> Unit = {}) {
+private fun MessageRow(
+    m: ChatItem,
+    showPlanAction: Boolean,
+    onBuild: () -> Unit,
+    onCancelJob: (String) -> Unit = {},
+    rich: RichRowState = RichRowState(),
+    actions: ProjectActions = ProjectActions(),
+) {
     when (m.role) {
-        "user" -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-            Surface(
+        "user" -> if (m.answer != null) {
+            AnswerBubble(m.answer)
+        } else Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (m.attachments.isNotEmpty()) ImageGridRow(m.attachments, actions.attachmentUrl)
+            if (m.content.isNotBlank()) Surface(
                 color = DfColors.AccentSoft,
                 shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp),
                 border = BorderStroke(1.dp, DfColors.Accent.copy(alpha = .25f)),
@@ -755,7 +786,8 @@ private fun MessageRow(m: ChatItem, showPlanAction: Boolean, onBuild: () -> Unit
         "assistant" -> Row(Modifier.fillMaxWidth()) {
             PersonaAvatar(Persona.Braise, 30.dp, Modifier.padding(top = 2.dp))
             Column(Modifier.padding(start = 10.dp).weight(1f, fill = false).widthIn(max = 640.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Surface(
+                val sameAsQuestion = m.question != null && m.content.trim() == m.question.question.trim()
+                if (!sameAsQuestion) Surface(
                     color = DfColors.Card,
                     shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
                     border = BorderStroke(1.dp, DfColors.Line),
@@ -764,7 +796,13 @@ private fun MessageRow(m: ChatItem, showPlanAction: Boolean, onBuild: () -> Unit
                         MarkdownText(m.content.ifBlank { "…" }, Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
                     }
                 }
+                m.question?.let { q ->
+                    QuestionCardRow(q, open = rich.questionOpen, answer = rich.answer, onAnswer = { opt, text -> actions.onAnswer(m, opt, text) })
+                }
                 m.jobs.forEach { job -> JobCardRow(job, onCancel = { onCancelJob(job.id) }) }
+                if (m.reactions.isNotEmpty() || rich.canReact) {
+                    ReactionsRow(m.reactions, enabled = rich.canReact, onToggle = { e -> actions.onReact(m, e) })
+                }
                 if (showPlanAction) {
                     OutlinedButton(onClick = onBuild, modifier = Modifier.heightIn(min = 48.dp)) {
                         Text("🧱 Construire en brouillon")

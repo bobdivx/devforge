@@ -10,7 +10,7 @@ import { MobileThreadBar } from './chat/MobileThreadBar';
 import { PersonaChips, PersonaEmptyState } from './chat/PersonaEmptyState';
 import { metaFor, THREAD_STARTERS, threadLabel } from './chat/thread-meta';
 import { TeamSidebar, ThreadSidebar } from './chat/ThreadSidebar';
-import type { ChatChip, ChatPersona } from './chat/types';
+import type { Answer, ChatChip, ChatMessage, ChatPersona } from './chat/types';
 import { useAgentThread } from './chat/useAgentThread';
 import { useLlmStatus } from './chat/useLlmStatus';
 import { useThreadList } from './chat/useThreadList';
@@ -115,6 +115,18 @@ export function ProjectAgentsPanel({ projectUuid, defaultAgentUuid, builderMode,
     }, 0);
   }
 
+  // P5-04 / P5-06 : réponses aux questions et extraits cités, indexés par uuid serveur.
+  const answers = new Map<string, Answer>();
+  const byUuid = new Map<string, ChatMessage>();
+  for (const m of messages) {
+    if (m.serverUuid) byUuid.set(m.serverUuid, m);
+    if (m.answer?.answerTo) answers.set(m.answer.answerTo, m.answer);
+  }
+  const quoteFor = (uuid: string) => {
+    const t = byUuid.get(uuid);
+    return t ? { targetId: t.id, excerpt: t.content.replace(/\s+/g, ' ').trim().slice(0, 140) || 'Image' } : null;
+  };
+
   const currentMeta = current ? metaFor(current) : null;
   const title = threadsMode ? (current ? threadLabel(current) : 'Chat') : currentMeta?.label || 'Agent';
   const isCoordinator = current?.role === 'coordinator';
@@ -184,8 +196,14 @@ export function ProjectAgentsPanel({ projectUuid, defaultAgentUuid, builderMode,
                 onStarter={(s) => void thread.send(s)}
               />
             )}
-            {messages.map((m) => (
+            {messages.map((m, idx) => (
               <MessageItem
+                quote={m.replyTo ? quoteFor(m.replyTo) : null}
+                questionState={idx === messages.length - 1 && !busy && !following ? 'open' : 'stale'}
+                questionAnswer={m.serverUuid ? answers.get(m.serverUuid) : answers.get(m.id)}
+                onAnswer={thread.onAnswer}
+                onReact={thread.onReact}
+                onReply={thread.onReply}
                 key={m.id}
                 m={m}
                 persona={persona}
@@ -210,6 +228,11 @@ export function ProjectAgentsPanel({ projectUuid, defaultAgentUuid, builderMode,
             onStop={thread.stop}
             queued={thread.queued}
             onCancelQueued={thread.cancelQueued}
+            attachments={thread.attachments.items}
+            onAddFiles={selected ? (files) => void thread.attachments.addFiles(files) : undefined}
+            onRemoveAttachment={thread.attachments.remove}
+            replyTo={thread.replyTo}
+            onCancelReply={thread.cancelReply}
             placeholder={persona ? persona.placeholder : threadsMode ? 'Message…' : current ? `Message pour ${title}…` : 'Message…'}
             class={cn(
               'shrink-0 p-3',

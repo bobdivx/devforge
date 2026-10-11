@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { CRON_PRESETS, cronToFrench } from '../lib/cron-utils';
 import { deployProgressDetail, deployStatusLabel, deployStatusShort, isDeployInProgress, shortSha } from '../lib/deployStatus';
 import type { ComponentChildren } from 'preact';
 import { api, type AppGroupMember, type ClusterNode, type Deployment, type InstanceDomain, type Project, type ProjectRuntime, type PublishedPort } from '../lib/api';
@@ -4615,7 +4616,6 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
     setEnabled(cron.enabled === 1);
     
     // Check if it matches a preset
-    const { CRON_PRESETS } = await import('../lib/cron-utils');
     const matchingPreset = CRON_PRESETS.find(p => p.value === cron.cron_expression);
     setSelectedPreset(matchingPreset ? cron.cron_expression : '');
     setShowAdvanced(!matchingPreset || matchingPreset.value === '');
@@ -4722,7 +4722,6 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
         ) : (
           <Table headers={['Nom', 'Planification', 'Commande', 'Statut', '']}>
             {crons.map((c) => {
-              const { cronToFrench } = require('../lib/cron-utils');
               const schedule = cronToFrench(c.cron_expression);
               return (
               <Tr key={c.id}>
@@ -4735,9 +4734,23 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
                     </span>
                   </div>
                 </Td>
-                <Td class="truncate max-w-xs font-mono text-xs" title={c.command}>
-                  {c.command}
-                </Td>
+                {c.kind === 'agent' ? (
+                  <Td class="max-w-xs" title={c.prompt ?? ''}>
+                    <div class="flex flex-col gap-1">
+                      <span class="flex flex-wrap items-center gap-1">
+                        <Badge tone="accent">Routine d’agent</Badge>
+                        <span class="text-[11px] text-[var(--color-ink-faint)]">
+                          {c.notify === 'always' ? 'message à chaque passage' : c.notify === 'on_failure' ? 'message si échec' : 'message si changement'}
+                        </span>
+                      </span>
+                      <span class="line-clamp-2 text-xs text-[var(--color-ink-muted)]">{c.prompt}</span>
+                    </div>
+                  </Td>
+                ) : (
+                  <Td class="truncate max-w-xs font-mono text-xs" title={c.command}>
+                    {c.command}
+                  </Td>
+                )}
                 <Td>
                   <div class="flex items-center gap-2">
                     <Badge tone={c.enabled ? 'ok' : 'neutral'}>
@@ -4761,9 +4774,11 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
                     <Button size="sm" variant="ghost" onClick={() => showRuns(c.id)}>
                       Historique
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => openEdit(c)} disabled={busy}>
-                      Modifier
-                    </Button>
+                    {c.kind !== 'agent' && (
+                      <Button size="sm" variant="ghost" onClick={() => openEdit(c)} disabled={busy}>
+                        Modifier
+                      </Button>
+                    )}
                     <Button size="sm" variant="ghost" onClick={() => remove(c.id)} disabled={busy}>
                       Supprimer
                     </Button>
@@ -4817,7 +4832,6 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
               }}
             >
               {(() => {
-                const { CRON_PRESETS } = require('../lib/cron-utils');
                 return CRON_PRESETS.map((preset: any) => (
                   <option key={preset.label} value={preset.value}>
                     {preset.label}
@@ -4859,8 +4873,7 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
               {cronExpr && (
                 <p class="mt-1.5 text-xs text-[var(--color-ink-muted)]">
                   Aperçu : {(() => {
-                    const { cronToFrench } = require('../lib/cron-utils');
-                    return cronToFrench(cronExpr);
+                          return cronToFrench(cronExpr);
                   })()}
                 </p>
               )}

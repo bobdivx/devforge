@@ -214,7 +214,13 @@ data class AgentMessage(
     val provider: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("tool_calls_json") val toolCallsJson: String? = null,
+    @SerialName("attachments_json") val attachmentsJson: String? = null,
+    @SerialName("reactions_json") val reactionsJson: String? = null,
+    @SerialName("reply_to_uuid") val replyToUuid: String? = null,
 ) {
+    val attachments: List<AttachmentInfo> get() = parseAttachments(attachmentsJson)
+    val reactions: List<ReactionInfo> get() = parseReactions(reactionsJson)
+
     /** Les appels d'outils sont stockés en chaîne JSON ; une valeur invalide donne une liste vide. */
     val toolCalls: List<ToolCall>
         get() = parseToolCalls(toolCallsJson)

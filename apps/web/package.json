@@ -18,10 +18,13 @@
     "@tailwindcss/vite": "^4.3.3",
     "astro": "^7.3.2",
     "chart.js": "^4.5.1",
+    "katex": "^0.19.0",
     "lucide-preact": "^1.45.0",
+    "mermaid": "^12.1.0",
     "motion": "^13.4.0",
     "preact": "^10.29.8",
     "preact-in-motion": "^0.2.9",
+    "shiki": "^4.5.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3"
   },

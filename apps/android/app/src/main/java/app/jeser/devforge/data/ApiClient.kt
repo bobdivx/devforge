@@ -331,6 +331,24 @@ class ApiClient(
     suspend fun memoryPin(uuid: String, pinned: Boolean): MemoryOk =
         send("POST", "/memory/${enc(uuid)}/${if (pinned) "pin" else "unpin"}", buildJsonObject { }, MemoryOk.serializer())
 
+    /* Chat riche (P5) : réactions, images jointes, accord de publication. */
+    suspend fun react(messageUuid: String, emoji: String, on: Boolean): ReactionsResponse =
+        send(if (on) "POST" else "DELETE", "/messages/${enc(messageUuid)}/reactions/${enc(emoji).replace("+", "%20")}", buildJsonObject { }, ReactionsResponse.serializer())
+
+    suspend fun approvePublish(projectUuid: String): PublishApproval =
+        send("POST", "/projects/${enc(projectUuid)}/publish-approval", buildJsonObject { }, PublishApproval.serializer())
+
+    suspend fun uploadAttachment(projectUuid: String, agentUuid: String, bytes: ByteArray, mime: String, name: String): AttachmentInfo {
+        val req = Request.Builder().url(url("/projects/${enc(projectUuid)}/agents/${enc(agentUuid)}/attachments"))
+            .header("X-Filename", enc(name).replace("+", "%20"))
+            .post(bytes.toRequestBody(mime.toMediaType()))
+            .build()
+        return call(req) { DevForgeJson.decodeFromString(AttachmentUpload.serializer(), it) }.data
+    }
+
+    /** URL d'affichage d'une image jointe (lien de capacité, sans en-tête). */
+    fun attachmentUrl(id: String): String? = runCatching { url("/attachments/${enc(id)}") }.getOrNull()
+
     /* Runs d'agent (cartes de job, P4). */
     suspend fun agentRun(runUuid: String): AgentRunInfo =
         get("/agent/runs/${enc(runUuid)}", DataEnvelope.serializer(AgentRunInfo.serializer())).data
@@ -362,6 +380,8 @@ class ApiClient(
         projectUuid: String,
         agentUuid: String,
         message: String,
+        answer: JsonObject? = null,
+        attachments: List<String> = emptyList(),
         onProgress: (String) -> Unit,
     ): ChatReply = withContext(Dispatchers.IO) {
         val body = buildJsonObject {
@@ -369,6 +389,8 @@ class ApiClient(
             put("stream", true)
             put("project_uuid", projectUuid)
             put("agent_uuid", agentUuid)
+            if (answer != null) put("answer", answer)
+            if (attachments.isNotEmpty()) put("attachments", kotlinx.serialization.json.JsonArray(attachments.map { JsonPrimitive(it) }))
         }
         val req = Request.Builder().url(url("/agent/chat"))
             .header("Accept", "text/event-stream")

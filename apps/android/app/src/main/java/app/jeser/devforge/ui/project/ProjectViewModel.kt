@@ -43,6 +43,12 @@ data class ChatItem(
     val hasPlan: Boolean = false,
     /** Cartes de job (workers délégués, mises en ligne) attachées au message. */
     val jobs: List<app.jeser.devforge.data.JobInfo> = emptyList(),
+    /** P5 : uuid serveur, question `ask_user`, réponse structurée, images, réactions. */
+    val uuid: String? = null,
+    val question: app.jeser.devforge.data.QuestionInfo? = null,
+    val answer: app.jeser.devforge.data.AnswerInfo? = null,
+    val attachments: List<app.jeser.devforge.data.AttachmentInfo> = emptyList(),
+    val reactions: List<app.jeser.devforge.data.ReactionInfo> = emptyList(),
 )
 
 /** Logs d'exécution de l'app (conteneur), lecture seule. */
@@ -92,6 +98,8 @@ data class ProjectUiState(
     val draftValidated: DraftValidated? = null,
     /** Message + sauvegarde à proposer en « Annuler » (snackbar). */
     val undo: DraftUndo? = null,
+    /** P5-02 : images du composer (envoyées dès l'ajout). */
+    val pendingImages: List<app.jeser.devforge.data.PendingImage> = emptyList(),
 ) {
     /** Dernière mise en ligne de la prod (la dev a sa propre section Branches). */
     val latest: Deployment? get() = deployments.firstOrNull { !it.isDev } ?: deployments.firstOrNull()
@@ -121,6 +129,11 @@ fun AgentMessage.toChatItem(index: Int) = ChatItem(
     createdAt = createdAt,
     hasPlan = role == "assistant" && hasPlan,
     jobs = if (role == "assistant") app.jeser.devforge.data.jobsFromToolCalls(toolCalls) else emptyList(),
+    uuid = uuid,
+    question = if (role == "assistant") app.jeser.devforge.data.questionFromToolCalls(toolCalls) else null,
+    answer = if (role == "user") app.jeser.devforge.data.answerFromToolCalls(toolCalls) else null,
+    attachments = attachments,
+    reactions = reactions,
 )
 
 class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewModel() {
@@ -353,21 +366,97 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
         }
     }
 
-    fun send(text: String) {
+    /** P5-04 : réponse à une question (accord de publication d'abord si l'option le demande). */
+    fun answer(item: ChatItem, option: app.jeser.devforge.data.QuestionOption?, freeText: String? = null) {
+        val q = item.question ?: return
+        if (_state.value.sending) return
+        val label = option?.label ?: "Autre"
+        viewModelScope.launch {
+            if (option?.action == "approve_publish") {
+                val ok = runCatching { api.approvePublish(uuid) }.onFailure { e -> _state.update { it.copy(notice = e.message ?: "Validation impossible") } }.isSuccess
+                if (!ok) return@launch
+            }
+            val payload = kotlinx.serialization.json.buildJsonObject {
+                item.uuid?.let { put("message_uuid", kotlinx.serialization.json.JsonPrimitive(it)) }
+                option?.let { put("option_id", kotlinx.serialization.json.JsonPrimitive(it.id)) }
+                put("label", kotlinx.serialization.json.JsonPrimitive(label))
+                put("question", kotlinx.serialization.json.JsonPrimitive(q.question))
+                if (!freeText.isNullOrBlank()) put("text", kotlinx.serialization.json.JsonPrimitive(freeText.trim()))
+            }
+            val answerInfo = app.jeser.devforge.data.AnswerInfo(item.uuid, option?.id, label, freeText?.trim())
+            send(app.jeser.devforge.data.answerModelText(q.question, label, freeText), answer = payload, answerInfo = answerInfo)
+        }
+    }
+
+    /** P5-03 : réaction optimiste, corrigée par la réponse du serveur. */
+    fun react(item: ChatItem, emoji: String) {
+        val id = item.uuid ?: return
+        val before = _state.value.messages.firstOrNull { it.key == item.key }?.reactions ?: return
+        val mine = before.any { it.emoji == emoji && it.mine }
+        fun put(list: List<app.jeser.devforge.data.ReactionInfo>) =
+            _state.update { s -> s.copy(messages = s.messages.map { if (it.key == item.key) it.copy(reactions = list) else it }) }
+        put(app.jeser.devforge.data.toggleReaction(before, emoji))
+        viewModelScope.launch {
+            runCatching { api.react(id, emoji, !mine) }
+                .onSuccess { put(it.reactions) }
+                .onFailure { e ->
+                    put(before)
+                    _state.update { it.copy(notice = e.message ?: "Réaction non enregistrée") }
+                }
+        }
+    }
+
+    /** P5-02 : image choisie → envoyée tout de suite ; la vignette suit l'état. */
+    fun attachImage(bytes: ByteArray, mime: String, name: String) {
+        val agent = _state.value.coordinatorUuid ?: return
+        if (_state.value.pendingImages.size >= 4) {
+            _state.update { it.copy(notice = "4 images maximum par message.") }
+            return
+        }
+        if (mime !in app.jeser.devforge.data.ACCEPTED_IMAGE_MIMES || bytes.size > app.jeser.devforge.data.MAX_IMAGE_BYTES) {
+            _state.update { it.copy(notice = if (bytes.size > app.jeser.devforge.data.MAX_IMAGE_BYTES) "Image trop lourde (10 Mo max)." else "PNG, JPEG, WebP ou GIF uniquement.") }
+            return
+        }
+        val localId = "img:${System.nanoTime()}"
+        val pending = app.jeser.devforge.data.PendingImage(localId, name, preview = bytes)
+        _state.update { it.copy(pendingImages = it.pendingImages + pending) }
+        fun set(fn: (app.jeser.devforge.data.PendingImage) -> app.jeser.devforge.data.PendingImage) =
+            _state.update { s -> s.copy(pendingImages = s.pendingImages.map { if (it.localId == localId) fn(it) else it }) }
+        viewModelScope.launch {
+            runCatching { api.uploadAttachment(uuid, agent, bytes, mime, name) }
+                .onSuccess { info -> set { it.copy(status = "ready", info = info) } }
+                .onFailure { e ->
+                    set { it.copy(status = "error", error = e.message) }
+                    _state.update { it.copy(notice = e.message ?: "Image non jointe") }
+                }
+        }
+    }
+
+    fun removeImage(localId: String) {
+        _state.update { s -> s.copy(pendingImages = s.pendingImages.filterNot { it.localId == localId }) }
+    }
+
+    fun send(text: String, answer: kotlinx.serialization.json.JsonObject? = null, answerInfo: app.jeser.devforge.data.AnswerInfo? = null) {
         val msg = text.trim()
         val agent = _state.value.coordinatorUuid ?: return
-        if (msg.isEmpty() || _state.value.sending) return
+        val images = if (answer == null) _state.value.pendingImages.filter { it.status == "ready" }.mapNotNull { it.info } else emptyList()
+        if ((msg.isEmpty() && images.isEmpty()) || _state.value.sending) return
+        if (_state.value.pendingImages.any { it.status == "uploading" } && answer == null) {
+            _state.update { it.copy(notice = "Image en cours d’envoi, réessaie dans un instant.") }
+            return
+        }
         _state.update {
             it.copy(
                 sending = true,
                 progress = "Braise lit ta demande…",
                 sentCounter = it.sentCounter + 1,
-                messages = it.messages + ChatItem("pending:${it.sentCounter}", "user", msg),
+                messages = it.messages + ChatItem("pending:${it.sentCounter}", "user", msg, answer = answerInfo, attachments = images),
+                pendingImages = if (answer == null) emptyList() else it.pendingImages,
             )
         }
         viewModelScope.launch {
             try {
-                api.chat(uuid, agent, msg) { label -> _state.update { it.copy(progress = label) } }
+                api.chat(uuid, agent, if (answer != null) "" else msg, answer = answer, attachments = images.map { it.id }) { label -> _state.update { it.copy(progress = label) } }
             } catch (e: UnauthorizedException) {
                 // Déconnexion gérée globalement.
             } catch (e: ApiException) {
