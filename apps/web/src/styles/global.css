@@ -745,3 +745,12 @@ pre {
   .df-flash { animation: none; outline: 2px solid var(--color-accent); }
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
 }
+
+/* P5-01 : diagramme Mermaid lisible sans envahir le fil. */
+.df-mermaid svg {
+  display: block;
+  max-width: 100%;
+  max-height: 22rem;
+  height: auto;
+  margin-inline: auto;
+}

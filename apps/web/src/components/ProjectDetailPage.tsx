@@ -4735,8 +4735,8 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
                   </div>
                 </Td>
                 {c.kind === 'agent' ? (
-                  <Td class="max-w-xs" title={c.prompt ?? ''}>
-                    <div class="flex flex-col gap-1">
+                  <Td class="max-w-xs">
+                    <div class="flex flex-col gap-1" title={c.prompt ?? ''}>
                       <span class="flex flex-wrap items-center gap-1">
                         <Badge tone="accent">Routine d’agent</Badge>
                         <span class="text-[11px] text-[var(--color-ink-faint)]">
@@ -4747,8 +4747,8 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
                     </div>
                   </Td>
                 ) : (
-                  <Td class="truncate max-w-xs font-mono text-xs" title={c.command}>
-                    {c.command}
+                  <Td class="truncate max-w-xs font-mono text-xs">
+                    <span title={c.command}>{c.command}</span>
                   </Td>
                 )}
                 <Td>
