@@ -26,7 +26,7 @@ pub fn docker_run(name: &str, image: &str, ports: &[(u16, u16)], env_file: Optio
     )
 }
 
-/// `source:cible` ou `source:cible:ro|rw`. Chemins absolus, pas de `..`.
+/// `source:cible` ou `source:cible:ro|rw`. Source = chemin hôte absolu ou volume nommé `df-…` ; pas de `..`.
 pub fn normalize_volume_mount(raw: &str) -> Result<String, String> {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -46,20 +46,22 @@ pub fn normalize_volume_mount(raw: &str) -> Result<String, String> {
     let parts: Vec<&str> = raw.split(':').collect();
     if parts.len() < 2 || parts.len() > 3 {
         return Err(format!(
-            "montage invalide ({raw}) — format /hôte:/conteneur[:ro|rw]"
+            "montage invalide ({raw}) — format /hôte:/conteneur[:ro|rw] ou df-volume:/conteneur"
         ));
     }
     let host = parts[0];
     let container = parts[1];
+    // Source = chemin hôte absolu OU volume Docker nommé `df-…`.
+    let named_volume = is_docker_volume_name(host);
     if host.is_empty()
         || container.is_empty()
-        || !host.starts_with('/')
+        || (!host.starts_with('/') && !named_volume)
         || !container.starts_with('/')
         || host.contains("..")
         || container.contains("..")
     {
         return Err(format!(
-            "montage invalide ({raw}) — chemins absolus, sans « .. »"
+            "montage invalide ({raw}) — chemins absolus ou volume nommé df-…, sans « .. »"
         ));
     }
     if let Some(mode) = parts.get(2) {
@@ -68,6 +70,22 @@ pub fn normalize_volume_mount(raw: &str) -> Result<String, String> {
         }
     }
     Ok(raw.to_string())
+}
+
+/// Volume Docker nommé géré par DevForge : préfixe `df-` obligatoire (évite qu'un
+/// chemin relatif tapé par erreur, ex. `media:/x`, devienne un volume implicite),
+/// puis `[a-zA-Z0-9_.-]` (règle du daemon).
+pub fn is_docker_volume_name(s: &str) -> bool {
+    match s.strip_prefix("df-") {
+        Some(rest) => {
+            !rest.is_empty()
+                && s.len() <= 128
+                && rest
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+        }
+        None => false,
+    }
 }
 
 pub fn normalize_volume_mounts(inputs: &[String]) -> Result<Vec<String>, String> {
@@ -1948,5 +1966,21 @@ mod tests {
         if s.ok {
             assert!(s.version.is_some());
         }
+    }
+
+    #[test]
+    fn named_volume_mount_accepted() {
+        assert_eq!(
+            normalize_volume_mount("df-745bbe7a-platformio:/app/.platformio").unwrap(),
+            "df-745bbe7a-platformio:/app/.platformio"
+        );
+        assert!(normalize_volume_mount("df-my_vol.1:/data:ro").is_ok());
+        assert!(normalize_volume_mount("media:/data").is_err());
+        assert!(normalize_volume_mount("df-:/data").is_err());
+        assert!(normalize_volume_mount("/srv/x:/data").is_ok());
+        assert!(normalize_volume_mount("-bad:/data").is_err());
+        assert!(normalize_volume_mount("rel/path:/data").is_err());
+        assert!(normalize_volume_mount("vol:relative").is_err());
+        assert!(normalize_volume_mount("..:/data").is_err());
     }
 }
