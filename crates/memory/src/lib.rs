@@ -83,8 +83,16 @@ impl Scope {
     }
 
     /// Construit une portée depuis les colonnes SQL / les arguments d'outil.
-    pub fn from_parts(name: &str, project_uuid: Option<&str>, agent_uuid: Option<&str>) -> Option<Scope> {
-        let nz = |s: Option<&str>| s.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    pub fn from_parts(
+        name: &str,
+        project_uuid: Option<&str>,
+        agent_uuid: Option<&str>,
+    ) -> Option<Scope> {
+        let nz = |s: Option<&str>| {
+            s.map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        };
         match name {
             "user" => Some(Scope::User),
             "project" => nz(project_uuid).map(Scope::Project),
@@ -121,7 +129,15 @@ impl Tier {
     }
 }
 
-pub const KINDS: &[&str] = &["fact", "preference", "infra", "decision", "incident", "todo", "context"];
+pub const KINDS: &[&str] = &[
+    "fact",
+    "preference",
+    "infra",
+    "decision",
+    "incident",
+    "todo",
+    "context",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MemoryItem {
@@ -186,10 +202,16 @@ pub enum WriteOutcome {
     /// Même contenu : on rafraîchit la date (pas de doublon).
     Updated(String),
     /// Le plus récent gagne : l'ancienne entrée pointe vers la nouvelle.
-    Superseded { old: String, new: String },
+    Superseded {
+        old: String,
+        new: String,
+    },
     /// Fait déclaré par l'utilisateur contredit par une observation incertaine :
     /// rien n'est remplacé, une note « à confirmer » est créée.
-    NeedsConfirmation { existing: String, note: String },
+    NeedsConfirmation {
+        existing: String,
+        note: String,
+    },
     Rejected(String),
 }
 

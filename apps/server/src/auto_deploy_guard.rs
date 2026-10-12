@@ -41,9 +41,14 @@ pub struct Attempt {
 pub enum Gate {
     Go,
     /// Ce SHA a déjà échoué : pas de relance automatique.
-    SameShaFailed { sha: String },
+    SameShaFailed {
+        sha: String,
+    },
     /// Échecs consécutifs récents : on attend avant de tenter un nouveau commit.
-    Backoff { until: DateTime<Utc>, failures: u32 },
+    Backoff {
+        until: DateTime<Utc>,
+        failures: u32,
+    },
 }
 
 fn usable(sha: &str) -> bool {
@@ -74,7 +79,9 @@ pub fn decide(tip: &str, history: &[Attempt], now: DateTime<Utc>) -> Gate {
             "success" | "ready" => break,
             "failed" | "error" => {
                 if a.sha.as_deref().is_some_and(|s| same_sha(s, tip)) {
-                    return Gate::SameShaFailed { sha: tip.chars().take(7).collect() };
+                    return Gate::SameShaFailed {
+                        sha: tip.chars().take(7).collect(),
+                    };
                 }
                 failures += 1;
                 last_failure.get_or_insert(a.created_at);
@@ -122,9 +129,36 @@ pub async fn gate(state: &AppState, project: &Project, environment: &str, tip: &
         Gate::Go => {}
         Gate::SameShaFailed { sha } => {
             tracing::info!(project = %project.name, environment, sha = %sha, "auto-deploy: SHA déjà en échec, pas de relance");
+            crate::wake_gate::record(
+                &state.pool,
+                &project.uuid,
+                "auto_deploy",
+                &format!("auto_deploy:{environment}"),
+                "Mise en ligne automatique",
+                crate::wake_gate::SKIPPED,
+                &format!("commit {sha} déjà en échec : pas de relance automatique"),
+                sha,
+                None,
+            )
+            .await;
             escalate_once(&state.pool, &project.uuid, environment, sha).await;
         }
         Gate::Backoff { until, failures } => {
+            crate::wake_gate::record(
+                &state.pool,
+                &project.uuid,
+                "auto_deploy",
+                &format!("auto_deploy:{environment}"),
+                "Mise en ligne automatique",
+                crate::wake_gate::SKIPPED,
+                &format!(
+                    "{failures} échec(s) consécutif(s) : attente jusqu'à {}",
+                    until.format("%H:%M UTC")
+                ),
+                tip,
+                None,
+            )
+            .await;
             tracing::info!(project = %project.name, environment, failures, until = %until, "auto-deploy: backoff après échecs");
         }
     }
@@ -140,7 +174,11 @@ pub async fn set_target_sha(pool: &PgPool, dep_uuid: &str, sha: &str) {
 }
 
 pub fn paused_text(environment: &str, sha: &str) -> String {
-    let env = if environment == "dev" { "de l'environnement DEV" } else { "en production" };
+    let env = if environment == "dev" {
+        "de l'environnement DEV"
+    } else {
+        "en production"
+    };
     format!(
         "⏸️ Mise en ligne automatique {env} en pause : le commit {sha} a échoué et je ne le relance plus tout seul.\n\
          Elle reprendra au prochain commit poussé sur la branche, ou tout de suite avec « Réessayer la mise en ligne ».\n\
@@ -150,7 +188,12 @@ pub fn paused_text(environment: &str, sha: &str) -> String {
 
 /// Une seule notification par (projet, environnement, SHA) : la cause P1-07 garde le SHA
 /// déjà signalé dans `last_dep_uuid`, et compte les SHA bloqués successifs.
-pub async fn escalate_once(pool: &PgPool, project_uuid: &str, environment: &str, sha: &str) -> bool {
+pub async fn escalate_once(
+    pool: &PgPool,
+    project_uuid: &str,
+    environment: &str,
+    sha: &str,
+) -> bool {
     let summary = format!("auto-deploy {environment} en pause sur un commit en échec");
     let hash = crate::wake_causes::cause_hash(KIND_AUTO_DEPLOY_PAUSED, &summary);
     let marker = format!("{environment}:{sha}");
@@ -166,9 +209,17 @@ pub async fn escalate_once(pool: &PgPool, project_uuid: &str, environment: &str,
     if seen.and_then(|(m,)| m).as_deref() == Some(marker.as_str()) {
         return false;
     }
-    let cause = crate::wake_causes::register_failure(pool, project_uuid, KIND_AUTO_DEPLOY_PAUSED, &summary, &marker).await;
+    let cause = crate::wake_causes::register_failure(
+        pool,
+        project_uuid,
+        KIND_AUTO_DEPLOY_PAUSED,
+        &summary,
+        &marker,
+    )
+    .await;
     let text = paused_text(environment, sha);
-    crate::deploy_queue::record_event(pool, project_uuid, "deploy", "auto_paused", sha, &text).await;
+    crate::deploy_queue::record_event(pool, project_uuid, "deploy", "auto_paused", sha, &text)
+        .await;
     if let Ok(Some(agent_uuid)) = crate::db::ensure_coordinator_agent(pool, project_uuid).await {
         let _ = sqlx::query(
             r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
@@ -195,16 +246,26 @@ pub async fn backup_draft_before_reset(state: &AppState, project: &Project) {
     if configured.is_empty() {
         return;
     }
-    let wd = std::path::PathBuf::from(devforge_deploy::resolve_project_workdir(&configured, &project.uuid));
-    let branch = project.git_branch.clone().filter(|b| !b.trim().is_empty()).unwrap_or_else(|| "main".into());
-    let data = std::path::PathBuf::from(std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/data".into()));
+    let wd = std::path::PathBuf::from(devforge_deploy::resolve_project_workdir(
+        &configured,
+        &project.uuid,
+    ));
+    let branch = project
+        .git_branch
+        .clone()
+        .filter(|b| !b.trim().is_empty())
+        .unwrap_or_else(|| "main".into());
+    let data = std::path::PathBuf::from(
+        std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/data".into()),
+    );
     let root = crate::draft::backups_root(&data, &project.uuid);
     let res = tokio::task::spawn_blocking(move || {
         let st = crate::draft::status(&wd, &branch, None);
         if !st.available || !st.dirty {
             return Ok(None);
         }
-        crate::draft::backup(&wd, &root, &st.files, "auto-deploy").map(|b| Some((b.id, st.files.len())))
+        crate::draft::backup(&wd, &root, &st.files, "auto-deploy")
+            .map(|b| Some((b.id, st.files.len())))
     })
     .await;
     if let Ok(Ok(Some((id, n)))) = res {
@@ -228,7 +289,11 @@ mod tests {
         now - Duration::minutes(min_ago)
     }
     fn a(sha: &str, status: &str, min_ago: i64, now: DateTime<Utc>) -> Attempt {
-        Attempt { sha: Some(sha.into()), status: status.into(), created_at: at(min_ago, now) }
+        Attempt {
+            sha: Some(sha.into()),
+            status: status.into(),
+            created_at: at(min_ago, now),
+        }
     }
     const TIP: &str = "0c4711b2e5f0a1b2c3d4e5f60718293a4b5c6d7e";
 
@@ -236,20 +301,45 @@ mod tests {
     fn failed_tip_is_never_redeployed_automatically() {
         let now = Utc::now();
         // Scénario devforge-esp : 0c4711b en échec, dernier succès plus ancien.
-        let h = vec![a("0c4711b", "failed", 1, now), a("89ce0fd", "success", 300, now)];
-        assert_eq!(decide(TIP, &h, now), Gate::SameShaFailed { sha: "0c4711b".into() });
+        let h = vec![
+            a("0c4711b", "failed", 1, now),
+            a("89ce0fd", "success", 300, now),
+        ];
+        assert_eq!(
+            decide(TIP, &h, now),
+            Gate::SameShaFailed {
+                sha: "0c4711b".into()
+            }
+        );
         // Même des heures plus tard : toujours bloqué (pas de backoff qui finit par relancer).
-        let h = vec![a("0c4711b", "failed", 600, now), a("89ce0fd", "success", 900, now)];
-        assert_eq!(decide(TIP, &h, now), Gate::SameShaFailed { sha: "0c4711b".into() });
+        let h = vec![
+            a("0c4711b", "failed", 600, now),
+            a("89ce0fd", "success", 900, now),
+        ];
+        assert_eq!(
+            decide(TIP, &h, now),
+            Gate::SameShaFailed {
+                sha: "0c4711b".into()
+            }
+        );
     }
 
     #[test]
     fn new_commit_goes_after_backoff() {
         let now = Utc::now();
-        let h = vec![a("0c4711b", "failed", 1, now), a("89ce0fd", "success", 300, now)];
+        let h = vec![
+            a("0c4711b", "failed", 1, now),
+            a("89ce0fd", "success", 300, now),
+        ];
         let new_tip = "abcdef1234567";
-        assert!(matches!(decide(new_tip, &h, now), Gate::Backoff { failures: 1, .. }));
-        let h = vec![a("0c4711b", "failed", 3, now), a("89ce0fd", "success", 300, now)];
+        assert!(matches!(
+            decide(new_tip, &h, now),
+            Gate::Backoff { failures: 1, .. }
+        ));
+        let h = vec![
+            a("0c4711b", "failed", 3, now),
+            a("89ce0fd", "success", 300, now),
+        ];
         assert_eq!(decide(new_tip, &h, now), Gate::Go);
     }
 
@@ -262,23 +352,38 @@ mod tests {
         assert_eq!(backoff_for(9), Duration::minutes(60));
         assert_eq!(backoff_for(40), Duration::minutes(60));
         let now = Utc::now();
-        let h: Vec<Attempt> = (0..4).map(|i| a(&format!("aaaaaa{i}"), "failed", 10 + i, now)).collect();
+        let h: Vec<Attempt> = (0..4)
+            .map(|i| a(&format!("aaaaaa{i}"), "failed", 10 + i, now))
+            .collect();
         // 4 échecs consécutifs → 16 min depuis le dernier (il y a 10 min) : on attend.
-        assert!(matches!(decide("bbbbbbb", &h, now), Gate::Backoff { failures: 4, .. }));
+        assert!(matches!(
+            decide("bbbbbbb", &h, now),
+            Gate::Backoff { failures: 4, .. }
+        ));
     }
 
     #[test]
     fn success_resets_and_unknown_shas_ignored() {
         let now = Utc::now();
-        let h = vec![a("1111111", "success", 1, now), a("0c4711b", "failed", 5, now)];
+        let h = vec![
+            a("1111111", "success", 1, now),
+            a("0c4711b", "failed", 5, now),
+        ];
         assert_eq!(decide(TIP, &h, now), Gate::Go);
-        let h = vec![Attempt { sha: None, status: "failed".into(), created_at: at(30, now) }];
+        let h = vec![Attempt {
+            sha: None,
+            status: "failed".into(),
+            created_at: at(30, now),
+        }];
         assert_eq!(decide(TIP, &h, now), Gate::Go);
         assert!(!same_sha("unknown", "unknown"));
         assert!(!same_sha("pending", TIP));
         assert!(same_sha("0C4711B", TIP));
         // Un déploiement en cours ne compte ni comme échec ni comme succès.
-        let h = vec![a("0c4711b", "running", 1, now), a("2222222", "success", 9, now)];
+        let h = vec![
+            a("0c4711b", "running", 1, now),
+            a("2222222", "success", 9, now),
+        ];
         assert_eq!(decide(TIP, &h, now), Gate::Go);
     }
 
@@ -292,7 +397,11 @@ mod tests {
             .execute(&pool).await.unwrap();
         migrate(&pool).await.unwrap();
         let now = Utc::now();
-        for (sha, status, min) in [("0c4711b", "failed", 2), ("0c4711b", "failed", 4), ("89ce0fd", "success", 300)] {
+        for (sha, status, min) in [
+            ("0c4711b", "failed", 2),
+            ("0c4711b", "failed", 4),
+            ("89ce0fd", "success", 300),
+        ] {
             sqlx::query("INSERT INTO deployments (uuid, project_id, status, git_sha, created_at) VALUES ($1, 32, $2, $3, $4)")
                 .bind(new_uuid()).bind(status).bind(sha).bind((now - Duration::minutes(min)).to_rfc3339())
                 .execute(&pool).await.unwrap();
@@ -304,22 +413,43 @@ mod tests {
         assert_eq!(h.len(), 3);
         let mut notified = 0;
         for _ in 0..12 {
-            assert_eq!(decide(TIP, &h, Utc::now()), Gate::SameShaFailed { sha: "0c4711b".into() });
+            assert_eq!(
+                decide(TIP, &h, Utc::now()),
+                Gate::SameShaFailed {
+                    sha: "0c4711b".into()
+                }
+            );
             if escalate_once(&pool, "esp", "production", "0c4711b").await {
                 notified += 1;
             }
         }
         assert_eq!(notified, 1);
         assert!(escalate_once(&pool, "esp", "production", "f00ba47").await);
-        let (n,): (i32,) = sqlx::query_as("SELECT occurrences FROM agent_wake_causes WHERE project_uuid = 'esp' AND kind = $1")
-            .bind(KIND_AUTO_DEPLOY_PAUSED).fetch_one(&pool).await.unwrap();
+        let (n,): (i32,) = sqlx::query_as(
+            "SELECT occurrences FROM agent_wake_causes WHERE project_uuid = 'esp' AND kind = $1",
+        )
+        .bind(KIND_AUTO_DEPLOY_PAUSED)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(n, 2);
-        assert!(matches!(decide("abcdef1", &load_history(&pool, 32, "production").await, Utc::now()), Gate::Backoff { .. }));
+        assert!(matches!(
+            decide(
+                "abcdef1",
+                &load_history(&pool, 32, "production").await,
+                Utc::now()
+            ),
+            Gate::Backoff { .. }
+        ));
     }
 
     #[test]
     fn paused_text_is_clear() {
         let t = paused_text("production", "0c4711b");
-        assert!(t.contains("0c4711b") && t.contains("prochain commit") && t.contains("Réessayer la mise en ligne"));
+        assert!(
+            t.contains("0c4711b")
+                && t.contains("prochain commit")
+                && t.contains("Réessayer la mise en ligne")
+        );
     }
 }

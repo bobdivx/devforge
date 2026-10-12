@@ -19,10 +19,7 @@ pub fn router() -> Router<AppState> {
             "/api/v1/projects/{uuid}/specs",
             get(list_specs).post(create_spec),
         )
-        .route(
-            "/api/v1/projects/{uuid}/specs/{slug}",
-            get(get_spec),
-        )
+        .route("/api/v1/projects/{uuid}/specs/{slug}", get(get_spec))
         .route(
             "/api/v1/projects/{uuid}/specs/{slug}/decision",
             post(decide_spec),
@@ -130,8 +127,8 @@ async fn revise_spec(
 ) -> Result<Json<Value>, ApiError> {
     let _ = crate::routes::auth_project(&state, &headers, &uuid).await?;
     let root = project_root(&state, &uuid).await?;
-    let status = sdd::revise(&root, &slug, &body.title, &body.description)
-        .map_err(ApiError::message)?;
+    let status =
+        sdd::revise(&root, &slug, &body.title, &body.description).map_err(ApiError::message)?;
     let spec_md = sdd::read_spec_markdown(&root, &slug)
         .map_err(ApiError::message)?
         .unwrap_or_default();
@@ -277,7 +274,6 @@ async fn converge_spec(
     let status = advance(&state, &uuid, &root, &slug, None, None).await?;
     Ok(Json(json!({"data": status})))
 }
-
 
 async fn assign_spec_provider(state: &AppState, project_uuid: &str, status: &mut FeatureStatus) {
     let Some(owner) = project_owner(state, project_uuid).await else {

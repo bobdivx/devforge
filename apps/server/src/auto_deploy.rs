@@ -91,7 +91,6 @@ pub async fn ensure_project_webhook(state: &AppState, project: &Project) -> Opti
     }
 }
 
-
 async fn latest_success_sha(state: &AppState, project_id: i64) -> Option<String> {
     let row: Option<(Option<String>,)> = sqlx::query_as(
         "SELECT git_sha FROM deployments WHERE project_id = $1 AND environment = 'production' AND status IN ('success', 'ready') ORDER BY created_at DESC LIMIT 1",
@@ -155,7 +154,12 @@ async fn project_is_behind(state: &AppState, project: &Project) -> Option<(u64, 
     }
 }
 
-pub(crate) async fn deploy_project(state: &AppState, project: &Project, message: &str, target_sha: Option<&str>) {
+pub(crate) async fn deploy_project(
+    state: &AppState,
+    project: &Project,
+    message: &str,
+    target_sha: Option<&str>,
+) {
     let dep_uuid = new_uuid();
     let now = now_str();
 

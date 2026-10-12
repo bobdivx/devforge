@@ -11,7 +11,10 @@ use std::sync::OnceLock;
 /// Motifs des jetons connus : (règle, regex). Source unique pour la mémoire et la revue sécurité.
 pub const PROVIDER_PATTERNS: &[(&str, &str)] = &[
     ("aws_access_key", r"\bAKIA[0-9A-Z]{16}\b"),
-    ("github_token", r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b"),
+    (
+        "github_token",
+        r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b",
+    ),
     ("openai_key", r"\bsk-[A-Za-z0-9_-]{20,}\b"),
     ("stripe_live", r"\bsk_live_[A-Za-z0-9]{8,}\b"),
     ("slack_token", r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
@@ -21,15 +24,24 @@ pub const PROVIDER_PATTERNS: &[(&str, &str)] = &[
 /// Motifs supplémentaires propres à la mémoire (plus stricts que la revue du workdir).
 const MEMORY_PATTERNS: &[(&str, &str)] = &[
     ("pem_block", r"-----BEGIN [A-Z ]+-----"),
-    ("jwt", r"\beyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*"),
+    (
+        "jwt",
+        r"\beyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*",
+    ),
     // Préfixes courts : même tronqués (« ghp_xxx… »), on n'enregistre pas.
-    ("token_prefix", r"\b(?:ghp_|gho_|github_pat_|xox[baprs]-|sk-[A-Za-z0-9]{6,}|AKIA[0-9A-Z]{4,})"),
+    (
+        "token_prefix",
+        r"\b(?:ghp_|gho_|github_pat_|xox[baprs]-|sk-[A-Za-z0-9]{6,}|AKIA[0-9A-Z]{4,})",
+    ),
     // password=…, token: …, secret=…, api_key=… suivi d'une valeur.
     (
         "credential_assignment",
         r"(?i)\b(?:password|passwd|pwd|mot de passe|mdp|token|secret|api[_-]?key|apikey|client[_-]?secret|bearer)\s*[:=]\s*([^\s,;]{6,})",
     ),
-    ("bearer_header", r"(?i)\bauthorization\s*:\s*bearer\s+[A-Za-z0-9._~+/=-]{12,}"),
+    (
+        "bearer_header",
+        r"(?i)\bauthorization\s*:\s*bearer\s+[A-Za-z0-9._~+/=-]{12,}",
+    ),
 ];
 
 static REJECTIONS: AtomicU64 = AtomicU64::new(0);
@@ -58,7 +70,8 @@ fn token_rx() -> &'static Regex {
 fn uuid_rx() -> &'static Regex {
     static RX: OnceLock<Regex> = OnceLock::new();
     RX.get_or_init(|| {
-        Regex::new(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$").expect("uuid")
+        Regex::new(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            .expect("uuid")
     })
 }
 
@@ -123,7 +136,10 @@ pub fn detect(content: &str, known_values: &[String]) -> Option<&'static str> {
             return Some(rule);
         }
     }
-    if token_rx().find_iter(content).any(|m| high_entropy_token(m.as_str())) {
+    if token_rx()
+        .find_iter(content)
+        .any(|m| high_entropy_token(m.as_str()))
+    {
         return Some("high_entropy");
     }
     if known_values
@@ -159,38 +175,73 @@ mod tests {
     fn secret_table() {
         let cases: &[(&str, bool)] = &[
             // positifs
-            ("le token GitHub est ghp_abcdefghijklmnopqrstuvwxyz0123456789", true),
+            (
+                "le token GitHub est ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+                true,
+            ),
             ("le token GitHub est ghp_xxx…", true),
-            ("PAT : github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz", true),
+            (
+                "PAT : github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz",
+                true,
+            ),
             ("clé OpenAI sk-proj-AbCdEf0123456789AbCdEf0123", true),
             ("bot slack xoxb-123456789012-abcdefghijkl", true),
             ("AWS AKIAIOSFODNN7EXAMPLE pour le bucket", true),
             ("-----BEGIN OPENSSH PRIVATE KEY----- b3BlbnNzaC1rZXk", true),
-            ("cookie eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N", true),
+            (
+                "cookie eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N",
+                true,
+            ),
             ("password=Hunter2!x", true),
             ("le token: 9f8e7d6c5b4a", true),
             ("secret = s3cr3t-value", true),
             ("clé: Zx9QmT4vLp2RsW8yNb6KcF3hJd7GaE5u", true),
             // négatifs
             ("Le worker Demeter répond sur http://10.1.0.88:8000.", false),
-            ("L'app est en ligne sur https://web.jeser.app/api/v1/health", false),
+            (
+                "L'app est en ligne sur https://web.jeser.app/api/v1/health",
+                false,
+            ),
             ("Déploiement 3f2a9c1 : succès — smoke 200", false),
-            ("Commit 54607a2ecdaf0def85bad0ce86b11237034be232 mergé", false),
-            ("Projet 02792add-bf8d-41a3-8761-3ad7f75ae6f8 = template-studio", false),
-            ("Préfère des réponses courtes, accusé de réception puis travail.", false),
-            ("Le mot de passe est dans le gestionnaire, ne jamais le demander.", false),
-            ("Branche fix-resynchroniser-package-lock-json en attente", false),
+            (
+                "Commit 54607a2ecdaf0def85bad0ce86b11237034be232 mergé",
+                false,
+            ),
+            (
+                "Projet 02792add-bf8d-41a3-8761-3ad7f75ae6f8 = template-studio",
+                false,
+            ),
+            (
+                "Préfère des réponses courtes, accusé de réception puis travail.",
+                false,
+            ),
+            (
+                "Le mot de passe est dans le gestionnaire, ne jamais le demander.",
+                false,
+            ),
+            (
+                "Branche fix-resynchroniser-package-lock-json en attente",
+                false,
+            ),
             ("Le secret: utiliser la branche dev", false),
         ];
         for (text, want) in cases {
-            assert_eq!(detect(text, &[]).is_some(), *want, "cas : {text} → {:?}", detect(text, &[]));
+            assert_eq!(
+                detect(text, &[]).is_some(),
+                *want,
+                "cas : {text} → {:?}",
+                detect(text, &[])
+            );
         }
     }
 
     #[test]
     fn known_env_values_are_rejected() {
         let vals = vec!["SuperValeur42".to_string(), "abc".to_string()];
-        assert_eq!(detect("la clé vaut SuperValeur42", &vals), Some("env_secret_value"));
+        assert_eq!(
+            detect("la clé vaut SuperValeur42", &vals),
+            Some("env_secret_value")
+        );
         // Valeurs trop courtes ignorées (sinon tout texte serait refusé).
         assert_eq!(detect("abc est un mot", &vals), None);
     }
@@ -198,7 +249,10 @@ mod tests {
     #[test]
     fn check_counts_rejections() {
         let before = rejections();
-        assert_eq!(check("ghp_abcdefghijklmnopqrstuvwxyz0123456789", &[]).unwrap_err(), REJECTED_MESSAGE);
+        assert_eq!(
+            check("ghp_abcdefghijklmnopqrstuvwxyz0123456789", &[]).unwrap_err(),
+            REJECTED_MESSAGE
+        );
         assert!(rejections() > before);
         assert!(check("rien de sensible", &[]).is_ok());
     }

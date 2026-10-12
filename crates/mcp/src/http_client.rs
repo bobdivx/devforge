@@ -27,7 +27,7 @@ impl HttpMcpRemoteClient {
             .header("Accept", "application/json, text/event-stream")
             .header("Content-Type", "application/json")
             .header("MCP-Protocol-Version", "2025-03-26");
-        
+
         // Préférer OAuth access token si présent et valide
         let auth_added = if let Some(oauth_token) = server.best_auth_token() {
             let bearer = if oauth_token.starts_with("Bearer ") {
@@ -40,7 +40,7 @@ impl HttpMcpRemoteClient {
         } else {
             false
         };
-        
+
         for (k, v) in &server.headers {
             // Ne pas écraser Accept / Content-Type / Authorization posés ci-dessus.
             let key = k.to_ascii_lowercase();
@@ -216,17 +216,10 @@ impl HttpMcpRemoteClient {
 
         // Notification (pas d’id) — certaines plateformes l’exigent avant tools/*.
         let _ = self
-            .post_notification(
-                server,
-                "notifications/initialized",
-                json!({}),
-                session_id,
-            )
+            .post_notification(server, "notifications/initialized", json!({}), session_id)
             .await;
 
-        let (result, _) = self
-            .post_rpc(server, method, params, session_id, 2)
-            .await?;
+        let (result, _) = self.post_rpc(server, method, params, session_id, 2).await?;
         Ok(result)
     }
 }
@@ -251,10 +244,12 @@ mod tests {
             "params": {}
         });
         let bytes = serde_json::to_vec(&body).expect("serialization failed");
-        let reconstructed: Value =
-            serde_json::from_slice(&bytes).expect("deserialization failed");
-        assert_eq!(reconstructed.get("method").and_then(|m| m.as_str()), Some("initialize"));
-        
+        let reconstructed: Value = serde_json::from_slice(&bytes).expect("deserialization failed");
+        assert_eq!(
+            reconstructed.get("method").and_then(|m| m.as_str()),
+            Some("initialize")
+        );
+
         // Vérifie que apply_auth pose Content-Type: application/json (exact)
         let client = HttpMcpRemoteClient::new();
         let server = McpServerConfig {
@@ -272,7 +267,7 @@ mod tests {
             oauth_expires_at: String::new(),
             oauth_scopes: String::new(),
         };
-        
+
         // Construire une requête et vérifier les headers (inspection manuelle dans les tests d'intégration)
         // Ce test vérifie surtout que to_vec fonctionne correctement
         let req_builder = client.http.post(&server.url).body(bytes);

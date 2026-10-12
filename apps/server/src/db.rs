@@ -161,11 +161,14 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    let _ = sqlx::query("ALTER TABLE project_env_vars ADD COLUMN preview_allowed BIGINT NOT NULL DEFAULT 0")
-        .execute(pool)
-        .await;
+    let _ = sqlx::query(
+        "ALTER TABLE project_env_vars ADD COLUMN preview_allowed BIGINT NOT NULL DEFAULT 0",
+    )
+    .execute(pool)
+    .await;
 
     crate::wake_causes::migrate(pool).await?;
+    crate::wake_gate::migrate(pool).await?;
     crate::auto_deploy_guard::migrate(pool).await?;
 
     sqlx::query(

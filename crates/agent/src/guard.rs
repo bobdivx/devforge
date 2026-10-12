@@ -123,15 +123,29 @@ pub async fn publish_approval_refusal(pool: &PgPool, project_uuid: &str) -> Opti
 
 /// Résumé court de l'action bloquée, pour le message à l'utilisateur.
 pub fn remote_write_summary(tool: &str, args: &Value) -> String {
-    let s = |k: &str| args.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let s = |k: &str| {
+        args.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
     match tool {
         "create_github_fix" => {
             let title = s("title");
-            if title.is_empty() { "ouvrir une pull request".into() } else { format!("pull request « {title} »") }
+            if title.is_empty() {
+                "ouvrir une pull request".into()
+            } else {
+                format!("pull request « {title} »")
+            }
         }
         "sync_workdir_to_github" => {
             let msg = s("commit_message");
-            if msg.is_empty() { "pousser le brouillon sur GitHub".into() } else { format!("pousser sur GitHub : « {msg} »") }
+            if msg.is_empty() {
+                "pousser le brouillon sur GitHub".into()
+            } else {
+                format!("pousser sur GitHub : « {msg} »")
+            }
         }
         "publish_to_github" => "publier le projet sur GitHub".into(),
         "create_github_repo" => "créer le dépôt GitHub".into(),
@@ -159,6 +173,19 @@ pub fn remote_write_blocked(tool: &str, args: &Value) -> Value {
     })
 }
 
+/// Variante P1-10 : run automatique (réveil, cron, routine). Même carte de validation, sans
+/// attendre : le tour continue (ou se termine) et l'action reste en brouillon.
+pub fn remote_write_blocked_unattended(tool: &str, args: &Value) -> Value {
+    let mut v = remote_write_blocked(tool, args);
+    v["unattended"] = json!(true);
+    v["error"] = json!("Exécution automatique : action distante non lancée, validation demandée.");
+    v["message_fr"] = json!(format!(
+        "Exécution automatique : je n'ai pas lancé « {} ». Le travail reste dans le brouillon ; valide quand tu es là.",
+        remote_write_summary(tool, args)
+    ));
+    v
+}
+
 /// Intention de publication exprimée dans le message (sert UNIQUEMENT au prompt).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PublishIntent {
@@ -175,15 +202,43 @@ fn normalize(msg: &str) -> String {
 
 /// Mots-clés (déjà normalisés) qui expriment une demande de publication.
 const PUBLISH_NEEDLES: &[&str] = &[
-    "crée une pr", "creer une pr", "créer une pr", "crée la pr", "creer la pr", "créer la pr",
-    "ouvre une pr", "ouvre la pr", "ouvrir une pr", "open a pr", "pull request", "publie", "publier",
-    "valide et crée", "valider et créer", "valide les changements", "merge", "déploie en prod",
-    "deploie en prod", "déploie en production", "mets en ligne", "met en ligne", "create_github_fix",
-    "ok pour la pr", "tu peux publier", "je valide", "validé", "valide", "pousse sur github",
-    "push sur github", "publication validée",
+    "crée une pr",
+    "creer une pr",
+    "créer une pr",
+    "crée la pr",
+    "creer la pr",
+    "créer la pr",
+    "ouvre une pr",
+    "ouvre la pr",
+    "ouvrir une pr",
+    "open a pr",
+    "pull request",
+    "publie",
+    "publier",
+    "valide et crée",
+    "valider et créer",
+    "valide les changements",
+    "merge",
+    "déploie en prod",
+    "deploie en prod",
+    "déploie en production",
+    "mets en ligne",
+    "met en ligne",
+    "create_github_fix",
+    "ok pour la pr",
+    "tu peux publier",
+    "je valide",
+    "validé",
+    "valide",
+    "pousse sur github",
+    "push sur github",
+    "publication validée",
 ];
 
-const NEGATIONS: &[&str] = &["ne", "n'", "pas", "sans", "aucun", "aucune", "jamais", "don't", "dont", "not", "no", "non", "surtout"];
+const NEGATIONS: &[&str] = &[
+    "ne", "n'", "pas", "sans", "aucun", "aucune", "jamais", "don't", "dont", "not", "no", "non",
+    "surtout",
+];
 
 /// Négation dans la fenêtre de 4 mots avant `start` (ou « pas de <mot-clé> »).
 fn negated_before(text: &str, start: usize) -> bool {
@@ -209,7 +264,11 @@ pub fn publish_intent(msg: &str) -> PublishIntent {
         while let Some(pos) = t[from..].find(needle) {
             let start = from + pos;
             // « valide » ne doit pas matcher « invalide »/« validation » isolés en milieu de mot.
-            let prev_ok = t[..start].chars().last().map(|c| !c.is_alphanumeric()).unwrap_or(true);
+            let prev_ok = t[..start]
+                .chars()
+                .last()
+                .map(|c| !c.is_alphanumeric())
+                .unwrap_or(true);
             if prev_ok {
                 if negated_before(&t, start) {
                     negated = true;
@@ -236,13 +295,37 @@ mod tests {
     #[test]
     fn remote_write_table() {
         let cases: &[(&str, Value, bool)] = &[
-            ("write_project_file", json!({"mode": "local", "path": "a"}), false),
+            (
+                "write_project_file",
+                json!({"mode": "local", "path": "a"}),
+                false,
+            ),
             ("write_project_file", json!({"path": "a"}), false),
-            ("write_project_file", json!({"mode": "github", "path": "a"}), true),
-            ("mcp_call_tool", json!({"server": "github", "tool": "create_pull_request"}), true),
-            ("mcp_call_tool", json!({"server": "github", "tool": "github_push_files"}), true),
-            ("mcp_call_tool", json!({"server": "github", "tool": "merge_pull_request"}), true),
-            ("mcp_call_tool", json!({"server": "github", "tool": "get_file_contents"}), false),
+            (
+                "write_project_file",
+                json!({"mode": "github", "path": "a"}),
+                true,
+            ),
+            (
+                "mcp_call_tool",
+                json!({"server": "github", "tool": "create_pull_request"}),
+                true,
+            ),
+            (
+                "mcp_call_tool",
+                json!({"server": "github", "tool": "github_push_files"}),
+                true,
+            ),
+            (
+                "mcp_call_tool",
+                json!({"server": "github", "tool": "merge_pull_request"}),
+                true,
+            ),
+            (
+                "mcp_call_tool",
+                json!({"server": "github", "tool": "get_file_contents"}),
+                false,
+            ),
             ("read_github_file", json!({}), false),
             ("create_github_fix", json!({}), true),
             ("sync_workdir_to_github", json!({}), true),
@@ -251,7 +334,11 @@ mod tests {
             ("trigger_deploy", json!({}), true),
             ("cancel_deployment", json!({}), true),
             ("upsert_env_var", json!({}), true),
-            ("run_workdir_command", json!({"command": "npm install"}), false),
+            (
+                "run_workdir_command",
+                json!({"command": "npm install"}),
+                false,
+            ),
             ("http_smoke", json!({}), false),
         ];
         for (tool, args, expected) in cases {
@@ -262,30 +349,57 @@ mod tests {
     #[test]
     fn intent_detects_negation() {
         assert_eq!(publish_intent("ne publie pas"), PublishIntent::Negated);
-        assert_eq!(publish_intent("ne publie pas, corrige juste en local"), PublishIntent::Negated);
-        assert_eq!(publish_intent("pas de pull request"), PublishIntent::Negated);
+        assert_eq!(
+            publish_intent("ne publie pas, corrige juste en local"),
+            PublishIntent::Negated
+        );
+        assert_eq!(
+            publish_intent("pas de pull request"),
+            PublishIntent::Negated
+        );
         assert_ne!(publish_intent("Ne crée pas de PR"), PublishIntent::Explicit);
-        assert_eq!(publish_intent("don't open a PR, just fix it"), PublishIntent::Negated);
+        assert_eq!(
+            publish_intent("don't open a PR, just fix it"),
+            PublishIntent::Negated
+        );
         assert_eq!(publish_intent("sans publier"), PublishIntent::Negated);
-        assert_eq!(publish_intent("n’ouvre pas de pull request"), PublishIntent::Negated);
+        assert_eq!(
+            publish_intent("n’ouvre pas de pull request"),
+            PublishIntent::Negated
+        );
     }
 
     #[test]
     fn intent_detects_explicit() {
         assert_eq!(publish_intent("Validé"), PublishIntent::Explicit);
         assert_eq!(publish_intent("publie la PR"), PublishIntent::Explicit);
-        assert_eq!(publish_intent("Je valide, tu peux publier"), PublishIntent::Explicit);
+        assert_eq!(
+            publish_intent("Je valide, tu peux publier"),
+            PublishIntent::Explicit
+        );
         assert_eq!(publish_intent("ok pour la PR"), PublishIntent::Explicit);
-        assert_eq!(publish_intent("Valide les changements locaux et ouvre une pull request."), PublishIntent::Explicit);
-        assert_eq!(publish_intent("Publication validée, continue."), PublishIntent::Explicit);
+        assert_eq!(
+            publish_intent("Valide les changements locaux et ouvre une pull request."),
+            PublishIntent::Explicit
+        );
+        assert_eq!(
+            publish_intent("Publication validée, continue."),
+            PublishIntent::Explicit
+        );
         assert_eq!(publish_intent("merge"), PublishIntent::Explicit);
     }
 
     #[test]
     fn intent_none_for_plain_requests() {
-        assert_eq!(publish_intent("améliore la page d'accueil"), PublishIntent::None);
+        assert_eq!(
+            publish_intent("améliore la page d'accueil"),
+            PublishIntent::None
+        );
         assert_eq!(publish_intent("go"), PublishIntent::None);
-        assert_eq!(publish_intent("le formulaire est invalide"), PublishIntent::None);
+        assert_eq!(
+            publish_intent("le formulaire est invalide"),
+            PublishIntent::None
+        );
     }
 
     #[test]
@@ -310,9 +424,11 @@ mod tests {
         assert_eq!(v["code"], "publish_approval_required");
         assert_eq!(v["needs_user_action"], true);
         assert_eq!(v["kind"], "publish_approval");
-        assert!(v["message_fr"].as_str().unwrap().contains("Corrige le header"));
+        assert!(v["message_fr"]
+            .as_str()
+            .unwrap()
+            .contains("Corrige le header"));
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -366,16 +482,29 @@ mod push_cap_tests {
     fn push_tools_are_detected() {
         assert!(is_github_push("sync_workdir_to_github", &json!({})));
         assert!(is_github_push("create_github_fix", &json!({})));
-        assert!(is_github_push("write_project_file", &json!({"mode": "github"})));
-        assert!(!is_github_push("write_project_file", &json!({"mode": "local"})));
-        assert!(is_github_push("mcp_call_tool", &json!({"tool": "github_push_files"})));
+        assert!(is_github_push(
+            "write_project_file",
+            &json!({"mode": "github"})
+        ));
+        assert!(!is_github_push(
+            "write_project_file",
+            &json!({"mode": "local"})
+        ));
+        assert!(is_github_push(
+            "mcp_call_tool",
+            &json!({"tool": "github_push_files"})
+        ));
         assert!(!is_github_push("trigger_deploy", &json!({})));
         assert!(!is_github_push("upsert_env_var", &json!({})));
     }
 
     #[test]
     fn refusal_is_a_user_action_card() {
-        let v = push_limit_blocked("sync_workdir_to_github", &json!({"commit_message": "fix: lock"}), 3);
+        let v = push_limit_blocked(
+            "sync_workdir_to_github",
+            &json!({"commit_message": "fix: lock"}),
+            3,
+        );
         assert_eq!(v["needs_user_action"], true);
         assert_eq!(v["kind"], PUSH_LIMIT_KIND);
         assert!(v["message_fr"].as_str().unwrap().contains("3 fois"));

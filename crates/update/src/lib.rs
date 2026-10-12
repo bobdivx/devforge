@@ -836,7 +836,12 @@ impl UpdateFacade {
             {
                 let _ = self
                     .executor
-                    .exec(&self.config.server_id, ".", "docker rm -f devforge-traefik", 30)
+                    .exec(
+                        &self.config.server_id,
+                        ".",
+                        "docker rm -f devforge-traefik",
+                        30,
+                    )
                     .await;
                 let fallback = devforge_deploy::docker::traefik_run_command(
                     "devforge-traefik",

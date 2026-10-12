@@ -184,8 +184,7 @@ impl Tool for StartLocalPreviewTool {
             &command,
             Some(preview_url.as_str()),
             &project_env,
-        )
-        {
+        ) {
             Ok(pid) => pid,
             Err(e) => {
                 return Ok(json!({
@@ -259,8 +258,7 @@ impl Tool for StartLocalPreviewTool {
 
         // Laisse Traefik recharger le file provider
         tokio::time::sleep(Duration::from_millis(800)).await;
-        let (public_ok, public_status, public_detail) =
-            public_preview_health(&preview_url).await;
+        let (public_ok, public_status, public_detail) = public_preview_health(&preview_url).await;
         let logs_tail = read_preview_logs(workdir_path, 60);
 
         if !public_ok {
@@ -431,10 +429,7 @@ impl Tool for LocalPreviewStatusTool {
     }
 }
 
-async fn resolve_preview_context(
-    pool: &PgPool,
-    arguments: &Value,
-) -> Result<PreviewContext> {
+async fn resolve_preview_context(pool: &PgPool, arguments: &Value) -> Result<PreviewContext> {
     let project_uuid = arguments
         .get("project_uuid")
         .and_then(|v| v.as_str())
@@ -446,13 +441,12 @@ async fn resolve_preview_context(
         ));
     }
 
-    let project: Option<(String, Option<String>, i64, String)> = sqlx::query_as(
-        "SELECT uuid, workdir, port, name FROM projects WHERE uuid = $1",
-    )
-    .bind(project_uuid)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+    let project: Option<(String, Option<String>, i64, String)> =
+        sqlx::query_as("SELECT uuid, workdir, port, name FROM projects WHERE uuid = $1")
+            .bind(project_uuid)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
     let Some((uuid, workdir_opt, port_i, _name)) = project else {
         return Err(devforge_shared::DevForgeError::NotFound(format!(
@@ -590,10 +584,7 @@ fn dev_preview_upstream_url(port: u16) -> String {
 }
 
 fn container_eth0_ip() -> Option<String> {
-    let out = Command::new("hostname")
-        .arg("-i")
-        .output()
-        .ok()?;
+    let out = Command::new("hostname").arg("-i").output().ok()?;
     if !out.status.success() {
         return None;
     }
@@ -687,7 +678,8 @@ fn write_dev_traefik_dynamic(
     project_uuid: &str,
     port: u16,
 ) -> std::result::Result<String, String> {
-    let host = host_from_preview_url(preview_url).ok_or_else(|| "hôte dev- invalide".to_string())?;
+    let host =
+        host_from_preview_url(preview_url).ok_or_else(|| "hôte dev- invalide".to_string())?;
     let upstream = dev_preview_upstream_url(port);
     let yaml = dev_traefik_dynamic_yaml(&host, project_uuid, &upstream);
 
@@ -928,12 +920,12 @@ fn next_preview_port(port: u16) -> u16 {
 
 /// Premier port libre à partir de `preferred` (lui-même, puis les suivants).
 fn pick_preview_port(preferred: u16, is_taken: impl Fn(u16) -> bool) -> u16 {
-    let mut port = if (PREVIEW_PORT_BASE..PREVIEW_PORT_BASE + PREVIEW_PORT_SPAN).contains(&preferred)
-    {
-        preferred
-    } else {
-        PREVIEW_PORT_BASE
-    };
+    let mut port =
+        if (PREVIEW_PORT_BASE..PREVIEW_PORT_BASE + PREVIEW_PORT_SPAN).contains(&preferred) {
+            preferred
+        } else {
+            PREVIEW_PORT_BASE
+        };
     for _ in 0..PREVIEW_PORT_SPAN {
         if !is_taken(port) {
             return port;
@@ -944,12 +936,12 @@ fn pick_preview_port(preferred: u16, is_taken: impl Fn(u16) -> bool) -> u16 {
 }
 
 async fn allocate_preview_port(preferred: u16) -> u16 {
-    let mut port = if (PREVIEW_PORT_BASE..PREVIEW_PORT_BASE + PREVIEW_PORT_SPAN).contains(&preferred)
-    {
-        preferred
-    } else {
-        PREVIEW_PORT_BASE
-    };
+    let mut port =
+        if (PREVIEW_PORT_BASE..PREVIEW_PORT_BASE + PREVIEW_PORT_SPAN).contains(&preferred) {
+            preferred
+        } else {
+            PREVIEW_PORT_BASE
+        };
     // 64 essais : un refus TCP local est immédiat. Au-delà, on garde le dernier vu.
     for _ in 0..64 {
         if !port_is_open(port).await {
@@ -1104,7 +1096,12 @@ fn deps_fingerprint(workdir: &Path) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     let mut hasher = DefaultHasher::new();
-    for name in ["package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"] {
+    for name in [
+        "package.json",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+    ] {
         if let Ok(bytes) = std::fs::read(workdir.join(name)) {
             name.hash(&mut hasher);
             bytes.hash(&mut hasher);
@@ -1264,12 +1261,14 @@ async fn load_project_env_vars(pool: &PgPool, project_uuid: &str) -> Vec<devforg
     .await
     .unwrap_or_default();
     rows.into_iter()
-        .map(|(key, value, secret, preview_allowed)| devforge_env::EnvVar {
-            key,
-            value,
-            secret: secret != 0,
-            preview_allowed: preview_allowed != 0,
-        })
+        .map(
+            |(key, value, secret, preview_allowed)| devforge_env::EnvVar {
+                key,
+                value,
+                secret: secret != 0,
+                preview_allowed: preview_allowed != 0,
+            },
+        )
         .collect()
 }
 
@@ -1321,11 +1320,9 @@ async fn ensure_node_modules(
         return Ok(false);
     }
     if !npm_cli_available() {
-        return Err(
-            "npm introuvable dans l’environnement DevForge. \
+        return Err("npm introuvable dans l’environnement DevForge. \
              L’image runtime doit inclure Node.js 22 pour `npm i` au premier démarrage."
-                .into(),
-        );
+            .into());
     }
 
     let mut cmd = if cfg!(windows) {
@@ -1864,7 +1861,10 @@ mod tests {
         let b = stable_preview_port("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
         assert_ne!(a, b);
         assert!(a >= PREVIEW_PORT_BASE && a < PREVIEW_PORT_BASE + PREVIEW_PORT_SPAN);
-        assert_eq!(stable_preview_port("1b0e4a2f-d66a-40d8-8da0-2d960a8ff631"), a);
+        assert_eq!(
+            stable_preview_port("1b0e4a2f-d66a-40d8-8da0-2d960a8ff631"),
+            a
+        );
         assert_eq!(pick_preview_port(a, |p| p == a), next_preview_port(a));
         assert_eq!(pick_preview_port(a, |_| false), a);
         assert_eq!(pick_preview_port(80, |_| false), PREVIEW_PORT_BASE);
@@ -2009,18 +2009,21 @@ mod tests {
                 .map(|(_, v)| v.as_str()),
             Some("bar")
         );
-        assert!(env.iter().any(|(k, v)| k == "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS"
-            && v == "dev.example.com"));
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS" && v == "dev.example.com"));
         let astro_env = preview_process_env(&vars, 4321, "", false);
         assert!(astro_env.iter().all(|(k, _)| k != "HOST"));
     }
 
     #[test]
     fn listen_inode_matches_proc_net_tcp_listen_rows() {
-        let line = "0: 00000000:5EE7 00000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 4242 1";
+        let line =
+            "0: 00000000:5EE7 00000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 4242 1";
         assert_eq!(listen_inode(line, 24295), Some(4242));
         assert_eq!(listen_inode(line, 4321), None);
-        let established = "0: 00000000:5EE7 0100007F:C3B2 01 00000000:00000000 00:00000000 00000000 0 0 99 1";
+        let established =
+            "0: 00000000:5EE7 0100007F:C3B2 01 00000000:00000000 00:00000000 00000000 0 0 99 1";
         assert_eq!(listen_inode(established, 24295), None);
     }
 
@@ -2079,7 +2082,9 @@ mod tests {
         std::fs::write(preview_out_path(&work), "hello\n").unwrap();
         assert!(!work.join(".devforge-preview.out").exists());
         assert_eq!(
-            std::fs::read_to_string(preview_out_path(&work)).unwrap().trim(),
+            std::fs::read_to_string(preview_out_path(&work))
+                .unwrap()
+                .trim(),
             "hello"
         );
         std::fs::write(work.join(".devforge-preview.out"), "legacy").unwrap();
@@ -2118,5 +2123,4 @@ mod tests {
         // Les deux routeurs pointent vers le même service.
         assert_eq!(yaml.matches("service: dfdev-bba0bc75").count(), 2);
     }
-
 }

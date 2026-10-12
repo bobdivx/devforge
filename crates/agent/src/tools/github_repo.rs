@@ -112,13 +112,12 @@ impl Tool for CreateGitHubRepoTool {
         }
 
         // Vérifier que le projet existe
-        let project: Option<(String, Option<String>)> = sqlx::query_as(
-            "SELECT uuid, git_repository FROM projects WHERE uuid = $1",
-        )
-        .bind(project_uuid)
-        .fetch_optional(self.pool.as_ref())
-        .await
-        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let project: Option<(String, Option<String>)> =
+            sqlx::query_as("SELECT uuid, git_repository FROM projects WHERE uuid = $1")
+                .bind(project_uuid)
+                .fetch_optional(self.pool.as_ref())
+                .await
+                .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
         let Some((uuid, existing_repo)) = project else {
             return Ok(json!({
@@ -220,8 +219,13 @@ impl Tool for CreateGitHubRepoTool {
                     .to_string(),
                 Err(e) => {
                     let err_str = e.to_string();
-                    if err_str.contains("auth") || err_str.contains("401") || err_str.contains("403") {
-                        return Err(devforge_shared::DevForgeError::mcp_auth_failed("Github", &err_str));
+                    if err_str.contains("auth")
+                        || err_str.contains("401")
+                        || err_str.contains("403")
+                    {
+                        return Err(devforge_shared::DevForgeError::mcp_auth_failed(
+                            "Github", &err_str,
+                        ));
                     }
                     return Ok(json!({
                         "ok": false,
@@ -299,14 +303,12 @@ impl Tool for CreateGitHubRepoTool {
 
         // Attacher le dépôt au projet DevForge
         let git_url = format!("{html_url}.git");
-        sqlx::query(
-            "UPDATE projects SET git_repository = $1, git_branch = 'main' WHERE uuid = $2",
-        )
-        .bind(&git_url)
-        .bind(&uuid)
-        .execute(self.pool.as_ref())
-        .await
-        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        sqlx::query("UPDATE projects SET git_repository = $1, git_branch = 'main' WHERE uuid = $2")
+            .bind(&git_url)
+            .bind(&uuid)
+            .execute(self.pool.as_ref())
+            .await
+            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
         Ok(json!({
             "ok": true,

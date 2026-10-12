@@ -61,7 +61,10 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/v1/messages/{message_uuid}/reactions/{emoji}", post(add_reaction).delete(remove_reaction))
+        .route(
+            "/api/v1/messages/{message_uuid}/reactions/{emoji}",
+            post(add_reaction).delete(remove_reaction),
+        )
         .route(
             "/api/v1/projects/{project_uuid}/agents/{agent_uuid}/attachments",
             post(upload_attachment).layer(DefaultBodyLimit::max(MAX_ATTACHMENT_BYTES + 64 * 1024)),
@@ -80,16 +83,24 @@ pub const MESSAGE_EXTRA_COLUMNS: &str = r#"COALESCE(m.attachments_json, '[]') AS
 
 fn decode_emoji(raw: &str) -> Option<&'static str> {
     let e = raw.trim();
-    REACTIONS.iter().copied().find(|r| *r == e || r.trim_end_matches('\u{fe0f}') == e.trim_end_matches('\u{fe0f}'))
+    REACTIONS
+        .iter()
+        .copied()
+        .find(|r| *r == e || r.trim_end_matches('\u{fe0f}') == e.trim_end_matches('\u{fe0f}'))
 }
 
-async fn message_owner(state: &AppState, headers: &HeaderMap, message_uuid: &str) -> Result<(String, String, String, String, String), ApiError> {
-    let row: Option<(String, String, String, String)> =
-        sqlx::query_as("SELECT project_uuid, agent_uuid, role, content FROM agent_messages WHERE uuid = $1")
-            .bind(message_uuid)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(|e| ApiError::message(e.to_string()))?;
+async fn message_owner(
+    state: &AppState,
+    headers: &HeaderMap,
+    message_uuid: &str,
+) -> Result<(String, String, String, String, String), ApiError> {
+    let row: Option<(String, String, String, String)> = sqlx::query_as(
+        "SELECT project_uuid, agent_uuid, role, content FROM agent_messages WHERE uuid = $1",
+    )
+    .bind(message_uuid)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| ApiError::message(e.to_string()))?;
     let (project, agent, role, content) = row.ok_or_else(|| ApiError::not_found("message"))?;
     crate::routes::auth_project(state, headers, &project).await?;
     let (user, _) = crate::routes::require_auth(state, headers).await?;
@@ -106,7 +117,10 @@ async fn reactions_of(pool: &PgPool, message_uuid: &str, user_uuid: &str) -> Val
     .fetch_all(pool)
     .await
     .unwrap_or_default();
-    json!(rows.into_iter().map(|(emoji, count, mine)| json!({"emoji": emoji, "count": count, "mine": mine})).collect::<Vec<_>>())
+    json!(rows
+        .into_iter()
+        .map(|(emoji, count, mine)| json!({"emoji": emoji, "count": count, "mine": mine}))
+        .collect::<Vec<_>>())
 }
 
 async fn add_reaction(
@@ -115,7 +129,8 @@ async fn add_reaction(
     Path((message_uuid, emoji)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
     let emoji = decode_emoji(&emoji).ok_or_else(|| ApiError::message("réaction non autorisée"))?;
-    let (user, project, agent, role, content) = message_owner(&state, &headers, &message_uuid).await?;
+    let (user, project, agent, role, content) =
+        message_owner(&state, &headers, &message_uuid).await?;
     let inserted = sqlx::query(
         "INSERT INTO agent_message_reactions (message_uuid, user_uuid, emoji) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
     )
@@ -131,7 +146,9 @@ async fn add_reaction(
     if inserted && emoji == "👎" && role == "assistant" {
         thumbs_down_note(&state, &user, &project, &agent, &content).await;
     }
-    Ok(Json(json!({"ok": true, "reactions": reactions_of(&state.pool, &message_uuid, &user).await})))
+    Ok(Json(
+        json!({"ok": true, "reactions": reactions_of(&state.pool, &message_uuid, &user).await}),
+    ))
 }
 
 async fn remove_reaction(
@@ -148,18 +165,26 @@ async fn remove_reaction(
         .execute(&state.pool)
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;
-    Ok(Json(json!({"ok": true, "reactions": reactions_of(&state.pool, &message_uuid, &user).await})))
+    Ok(Json(
+        json!({"ok": true, "reactions": reactions_of(&state.pool, &message_uuid, &user).await}),
+    ))
 }
 
 pub fn thumbs_down_text(content: &str) -> String {
     let one_line = content.split_whitespace().collect::<Vec<_>>().join(" ");
     let excerpt: String = one_line.chars().take(160).collect();
-    let more = if one_line.chars().count() > 160 { "…" } else { "" };
+    let more = if one_line.chars().count() > 160 {
+        "…"
+    } else {
+        ""
+    };
     format!("Réponse jugée insatisfaisante par l'utilisateur : « {excerpt}{more} ». Sois plus précis et vérifie avant d'affirmer.")
 }
 
 async fn thumbs_down_note(state: &AppState, user: &str, project: &str, agent: &str, content: &str) {
-    let Some(store) = state.registry.memory() else { return };
+    let Some(store) = state.registry.memory() else {
+        return;
+    };
     let mut req = devforge_memory::WriteReq::new(
         user,
         devforge_memory::Scope::Agent(agent.to_string()),
@@ -180,10 +205,26 @@ async fn thumbs_down_note(state: &AppState, user: &str, project: &str, agent: &s
 
 /// Dimensions d'une image PNG / JPEG / GIF / WebP lues dans l'en-tête (sans décoder l'image).
 pub fn image_dims(b: &[u8]) -> Option<(u32, u32)> {
-    let be16 = |i: usize| -> Option<u32> { Some(u16::from_be_bytes([*b.get(i)?, *b.get(i + 1)?]) as u32) };
-    let le16 = |i: usize| -> Option<u32> { Some(u16::from_le_bytes([*b.get(i)?, *b.get(i + 1)?]) as u32) };
-    let be32 = |i: usize| -> Option<u32> { Some(u32::from_be_bytes([*b.get(i)?, *b.get(i + 1)?, *b.get(i + 2)?, *b.get(i + 3)?])) };
-    let le24 = |i: usize| -> Option<u32> { Some(u32::from_le_bytes([*b.get(i)?, *b.get(i + 1)?, *b.get(i + 2)?, 0])) };
+    let be16 =
+        |i: usize| -> Option<u32> { Some(u16::from_be_bytes([*b.get(i)?, *b.get(i + 1)?]) as u32) };
+    let le16 =
+        |i: usize| -> Option<u32> { Some(u16::from_le_bytes([*b.get(i)?, *b.get(i + 1)?]) as u32) };
+    let be32 = |i: usize| -> Option<u32> {
+        Some(u32::from_be_bytes([
+            *b.get(i)?,
+            *b.get(i + 1)?,
+            *b.get(i + 2)?,
+            *b.get(i + 3)?,
+        ]))
+    };
+    let le24 = |i: usize| -> Option<u32> {
+        Some(u32::from_le_bytes([
+            *b.get(i)?,
+            *b.get(i + 1)?,
+            *b.get(i + 2)?,
+            0,
+        ]))
+    };
     if b.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Some((be32(16)?, be32(20)?));
     }
@@ -209,7 +250,8 @@ pub fn image_dims(b: &[u8]) -> Option<(u32, u32)> {
                 continue;
             }
             let marker = b[i + 1];
-            if marker == 0xd8 || marker == 0x01 || (0xd0..=0xd7).contains(&marker) || marker == 0xff {
+            if marker == 0xd8 || marker == 0x01 || (0xd0..=0xd7).contains(&marker) || marker == 0xff
+            {
                 i += if marker == 0xff { 1 } else { 2 };
                 continue;
             }
@@ -245,9 +287,17 @@ pub fn validate_upload(declared: &str, bytes: &[u8]) -> Result<&'static str, Str
         return Err("fichier vide".into());
     }
     if bytes.len() > MAX_ATTACHMENT_BYTES {
-        return Err(format!("image trop lourde ({} Mo max)", MAX_ATTACHMENT_BYTES / 1024 / 1024));
+        return Err(format!(
+            "image trop lourde ({} Mo max)",
+            MAX_ATTACHMENT_BYTES / 1024 / 1024
+        ));
     }
-    let declared = declared.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    let declared = declared
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
     if !IMAGE_MIMES.contains(&declared.as_str()) {
         return Err("type refusé : PNG, JPEG, WebP ou GIF uniquement".into());
     }
@@ -258,7 +308,8 @@ pub fn validate_upload(declared: &str, bytes: &[u8]) -> Result<&'static str, Str
 }
 
 fn data_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/data".into())).join("attachments")
+    std::path::PathBuf::from(std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/data".into()))
+        .join("attachments")
 }
 
 fn safe_name(raw: &str) -> String {
@@ -267,11 +318,19 @@ fn safe_name(raw: &str) -> String {
         .filter(|c| !c.is_control() && !matches!(c, '/' | '\\' | '"' | '<' | '>'))
         .take(80)
         .collect();
-    if n.trim().is_empty() { "image".into() } else { n.trim().to_string() }
+    if n.trim().is_empty() {
+        "image".into()
+    } else {
+        n.trim().to_string()
+    }
 }
 
 fn random_id() -> String {
-    format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple())
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
 }
 
 async fn upload_attachment(
@@ -282,17 +341,24 @@ async fn upload_attachment(
 ) -> Result<Json<Value>, ApiError> {
     crate::routes::auth_project(&state, &headers, &project_uuid).await?;
     let (user, _) = crate::routes::require_auth(&state, &headers).await?;
-    let agent_ok: Option<(String,)> = sqlx::query_as("SELECT uuid FROM project_agents WHERE uuid = $1 AND project_uuid = $2")
-        .bind(&agent_uuid)
-        .bind(&project_uuid)
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|e| ApiError::message(e.to_string()))?;
+    let agent_ok: Option<(String,)> =
+        sqlx::query_as("SELECT uuid FROM project_agents WHERE uuid = $1 AND project_uuid = $2")
+            .bind(&agent_uuid)
+            .bind(&project_uuid)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|e| ApiError::message(e.to_string()))?;
     if agent_ok.is_none() {
         return Err(ApiError::not_found("agent"));
     }
-    let declared = headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("");
-    let mime = validate_upload(declared, &body).map_err(|e| ApiError { status: StatusCode::UNPROCESSABLE_ENTITY, message: e })?;
+    let declared = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let mime = validate_upload(declared, &body).map_err(|e| ApiError {
+        status: StatusCode::UNPROCESSABLE_ENTITY,
+        message: e,
+    })?;
     let (width, height) = image_dims(&body).unwrap_or((0, 0));
     let name = safe_name(
         &headers
@@ -314,8 +380,12 @@ async fn upload_attachment(
     } else {
         // Sans S3 configuré : disque persistant de l'instance (le stockage mémoire serait perdu au redémarrage).
         let dir = data_dir();
-        tokio::fs::create_dir_all(&dir).await.map_err(|e| ApiError::message(format!("stockage : {e}")))?;
-        tokio::fs::write(dir.join(&id), &body).await.map_err(|e| ApiError::message(format!("stockage : {e}")))?;
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(|e| ApiError::message(format!("stockage : {e}")))?;
+        tokio::fs::write(dir.join(&id), &body)
+            .await
+            .map_err(|e| ApiError::message(format!("stockage : {e}")))?;
         ("disk", id.clone())
     };
     sqlx::query(
@@ -336,7 +406,9 @@ async fn upload_attachment(
     .execute(&state.pool)
     .await
     .map_err(|e| ApiError::message(e.to_string()))?;
-    Ok(Json(json!({"ok": true, "data": attachment_meta(&id, &name, mime, width, height, body.len() as i64)})))
+    Ok(Json(
+        json!({"ok": true, "data": attachment_meta(&id, &name, mime, width, height, body.len() as i64)}),
+    ))
 }
 
 fn urlencoding_decode(s: &str) -> String {
@@ -357,7 +429,14 @@ fn urlencoding_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-pub fn attachment_meta(id: &str, name: &str, mime: &str, width: u32, height: u32, size: i64) -> Value {
+pub fn attachment_meta(
+    id: &str,
+    name: &str,
+    mime: &str,
+    width: u32,
+    height: u32,
+    size: i64,
+) -> Value {
     json!({"id": id, "url": format!("/api/v1/attachments/{id}"), "name": name, "mime": mime, "width": width, "height": height, "size": size})
 }
 
@@ -379,13 +458,19 @@ struct AttachmentRow {
 async fn load_bytes(state: &AppState, row: &AttachmentRow) -> Option<Vec<u8>> {
     if row.storage == "s3" {
         let bucket = state.storage.config().await.bucket;
-        state.storage.get_bytes(bucket.trim(), &row.storage_key).await.ok()
+        state
+            .storage
+            .get_bytes(bucket.trim(), &row.storage_key)
+            .await
+            .ok()
     } else {
         // Clé = id aléatoire hexadécimal : pas de traversée de chemin possible.
         if !row.storage_key.chars().all(|c| c.is_ascii_hexdigit()) {
             return None;
         }
-        tokio::fs::read(data_dir().join(&row.storage_key)).await.ok()
+        tokio::fs::read(data_dir().join(&row.storage_key))
+            .await
+            .ok()
     }
 }
 
@@ -395,20 +480,31 @@ async fn get_attachment(State(state): State<AppState>, Path(id): Path<String>) -
     if id.len() != 64 || !id.chars().all(|c| c.is_ascii_hexdigit()) {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let row: Option<AttachmentRow> = sqlx::query_as("SELECT * FROM agent_attachments WHERE id = $1")
-        .bind(&id)
-        .fetch_optional(&state.pool)
-        .await
-        .ok()
-        .flatten();
-    let Some(row) = row else { return StatusCode::NOT_FOUND.into_response() };
-    let Some(bytes) = load_bytes(&state, &row).await else { return StatusCode::NOT_FOUND.into_response() };
+    let row: Option<AttachmentRow> =
+        sqlx::query_as("SELECT * FROM agent_attachments WHERE id = $1")
+            .bind(&id)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten();
+    let Some(row) = row else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Some(bytes) = load_bytes(&state, &row).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
     (
         [
             (header::CONTENT_TYPE, row.mime.clone()),
-            (header::CACHE_CONTROL, "private, max-age=31536000, immutable".to_string()),
+            (
+                header::CACHE_CONTROL,
+                "private, max-age=31536000, immutable".to_string(),
+            ),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
-            (header::CONTENT_SECURITY_POLICY, "default-src 'none'; sandbox".to_string()),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; sandbox".to_string(),
+            ),
         ],
         bytes,
     )
@@ -438,9 +534,15 @@ pub struct PreparedTurn {
 }
 
 /// Question et libellé de l'option choisie, lus dans le message de l'agent (pas ceux du client).
-pub fn question_from_tools(tools_json: &str, option_id: Option<&str>) -> Option<(String, Option<String>)> {
+pub fn question_from_tools(
+    tools_json: &str,
+    option_id: Option<&str>,
+) -> Option<(String, Option<String>)> {
     let tools: Value = serde_json::from_str(tools_json).ok()?;
-    let ask = tools.as_array()?.iter().find(|t| t.get("name").and_then(|v| v.as_str()) == Some("ask_user"))?;
+    let ask = tools
+        .as_array()?
+        .iter()
+        .find(|t| t.get("name").and_then(|v| v.as_str()) == Some("ask_user"))?;
     let r = ask.get("result")?;
     let question = r.get("question")?.as_str()?.to_string();
     let label = option_id.and_then(|id| {
@@ -470,21 +572,34 @@ pub async fn prepare_user_turn(
     reply_to: Option<&str>,
     attachments: &[String],
 ) -> Result<PreparedTurn, ApiError> {
-    let mut turn = PreparedTurn { persisted: message.to_string(), for_model: message.to_string(), ..Default::default() };
+    let mut turn = PreparedTurn {
+        persisted: message.to_string(),
+        for_model: message.to_string(),
+        ..Default::default()
+    };
     // P5-04 : réponse structurée → texte clair pour le modèle, « ✓ X » à l'affichage.
     if let Some(a) = answer {
         let stored: Option<(String,)> = match a.message_uuid.as_deref().filter(|s| !s.is_empty()) {
-            Some(uuid) => sqlx::query_as("SELECT tool_calls_json FROM agent_messages WHERE uuid = $1 AND agent_uuid = $2")
-                .bind(uuid)
-                .bind(agent_uuid)
-                .fetch_optional(&state.pool)
-                .await
-                .map_err(|e| ApiError::message(e.to_string()))?,
+            Some(uuid) => sqlx::query_as(
+                "SELECT tool_calls_json FROM agent_messages WHERE uuid = $1 AND agent_uuid = $2",
+            )
+            .bind(uuid)
+            .bind(agent_uuid)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|e| ApiError::message(e.to_string()))?,
             None => None,
         };
         let from_db = stored.and_then(|(t,)| question_from_tools(&t, a.option_id.as_deref()));
-        let question = from_db.as_ref().map(|(q, _)| q.clone()).or_else(|| a.question.clone()).unwrap_or_default();
-        let label = from_db.and_then(|(_, l)| l).or_else(|| a.label.clone()).unwrap_or_default();
+        let question = from_db
+            .as_ref()
+            .map(|(q, _)| q.clone())
+            .or_else(|| a.question.clone())
+            .unwrap_or_default();
+        let label = from_db
+            .and_then(|(_, l)| l)
+            .or_else(|| a.label.clone())
+            .unwrap_or_default();
         let text = devforge_agent::ask_user_answer_text(&question, &label, a.text.as_deref());
         turn.persisted = text.clone();
         turn.for_model = text;
@@ -498,12 +613,14 @@ pub async fn prepare_user_turn(
     }
     // P5-06 : citation → contexte pour le modèle, lien vers l'original à l'affichage.
     if let Some(uuid) = reply_to.filter(|s| !s.is_empty()) {
-        let quoted: Option<(String,)> = sqlx::query_as("SELECT content FROM agent_messages WHERE uuid = $1 AND agent_uuid = $2")
-            .bind(uuid)
-            .bind(agent_uuid)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(|e| ApiError::message(e.to_string()))?;
+        let quoted: Option<(String,)> = sqlx::query_as(
+            "SELECT content FROM agent_messages WHERE uuid = $1 AND agent_uuid = $2",
+        )
+        .bind(uuid)
+        .bind(agent_uuid)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| ApiError::message(e.to_string()))?;
         if let Some((content,)) = quoted {
             turn.for_model = format!("{}\n\n{}", quote_prefix(&content), turn.for_model);
             turn.extras.reply_to_uuid = Some(uuid.to_string());
@@ -511,7 +628,11 @@ pub async fn prepare_user_turn(
     }
     // P5-02 : images de ce fil, envoyées par cet utilisateur.
     if !attachments.is_empty() {
-        let ids: Vec<String> = attachments.iter().take(MAX_ATTACHMENTS_PER_MESSAGE).cloned().collect();
+        let ids: Vec<String> = attachments
+            .iter()
+            .take(MAX_ATTACHMENTS_PER_MESSAGE)
+            .cloned()
+            .collect();
         let rows: Vec<AttachmentRow> = sqlx::query_as(
             "SELECT * FROM agent_attachments WHERE id = ANY($1) AND project_uuid = $2 AND agent_uuid = $3 AND user_uuid = $4",
         )
@@ -524,12 +645,24 @@ pub async fn prepare_user_turn(
         .map_err(|e| ApiError::message(e.to_string()))?;
         let mut metas = Vec::new();
         for id in &ids {
-            let Some(row) = rows.iter().find(|r| &r.id == id) else { continue };
+            let Some(row) = rows.iter().find(|r| &r.id == id) else {
+                continue;
+            };
             let _ = (&row.project_uuid, &row.agent_uuid, &row.user_uuid);
-            metas.push(attachment_meta(&row.id, &row.name, &row.mime, row.width as u32, row.height as u32, row.size_bytes));
+            metas.push(attachment_meta(
+                &row.id,
+                &row.name,
+                &row.mime,
+                row.width as u32,
+                row.height as u32,
+                row.size_bytes,
+            ));
             if let Some(bytes) = load_bytes(state, row).await {
                 let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                turn.images.push(devforge_llm::ImagePart { name: row.name.clone(), data_url: format!("data:{};base64,{b64}", row.mime) });
+                turn.images.push(devforge_llm::ImagePart {
+                    name: row.name.clone(),
+                    data_url: format!("data:{};base64,{b64}", row.mime),
+                });
             }
         }
         if !metas.is_empty() {
@@ -553,7 +686,11 @@ const ROUTINE_RULES: &str = "Exécution automatique programmée : personne ne r�
 /// Statut d'une routine d'après la réponse de l'agent.
 pub fn routine_status(reply: &str) -> &'static str {
     let t = reply.trim_start().to_lowercase();
-    if t.starts_with("échec") || t.starts_with("echec") || t.starts_with("erreur") || t.starts_with("❌") {
+    if t.starts_with("échec")
+        || t.starts_with("echec")
+        || t.starts_with("erreur")
+        || t.starts_with("❌")
+    {
         "failed"
     } else {
         "success"
@@ -566,7 +703,39 @@ impl ServerRoutineRunner {
         let Some(agent_uuid) = cron.agent_uuid.clone() else {
             return ("failed".into(), "routine sans agent cible".into());
         };
-        let prompt = format!("ROUTINE:{} « {} »\n{}\n\nConsigne : {}", cron.id, cron.name, ROUTINE_RULES, cron.prompt.as_deref().unwrap_or(""));
+        let prompt = format!(
+            "ROUTINE:{} « {} »\n{}\n\nConsigne : {}",
+            cron.id,
+            cron.name,
+            ROUTINE_RULES,
+            cron.prompt.as_deref().unwrap_or("")
+        );
+        // P1-10 : rien n'a changé depuis le dernier passage → pas de run LLM.
+        let wake_key = format!("routine:{}", cron.id);
+        let gate = match crate::wake_gate::project_by_uuid(state, &cron.project_uuid).await {
+            Some(project) => {
+                let observed = crate::wake_gate::observe(
+                    state,
+                    &project,
+                    true,
+                    json!({ "prompt": cron.prompt, "agent": agent_uuid }),
+                )
+                .await;
+                crate::wake_gate::check(
+                    &state.pool,
+                    &cron.project_uuid,
+                    "routine",
+                    &wake_key,
+                    &cron.name,
+                    &observed,
+                )
+                .await
+            }
+            None => return ("failed".into(), "projet introuvable".into()),
+        };
+        if let crate::wake_gate::Decision::Skip { cause } = &gate.decision {
+            return ("skipped".into(), cause.clone());
+        }
         let run_uuid = crate::state::new_uuid();
         let now = now_str();
         let _ = sqlx::query(
@@ -581,30 +750,65 @@ impl ServerRoutineRunner {
         .bind(&cron.name)
         .execute(&state.pool)
         .await;
-        let ctx = crate::routes::load_agent_context(state, &cron.project_uuid, &agent_uuid).await;
+        let mut ctx =
+            crate::routes::load_agent_context(state, &cron.project_uuid, &agent_uuid).await;
+        ctx.unattended = true;
         let owner = ctx.user_uuid.clone().unwrap_or_default();
         let (llm, mode) = state.llm_for_user(&owner).await;
         let gh = crate::user_prefs::github_token(&state.pool, &owner).await;
         let result = devforge_github::with_token(
             &gh,
-            state.agent.handle_with_provider(&prompt, None, None, ctx, None, Some((llm, mode))),
+            state
+                .agent
+                .handle_with_provider(&prompt, None, None, ctx, None, Some((llm, mode))),
         )
         .await;
         let (status, reply, tools_json, provider) = match result {
-            Ok(r) => (routine_status(&r.reply), r.reply.clone(), serde_json::to_string(&r.tool_calls).unwrap_or_else(|_| "[]".into()), r.provider),
-            Err(e) => ("failed", format!("ÉCHEC : la routine n'a pas pu s'exécuter ({e})."), "[]".into(), String::new()),
+            Ok(r) => (
+                routine_status(&r.reply),
+                r.reply.clone(),
+                serde_json::to_string(&r.tool_calls).unwrap_or_else(|_| "[]".into()),
+                r.provider,
+            ),
+            Err(e) => (
+                "failed",
+                format!("ÉCHEC : la routine n'a pas pu s'exécuter ({e})."),
+                "[]".into(),
+                String::new(),
+            ),
         };
         let summary: String = reply.chars().take(400).collect();
-        let _ = sqlx::query("UPDATE agent_runs SET status = $1, summary = $2, updated_at = $3 WHERE uuid = $4")
-            .bind(if status == "failed" { "failed" } else { "completed" })
-            .bind(&summary)
-            .bind(now_str())
-            .bind(&run_uuid)
-            .execute(&state.pool)
-            .await;
+        crate::wake_gate::finish(
+            &state.pool,
+            &cron.project_uuid,
+            &wake_key,
+            &gate,
+            status != "failed",
+            &summary,
+            Some(&run_uuid),
+        )
+        .await;
+        let _ = sqlx::query(
+            "UPDATE agent_runs SET status = $1, summary = $2, updated_at = $3 WHERE uuid = $4",
+        )
+        .bind(if status == "failed" {
+            "failed"
+        } else {
+            "completed"
+        })
+        .bind(&summary)
+        .bind(now_str())
+        .bind(&run_uuid)
+        .execute(&state.pool)
+        .await;
         let hash = devforge_cron::summary_hash(&reply);
         let notify = cron.notify.as_deref().unwrap_or("on_change");
-        if devforge_cron::should_notify(notify, cron.last_summary_hash.as_deref(), &hash, status == "failed") {
+        if devforge_cron::should_notify(
+            notify,
+            cron.last_summary_hash.as_deref(),
+            &hash,
+            status == "failed",
+        ) {
             let content = format!("Routine « {} » : {}", cron.name, reply.trim());
             let card = json!([{
                 "id": format!("routine-{run_uuid}"),
@@ -680,14 +884,25 @@ mod tests {
     #[test]
     fn upload_validation() {
         assert_eq!(validate_upload("image/png", &png(10, 20)), Ok("image/png"));
-        assert!(validate_upload("image/svg+xml", b"<svg onload=alert(1)>").is_err(), "SVG refusé");
-        assert!(validate_upload("image/png", b"<html><script>alert(1)</script>").is_err(), "HTML déguisé refusé");
-        assert!(validate_upload("image/jpeg", &png(1, 1)).is_err(), "type annoncé ≠ contenu");
+        assert!(
+            validate_upload("image/svg+xml", b"<svg onload=alert(1)>").is_err(),
+            "SVG refusé"
+        );
+        assert!(
+            validate_upload("image/png", b"<html><script>alert(1)</script>").is_err(),
+            "HTML déguisé refusé"
+        );
+        assert!(
+            validate_upload("image/jpeg", &png(1, 1)).is_err(),
+            "type annoncé ≠ contenu"
+        );
         assert!(validate_upload("application/pdf", b"%PDF").is_err());
         assert!(validate_upload("image/png", &[]).is_err());
         let mut big = png(1, 1);
         big.resize(MAX_ATTACHMENT_BYTES + 1, 0);
-        assert!(validate_upload("image/png", &big).unwrap_err().contains("trop lourde"));
+        assert!(validate_upload("image/png", &big)
+            .unwrap_err()
+            .contains("trop lourde"));
     }
 
     #[test]
@@ -696,7 +911,10 @@ mod tests {
         let gif = [b"GIF89a".as_slice(), &[0x40, 0x01, 0xf0, 0x00]].concat();
         assert_eq!(image_dims(&gif), Some((320, 240)));
         // JPEG minimal : SOI, APP0 court, SOF0 (h=480, w=640).
-        let jpg = [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0xe0, 0x02, 0x80, 0x03, 0, 0, 0, 0, 0, 0];
+        let jpg = [
+            0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x01,
+            0xe0, 0x02, 0x80, 0x03, 0, 0, 0, 0, 0, 0,
+        ];
         assert_eq!(image_dims(&jpg), Some((640, 480)));
         assert_eq!(image_dims(b"nope"), None);
     }
@@ -704,14 +922,26 @@ mod tests {
     #[test]
     fn answer_reads_the_stored_question() {
         let tools = json!([{"name": "ask_user", "result": {"question": "Je pousse le correctif ?", "options": [{"id": "yes", "label": "Oui, publier"}, {"id": "no", "label": "Non, garder en local"}]}}]).to_string();
-        assert_eq!(question_from_tools(&tools, Some("no")), Some(("Je pousse le correctif ?".into(), Some("Non, garder en local".into()))));
-        assert_eq!(question_from_tools(&tools, Some("zzz")), Some(("Je pousse le correctif ?".into(), None)));
+        assert_eq!(
+            question_from_tools(&tools, Some("no")),
+            Some((
+                "Je pousse le correctif ?".into(),
+                Some("Non, garder en local".into())
+            ))
+        );
+        assert_eq!(
+            question_from_tools(&tools, Some("zzz")),
+            Some(("Je pousse le correctif ?".into(), None))
+        );
         assert_eq!(question_from_tools("[]", Some("yes")), None);
     }
 
     #[test]
     fn quote_and_signals() {
-        assert_eq!(quote_prefix("Le build\n casse"), "(en réponse à : « Le build casse »)");
+        assert_eq!(
+            quote_prefix("Le build\n casse"),
+            "(en réponse à : « Le build casse »)"
+        );
         assert!(quote_prefix(&"x".repeat(300)).ends_with("… »)"));
         assert!(thumbs_down_text("Tout est en ligne.").contains("« Tout est en ligne. »"));
         assert_eq!(routine_status("OK : popcornn.app répond 200"), "success");

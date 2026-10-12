@@ -848,7 +848,7 @@ pub struct CreateAgentBody {
     pub role: Option<String>,
     pub kind: Option<String>,
     pub parent_agent_uuid: Option<String>,
-    /// cron | event | system | "" 
+    /// cron | event | system | ""
     pub trigger_type: Option<String>,
     /// JSON : { "cron_expression", "timezone", "event" }
     pub trigger_config: Option<serde_json::Value>,
@@ -890,18 +890,13 @@ async fn create_agent(
         .unwrap_or_else(|| "".into())
         .trim()
         .to_lowercase();
-    if !trigger_type.is_empty()
-        && !matches!(trigger_type.as_str(), "cron" | "event" | "system")
-    {
+    if !trigger_type.is_empty() && !matches!(trigger_type.as_str(), "cron" | "event" | "system") {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
             Json(json!({"ok": false, "error": "trigger_type doit être cron, event ou system"})),
         ));
     }
-    let trigger_config = body
-        .trigger_config
-        .unwrap_or_else(|| json!({}))
-        .to_string();
+    let trigger_config = body.trigger_config.unwrap_or_else(|| json!({})).to_string();
     let instructions = body
         .instructions
         .unwrap_or_default()
@@ -973,8 +968,8 @@ pub struct UpdateAgentBody {
 }
 
 fn validate_agent_cron_config(config_json: &str) -> Result<(), String> {
-    let v: serde_json::Value =
-        serde_json::from_str(config_json).map_err(|_| "trigger_config JSON invalide".to_string())?;
+    let v: serde_json::Value = serde_json::from_str(config_json)
+        .map_err(|_| "trigger_config JSON invalide".to_string())?;
     let expr = v
         .get("cron_expression")
         .and_then(|x| x.as_str())
@@ -1057,9 +1052,7 @@ async fn update_agent(
         .trigger_type
         .map(|t| t.trim().to_lowercase())
         .unwrap_or_else(|| existing.trigger_type.clone());
-    if !trigger_type.is_empty()
-        && !matches!(trigger_type.as_str(), "cron" | "event" | "system")
-    {
+    if !trigger_type.is_empty() && !matches!(trigger_type.as_str(), "cron" | "event" | "system") {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
             Json(json!({"ok": false, "error": "trigger_type doit être cron, event ou system"})),
@@ -1248,17 +1241,17 @@ async fn list_agent_messages(
         crate::rich_chat::MESSAGE_EXTRA_COLUMNS
     );
     let rows = sqlx::query_as::<_, AgentMessageRow>(&sql)
-    .bind(&uuid)
-    .bind(&agent_uuid)
-    .bind(&user.uuid)
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|e| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
-        )
-    })?;
+        .bind(&uuid)
+        .bind(&agent_uuid)
+        .bind(&user.uuid)
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
     Ok(Json(json!({"data": rows})))
 }
 
@@ -1425,17 +1418,17 @@ async fn get_shared_agent_conversation(
         crate::rich_chat::MESSAGE_EXTRA_COLUMNS
     );
     let rows = sqlx::query_as::<_, AgentMessageRow>(&sql)
-    .bind(&project_uuid)
-    .bind(&agent_uuid)
-    .bind("")
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|e| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
-        )
-    })?;
+        .bind(&project_uuid)
+        .bind(&agent_uuid)
+        .bind("")
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
 
     let (agent_name, agent_role, agent_status) =
         agent.unwrap_or_else(|| ("Conversation".into(), "custom".into(), "idle".into()));
@@ -2192,11 +2185,12 @@ async fn github_webhook(
         .execute(&state.pool)
         .await;
 
-        let _ = sqlx::query("UPDATE projects SET status = 'deploying', updated_at = $1 WHERE id = $2")
-            .bind(&now)
-            .bind(project.id)
-            .execute(&state.pool)
-            .await;
+        let _ =
+            sqlx::query("UPDATE projects SET status = 'deploying', updated_at = $1 WHERE id = $2")
+                .bind(&now)
+                .bind(project.id)
+                .execute(&state.pool)
+                .await;
 
         let outcome = crate::routes::run_real_deploy(&state, &project, &dep_uuid).await;
         if outcome.cancelled {
@@ -2275,7 +2269,9 @@ async fn github_webhook(
         }));
     }
 
-    Ok(Json(json!({"ok": true, "deployed": deployed, "dev_deployed": dev_deployed})))
+    Ok(Json(
+        json!({"ok": true, "deployed": deployed, "dev_deployed": dev_deployed}),
+    ))
 }
 
 fn verify_github_sig(secret: &str, body: &[u8], signature_header: &str) -> bool {

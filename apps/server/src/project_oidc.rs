@@ -113,7 +113,13 @@ pub async fn all_callback_urls(pool: &sqlx::PgPool, project: &Project) -> Vec<St
 
 /// Callbacks de l'environnement dev (`dev-…` / `dev.…`) quand il est activé.
 pub fn dev_env_callback_urls(project: &Project) -> Vec<String> {
-    if project.dev_branch.as_deref().unwrap_or("").trim().is_empty() {
+    if project
+        .dev_branch
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
         return Vec::new();
     }
     let Some(origin) = crate::dev_env::dev_url_for(project) else {

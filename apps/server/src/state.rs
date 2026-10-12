@@ -297,29 +297,43 @@ impl ProjectStore for SqliteProjectStore {
             .await
             .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
         let Some(p) = project else {
-            return Ok(json!({"ok": false, "error": format!("projet introuvable: {project_uuid}")}));
+            return Ok(
+                json!({"ok": false, "error": format!("projet introuvable: {project_uuid}")}),
+            );
         };
-        let deps: Vec<(String, String, Option<String>, Option<String>, String, String)> = sqlx::query_as(
+        let deps: Vec<(
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+            String,
+        )> = sqlx::query_as(
             r#"SELECT uuid, status, git_sha, git_message, created_at, environment
                FROM deployments
                WHERE project_id = $1
-               ORDER BY id DESC LIMIT 15"#
+               ORDER BY id DESC LIMIT 15"#,
         )
         .bind(p.id)
         .fetch_all(&self.pool)
         .await
         .unwrap_or_default();
-        let deployments: Vec<Value> = deps.into_iter().map(|(uuid, status, sha, msg, created, env)| {
-            json!({
-                "uuid": uuid,
-                "status": status,
-                "git_sha": sha,
-                "git_message": msg,
-                "created_at": created,
-                "environment": env,
+        let deployments: Vec<Value> = deps
+            .into_iter()
+            .map(|(uuid, status, sha, msg, created, env)| {
+                json!({
+                    "uuid": uuid,
+                    "status": status,
+                    "git_sha": sha,
+                    "git_message": msg,
+                    "created_at": created,
+                    "environment": env,
+                })
             })
-        }).collect();
-        Ok(json!({"ok": true, "project_uuid": project_uuid, "deployments": deployments, "count": deployments.len()}))
+            .collect();
+        Ok(
+            json!({"ok": true, "project_uuid": project_uuid, "deployments": deployments, "count": deployments.len()}),
+        )
     }
 
     async fn cancel_deployment(&self, deployment_uuid: &str) -> DfResult<Value> {
@@ -351,7 +365,6 @@ impl ProjectStore for SqliteProjectStore {
         _git_sha: Option<String>,
         message: &str,
     ) -> DfResult<Value> {
-
         // Récupérer le projet
         let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1")
             .bind(project_uuid)
@@ -367,13 +380,12 @@ impl ProjectStore for SqliteProjectStore {
         };
 
         // L'agent ne publie pas tout seul : accord humain (grant court) requis.
-        let grant: Option<(String,)> = sqlx::query_as(
-            "SELECT expires_at FROM project_publish_grants WHERE project_uuid = $1",
-        )
-        .bind(project_uuid)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let grant: Option<(String,)> =
+            sqlx::query_as("SELECT expires_at FROM project_publish_grants WHERE project_uuid = $1")
+                .bind(project_uuid)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
         let allowed = grant
             .as_ref()
             .map(|(exp,)| devforge_agent::guard::grant_still_valid(exp, chrono::Utc::now()))
@@ -450,14 +462,16 @@ impl ProjectStore for SqliteProjectStore {
             tokio::spawn(async move {
                 let project_uuid = project.uuid.clone();
                 crate::routes::finish_manual_deploy(&app, project, dep_uuid.clone(), None).await;
-                let dep = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = $1")
-                    .bind(&dep_uuid)
-                    .fetch_optional(&app.pool)
-                    .await
-                    .ok()
-                    .flatten();
+                let dep =
+                    sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = $1")
+                        .bind(&dep_uuid)
+                        .fetch_optional(&app.pool)
+                        .await
+                        .ok()
+                        .flatten();
                 if dep.as_ref().is_some_and(|d| d.status == "success") {
-                    let _ = crate::routes::wake_deploy_success(&app, &project_uuid, &dep_uuid).await;
+                    let _ =
+                        crate::routes::wake_deploy_success(&app, &project_uuid, &dep_uuid).await;
                 }
                 let _ = tx.send(dep);
             });
@@ -533,7 +547,7 @@ impl EnvStore for SqliteEnvStore {
             key,
             value,
             secret: secret != 0,
-                    preview_allowed: false,
+            preview_allowed: false,
         }))
     }
 
@@ -984,7 +998,6 @@ fn prefer_first<T>(rows: &mut Vec<T>, is_preferred: impl Fn(&T) -> bool) {
     }
 }
 
-
 /// Chaîne de la spec : modèles configurés qui savent appeler des outils.
 /// Ollama est listé dans les logs puis écarté, sans servir de repli.
 async fn resolve_spec_worker_provider(
@@ -992,7 +1005,17 @@ async fn resolve_spec_worker_provider(
     user_uuid: &str,
     preferred_id: &str,
 ) -> Option<(Arc<dyn devforge_llm::LlmProvider>, String)> {
-    let rows: Vec<(String, String, String, String, String, String, String, String, i64)> = sqlx::query_as(
+    let rows: Vec<(
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        i64,
+    )> = sqlx::query_as(
         r#"SELECT id, name, provider, api_key, base_url, model,
                   COALESCE(resolved_model, ''), COALESCE(catalog_id, ''), enabled
            FROM llm_providers
@@ -1006,7 +1029,15 @@ async fn resolve_spec_worker_provider(
 
     let brief: Vec<(&str, &str, &str, &str, bool)> = rows
         .iter()
-        .map(|r| (r.0.as_str(), r.1.as_str(), r.2.as_str(), r.7.as_str(), r.8 != 0))
+        .map(|r| {
+            (
+                r.0.as_str(),
+                r.1.as_str(),
+                r.2.as_str(),
+                r.7.as_str(),
+                r.8 != 0,
+            )
+        })
         .collect();
     let (order, skipped) = devforge_agent::sdd::choose_spec_providers(&brief, preferred_id);
     if !skipped.is_empty() {
@@ -1057,10 +1088,7 @@ async fn resolve_spec_worker_provider(
         let single = Arc::new(devforge_llm::ResilientLlmProvider::new(entries));
         return Some((single, label));
     }
-    let mode = devforge_agent::sdd::provider_label_for_user(&format!(
-        "chain:{}",
-        labels.join(">")
-    ));
+    let mode = devforge_agent::sdd::provider_label_for_user(&format!("chain:{}", labels.join(">")));
     let resilient = Arc::new(devforge_llm::ResilientLlmProvider::new(entries));
     Some((resilient, mode))
 }
@@ -1106,7 +1134,18 @@ async fn resolve_llm_provider(
     let rows: Vec<LlmProviderRow> = rows
         .into_iter()
         .map(
-            |(id, name, provider, key, base, model, healthy, last_probe_at, resolved_model, _catalog)| {
+            |(
+                id,
+                name,
+                provider,
+                key,
+                base,
+                model,
+                healthy,
+                last_probe_at,
+                resolved_model,
+                _catalog,
+            )| {
                 LlmProviderRow {
                     id,
                     name,
@@ -1203,7 +1242,10 @@ async fn resolve_llm_provider(
     if chain.len() == 1 {
         // Un seul modèle : nouveaux essais sur 429/5xx/timeout quand même (P1-09).
         let label = labels[0].clone();
-        return (Arc::new(devforge_llm::ResilientLlmProvider::new(chain)), label);
+        return (
+            Arc::new(devforge_llm::ResilientLlmProvider::new(chain)),
+            label,
+        );
     }
     if chain.len() > 1 {
         let mode = format!("chain:{}", labels.join(">"));

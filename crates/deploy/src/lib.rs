@@ -193,7 +193,6 @@ pub fn conflict_marker_message(exit_code: i32, output: &str) -> Option<String> {
     ))
 }
 
-
 #[derive(Debug, Clone, Serialize)]
 pub struct DeployResult {
     pub ok: bool,
@@ -725,10 +724,18 @@ impl DeployFacade {
         // Marqueurs de conflit Git commités (incident devforge-esp 11/10) : échec immédiat et
         // lisible plutôt qu'un build Docker qui plante loin dans les logs.
         if !cfg!(windows) {
-            if let Ok(r) = self.executor.exec(server, &workdir, CONFLICT_GREP_CMD, 60).await {
+            if let Ok(r) = self
+                .executor
+                .exec(server, &workdir, CONFLICT_GREP_CMD, 60)
+                .await
+            {
                 if let Some(msg) = conflict_marker_message(r.exit_code, &r.output) {
                     logs.push_str(&msg);
-                    return DeployResult { ok: false, git_sha: sha, logs };
+                    return DeployResult {
+                        ok: false,
+                        git_sha: sha,
+                        logs,
+                    };
                 }
             }
         }
@@ -836,129 +843,168 @@ impl DeployFacade {
             .await
         } else {
             match req.build_pack.as_str() {
-            "dockercompose" => {
-                if extras.gpu_nvidia || extras.gpu_dri || extras.group_network.is_some() {
-                    logs.push_str(
+                "dockercompose" => {
+                    if extras.gpu_nvidia || extras.gpu_dri || extras.group_network.is_some() {
+                        logs.push_str(
                         "[compose] GPU et réseau de groupe non appliqués (chemin docker compose)\n",
                     );
-                }
-                if !extras.volumes.is_empty() || !extras.runtime.sidecars.is_empty() {
-                    logs.push_str(
+                    }
+                    if !extras.volumes.is_empty() || !extras.runtime.sidecars.is_empty() {
+                        logs.push_str(
                         "[compose] montages, ports extra, sidecars et healthcheck du projet ne sont pas injectés — déclare-les dans le fichier compose\n",
                     );
-                }
-                let compose = req
-                    .docker_compose_location
-                    .as_deref()
-                    .unwrap_or("/docker-compose.yaml")
-                    .trim_start_matches('/');
-                let cmd = docker::docker_compose_up(compose);
-                match self.executor.exec(server, &build_dir, &cmd, 900).await {
-                    Ok(r) => {
-                        logs.push_str(&format!(
-                            "[compose] exit={} {}\n",
-                            r.exit_code,
-                            trim_out(&r.output)
-                        ));
-                        r.ok
                     }
-                    Err(e) => {
-                        logs.push_str(&format!("[compose] error: {e}\n"));
-                        false
+                    let compose = req
+                        .docker_compose_location
+                        .as_deref()
+                        .unwrap_or("/docker-compose.yaml")
+                        .trim_start_matches('/');
+                    let cmd = docker::docker_compose_up(compose);
+                    match self.executor.exec(server, &build_dir, &cmd, 900).await {
+                        Ok(r) => {
+                            logs.push_str(&format!(
+                                "[compose] exit={} {}\n",
+                                r.exit_code,
+                                trim_out(&r.output)
+                            ));
+                            r.ok
+                        }
+                        Err(e) => {
+                            logs.push_str(&format!("[compose] error: {e}\n"));
+                            false
+                        }
                     }
                 }
-            }
-            "static" => {
-                let pub_dir = req
-                    .publish_directory
-                    .as_deref()
-                    .unwrap_or("dist")
-                    .trim_start_matches('/');
-                let df = docker::static_inline_dockerfile(pub_dir);
-                let cmd = if cfg!(windows) {
-                    // Windows: prefer project Dockerfile if present; else inline via PS.
-                    if std::path::Path::new(&format!("{build_dir}/Dockerfile")).exists() {
-                        docker::docker_build(".", &image, "Dockerfile")
+                "static" => {
+                    let pub_dir = req
+                        .publish_directory
+                        .as_deref()
+                        .unwrap_or("dist")
+                        .trim_start_matches('/');
+                    let df = docker::static_inline_dockerfile(pub_dir);
+                    let cmd = if cfg!(windows) {
+                        // Windows: prefer project Dockerfile if present; else inline via PS.
+                        if std::path::Path::new(&format!("{build_dir}/Dockerfile")).exists() {
+                            docker::docker_build(".", &image, "Dockerfile")
+                        } else {
+                            docker::docker_build_from_content(&image, &df)
+                        }
                     } else {
                         docker::docker_build_from_content(&image, &df)
-                    }
-                } else {
-                    docker::docker_build_from_content(&image, &df)
-                };
-                match self.executor.exec(server, &build_dir, &cmd, 900).await {
-                    Ok(r) => {
-                        logs.push_str(&format!(
-                            "[static-build] exit={} {}\n",
-                            r.exit_code,
-                            trim_out(&r.output)
-                        ));
-                        if r.ok {
-                            self.docker_restart_container(
-                                server,
-                                &build_dir,
-                                &name,
-                                &image,
-                                port,
-                                80,
-                                req.proxy_labels.as_ref(),
-                                &mut logs,
-                                &extras,
-                            )
-                            .await
-                        } else {
-                            false
-                        }
-                    }
-                    Err(e) => {
-                        logs.push_str(&format!("[static-build] error: {e}\n"));
-                        false
-                    }
-                }
-            }
-            "dockerfile" => {
-                let explicit_df = req
-                    .dockerfile_path
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty());
-                let explicit_ctx = req
-                    .docker_build_context
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty());
-                let context_dir = resolve_repo_subdir(
-                    &workdir,
-                    explicit_ctx.unwrap_or(req.base_directory.trim()),
-                );
-                let (cmd, label, exec_cwd) = if explicit_df.is_some() || explicit_ctx.is_some() {
-                    let df_rel = match explicit_df {
-                        Some(p) => normalize_repo_rel(p),
-                        None => {
-                            // Dockerfile par defaut dans le contexte, chemin relatif a workdir
-                            let abs = format!("{context_dir}/Dockerfile");
-                            path_relative_to(&abs, &workdir)
-                        }
                     };
-                    let ctx_rel = path_relative_to(&context_dir, &workdir);
-                    let cmd = builders::dockerfile_image_build_cmd(&image, &df_rel, &ctx_rel);
-                    (
-                        cmd,
-                        format!("docker build -f {df_rel} {ctx_rel}"),
-                        workdir.clone(),
-                    )
-                } else {
-                    let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
-                    (cmd, label.to_string(), build_dir.clone())
-                };
-                logs.push_str(&format!("[dockerfile] {label}\n"));
-                match self.executor.exec(server, &exec_cwd, &cmd, 900).await {
-                    Ok(r) => {
-                        logs.push_str(&format!(
-                            "[docker-build] exit={} {}\n",
-                            r.exit_code,
-                            trim_out(&r.output)
-                        ));
-                        if r.ok {
+                    match self.executor.exec(server, &build_dir, &cmd, 900).await {
+                        Ok(r) => {
+                            logs.push_str(&format!(
+                                "[static-build] exit={} {}\n",
+                                r.exit_code,
+                                trim_out(&r.output)
+                            ));
+                            if r.ok {
+                                self.docker_restart_container(
+                                    server,
+                                    &build_dir,
+                                    &name,
+                                    &image,
+                                    port,
+                                    80,
+                                    req.proxy_labels.as_ref(),
+                                    &mut logs,
+                                    &extras,
+                                )
+                                .await
+                            } else {
+                                false
+                            }
+                        }
+                        Err(e) => {
+                            logs.push_str(&format!("[static-build] error: {e}\n"));
+                            false
+                        }
+                    }
+                }
+                "dockerfile" => {
+                    let explicit_df = req
+                        .dockerfile_path
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty());
+                    let explicit_ctx = req
+                        .docker_build_context
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty());
+                    let context_dir = resolve_repo_subdir(
+                        &workdir,
+                        explicit_ctx.unwrap_or(req.base_directory.trim()),
+                    );
+                    let (cmd, label, exec_cwd) = if explicit_df.is_some() || explicit_ctx.is_some()
+                    {
+                        let df_rel = match explicit_df {
+                            Some(p) => normalize_repo_rel(p),
+                            None => {
+                                // Dockerfile par defaut dans le contexte, chemin relatif a workdir
+                                let abs = format!("{context_dir}/Dockerfile");
+                                path_relative_to(&abs, &workdir)
+                            }
+                        };
+                        let ctx_rel = path_relative_to(&context_dir, &workdir);
+                        let cmd = builders::dockerfile_image_build_cmd(&image, &df_rel, &ctx_rel);
+                        (
+                            cmd,
+                            format!("docker build -f {df_rel} {ctx_rel}"),
+                            workdir.clone(),
+                        )
+                    } else {
+                        let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
+                        (cmd, label.to_string(), build_dir.clone())
+                    };
+                    logs.push_str(&format!("[dockerfile] {label}\n"));
+                    match self.executor.exec(server, &exec_cwd, &cmd, 900).await {
+                        Ok(r) => {
+                            logs.push_str(&format!(
+                                "[docker-build] exit={} {}\n",
+                                r.exit_code,
+                                trim_out(&r.output)
+                            ));
+                            if r.ok {
+                                self.docker_restart_container(
+                                    server,
+                                    &build_dir,
+                                    &name,
+                                    &image,
+                                    port,
+                                    port,
+                                    req.proxy_labels.as_ref(),
+                                    &mut logs,
+                                    &extras,
+                                )
+                                .await
+                            } else {
+                                false
+                            }
+                        }
+                        Err(e) => {
+                            logs.push_str(&format!("[docker-build] error: {e}\n"));
+                            false
+                        }
+                    }
+                }
+                // nixpacks (default) — Docker-first builder image, no host CLI
+                _ => {
+                    let build_envs = builders::collect_build_envs(req.env_file.as_deref());
+                    let nix = builders::nixpacks_docker_build(&image, &build_envs);
+                    logs.push_str(&format!(
+                        "[nixpacks-docker] image={} envs={}\n",
+                        builders::nixpacks_image(),
+                        build_envs
+                            .iter()
+                            .map(|(k, _)| k.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    ));
+                    match self.executor.exec(server, &build_dir, &nix, 1800).await {
+                        Ok(r) if r.ok => {
+                            logs.push_str(&format!("[nixpacks-docker] {}\n", trim_out(&r.output)));
                             self.docker_restart_container(
                                 server,
                                 &build_dir,
@@ -971,120 +1017,82 @@ impl DeployFacade {
                                 &extras,
                             )
                             .await
-                        } else {
-                            false
                         }
-                    }
-                    Err(e) => {
-                        logs.push_str(&format!("[docker-build] error: {e}\n"));
-                        false
-                    }
-                }
-            }
-            // nixpacks (default) — Docker-first builder image, no host CLI
-            _ => {
-                let build_envs = builders::collect_build_envs(req.env_file.as_deref());
-                let nix = builders::nixpacks_docker_build(&image, &build_envs);
-                logs.push_str(&format!(
-                    "[nixpacks-docker] image={} envs={}\n",
-                    builders::nixpacks_image(),
-                    build_envs
-                        .iter()
-                        .map(|(k, _)| k.as_str())
-                        .collect::<Vec<_>>()
-                        .join(",")
-                ));
-                match self.executor.exec(server, &build_dir, &nix, 1800).await {
-                    Ok(r) if r.ok => {
-                        logs.push_str(&format!("[nixpacks-docker] {}\n", trim_out(&r.output)));
-                        self.docker_restart_container(
-                            server,
-                            &build_dir,
-                            &name,
-                            &image,
-                            port,
-                            port,
-                            req.proxy_labels.as_ref(),
-                            &mut logs,
-                            &extras,
-                        )
-                        .await
-                    }
-                    Ok(r) => {
-                        logs.push_str(&format!(
-                            "[nixpacks-docker] exit={} {}\n",
-                            r.exit_code,
-                            trim_out(&r.output)
-                        ));
-                        let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
-                        logs.push_str(&format!("[fallback] {label}\n"));
-                        match self.executor.exec(server, &build_dir, &cmd, 900).await {
-                            Ok(r2) => {
-                                logs.push_str(&format!(
-                                    "[docker-build] exit={} {}\n",
-                                    r2.exit_code,
-                                    trim_out(&r2.output)
-                                ));
-                                if r2.ok {
-                                    self.docker_restart_container(
-                                        server,
-                                        &build_dir,
-                                        &name,
-                                        &image,
-                                        port,
-                                        port,
-                                        req.proxy_labels.as_ref(),
-                                        &mut logs,
-                                        &extras,
-                                    )
-                                    .await
-                                } else {
+                        Ok(r) => {
+                            logs.push_str(&format!(
+                                "[nixpacks-docker] exit={} {}\n",
+                                r.exit_code,
+                                trim_out(&r.output)
+                            ));
+                            let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
+                            logs.push_str(&format!("[fallback] {label}\n"));
+                            match self.executor.exec(server, &build_dir, &cmd, 900).await {
+                                Ok(r2) => {
+                                    logs.push_str(&format!(
+                                        "[docker-build] exit={} {}\n",
+                                        r2.exit_code,
+                                        trim_out(&r2.output)
+                                    ));
+                                    if r2.ok {
+                                        self.docker_restart_container(
+                                            server,
+                                            &build_dir,
+                                            &name,
+                                            &image,
+                                            port,
+                                            port,
+                                            req.proxy_labels.as_ref(),
+                                            &mut logs,
+                                            &extras,
+                                        )
+                                        .await
+                                    } else {
+                                        false
+                                    }
+                                }
+                                Err(e) => {
+                                    logs.push_str(&format!("[docker-build] error: {e}\n"));
                                     false
                                 }
                             }
-                            Err(e) => {
-                                logs.push_str(&format!("[docker-build] error: {e}\n"));
-                                false
-                            }
                         }
-                    }
-                    Err(e) => {
-                        logs.push_str(&format!("[nixpacks-docker] error: {e}\n"));
-                        let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
-                        logs.push_str(&format!("[fallback] {label}\n"));
-                        match self.executor.exec(server, &build_dir, &cmd, 900).await {
-                            Ok(r2) => {
-                                logs.push_str(&format!(
-                                    "[docker-build] exit={} {}\n",
-                                    r2.exit_code,
-                                    trim_out(&r2.output)
-                                ));
-                                if r2.ok {
-                                    self.docker_restart_container(
-                                        server,
-                                        &build_dir,
-                                        &name,
-                                        &image,
-                                        port,
-                                        port,
-                                        req.proxy_labels.as_ref(),
-                                        &mut logs,
-                                        &extras,
-                                    )
-                                    .await
-                                } else {
+                        Err(e) => {
+                            logs.push_str(&format!("[nixpacks-docker] error: {e}\n"));
+                            let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
+                            logs.push_str(&format!("[fallback] {label}\n"));
+                            match self.executor.exec(server, &build_dir, &cmd, 900).await {
+                                Ok(r2) => {
+                                    logs.push_str(&format!(
+                                        "[docker-build] exit={} {}\n",
+                                        r2.exit_code,
+                                        trim_out(&r2.output)
+                                    ));
+                                    if r2.ok {
+                                        self.docker_restart_container(
+                                            server,
+                                            &build_dir,
+                                            &name,
+                                            &image,
+                                            port,
+                                            port,
+                                            req.proxy_labels.as_ref(),
+                                            &mut logs,
+                                            &extras,
+                                        )
+                                        .await
+                                    } else {
+                                        false
+                                    }
+                                }
+                                Err(e2) => {
+                                    logs.push_str(&format!("[docker-build] error: {e2}\n"));
                                     false
                                 }
-                            }
-                            Err(e2) => {
-                                logs.push_str(&format!("[docker-build] error: {e2}\n"));
-                                false
                             }
                         }
                     }
                 }
             }
-        }
         };
 
         if !build_ok {
@@ -1113,7 +1121,11 @@ impl DeployFacade {
                 return Some(text);
             }
         }
-        match self.executor.exec(server, dir, "cat package.json", 20).await {
+        match self
+            .executor
+            .exec(server, dir, "cat package.json", 20)
+            .await
+        {
             Ok(r) if r.ok && !r.output.trim().is_empty() => Some(r.output),
             _ => None,
         }

@@ -12,6 +12,7 @@ import { AppIcon, statusDotClass } from './AppIcon';
 import { AppShell } from './AppShell';
 import { ProjectAgentsHub } from './ProjectAgentsHub';
 import { ProjectHome } from './ProjectHome';
+import { WakeLogPanel } from './WakeLogPanel';
 import { StatusBadge } from './StatusBadge';
 import { DeployLogSheet } from './DeployLogSheet';
 import { ProjectSpecsModal } from './ProjectSpecsModal';
@@ -4951,6 +4952,7 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
           </ul>
         )}
       </Modal>
+      <WakeLogPanel projectUuid={projectUuid} />
     </FadeIn>
   );
 }

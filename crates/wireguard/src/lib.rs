@@ -31,7 +31,8 @@ pub struct WgNetwork {
 #[async_trait]
 pub trait WireguardStore: Send + Sync {
     async fn list_networks(&self) -> Result<Vec<WgNetwork>>;
-    async fn create_network(&self, name: &str, subnet: &str, listen_port: u16) -> Result<WgNetwork>;
+    async fn create_network(&self, name: &str, subnet: &str, listen_port: u16)
+        -> Result<WgNetwork>;
     async fn add_peer(&self, network_id: &str, peer: WgPeer) -> Result<WgPeer>;
     async fn remove_peer(&self, network_id: &str, peer_id: &str) -> Result<bool>;
     async fn get_network(&self, network_id: &str) -> Result<Option<WgNetwork>>;
@@ -57,7 +58,12 @@ impl WireguardStore for MemoryWireguardStore {
         Ok(v)
     }
 
-    async fn create_network(&self, name: &str, subnet: &str, listen_port: u16) -> Result<WgNetwork> {
+    async fn create_network(
+        &self,
+        name: &str,
+        subnet: &str,
+        listen_port: u16,
+    ) -> Result<WgNetwork> {
         if name.trim().is_empty() {
             return Err(DevForgeError::Message("name requis".into()));
         }
@@ -179,7 +185,12 @@ impl WireguardFacade {
         Ok(json!({"ok": true, "networks": self.store.list_networks().await?}))
     }
 
-    pub async fn create(&self, name: &str, subnet: Option<&str>, listen_port: Option<u16>) -> Result<Value> {
+    pub async fn create(
+        &self,
+        name: &str,
+        subnet: Option<&str>,
+        listen_port: Option<u16>,
+    ) -> Result<Value> {
         let net = self
             .store
             .create_network(name, subnet.unwrap_or(""), listen_port.unwrap_or(51820))
@@ -233,9 +244,7 @@ impl WireguardFacade {
                 shell_escape(&net.interface)
             );
             let cmd = format!("{write}\n{up}");
-            let res = exec
-                .exec(&self.apply_server_id, "", &cmd, 120)
-                .await?;
+            let res = exec.exec(&self.apply_server_id, "", &cmd, 120).await?;
             for p in &net.peers {
                 self.store
                     .set_peer_status(network_id, &p.id, if res.ok { "active" } else { "failed" })

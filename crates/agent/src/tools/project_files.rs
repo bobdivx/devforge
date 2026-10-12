@@ -155,13 +155,12 @@ impl Tool for WriteProjectFileTool {
         }
 
         // Récupérer le projet
-        let project: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT uuid, workdir, git_repository FROM projects WHERE uuid = $1",
-        )
-        .bind(project_uuid)
-        .fetch_optional(self.pool.as_ref())
-        .await
-        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let project: Option<(String, Option<String>, Option<String>)> =
+            sqlx::query_as("SELECT uuid, workdir, git_repository FROM projects WHERE uuid = $1")
+                .bind(project_uuid)
+                .fetch_optional(self.pool.as_ref())
+                .await
+                .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
         let Some((uuid, workdir_opt, git_repo_opt)) = project else {
             return Ok(json!({
@@ -172,15 +171,8 @@ impl Tool for WriteProjectFileTool {
 
         match mode {
             "github" => {
-                self.write_via_github(
-                    &uuid,
-                    git_repo_opt,
-                    path,
-                    content,
-                    commit_message,
-                    branch,
-                )
-                .await
+                self.write_via_github(&uuid, git_repo_opt, path, content, commit_message, branch)
+                    .await
             }
             "local" | _ => self.write_local(&uuid, workdir_opt, path, content).await,
         }
@@ -276,10 +268,7 @@ impl WriteProjectFileTool {
         commit_message: Option<&str>,
         branch: &str,
     ) -> Result<Value> {
-        let git_repo = git_repo_opt
-            .as_deref()
-            .unwrap_or("")
-            .trim();
+        let git_repo = git_repo_opt.as_deref().unwrap_or("").trim();
 
         if git_repo.is_empty() {
             return Ok(json!({
@@ -506,8 +495,14 @@ impl Tool for ReadProjectFileTool {
             }));
         }
 
-        let offset = arguments.get("offset").and_then(|v| v.as_u64()).filter(|n| *n > 0);
-        let limit = arguments.get("limit").and_then(|v| v.as_u64()).filter(|n| *n > 0);
+        let offset = arguments
+            .get("offset")
+            .and_then(|v| v.as_u64())
+            .filter(|n| *n > 0);
+        let limit = arguments
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .filter(|n| *n > 0);
         if offset.is_some() || limit.is_some() {
             let full = String::from_utf8_lossy(&bytes).into_owned();
             return Ok(read_line_window(path, &full, offset, limit));
@@ -536,10 +531,18 @@ impl Tool for ReadProjectFileTool {
 }
 
 /// Extrait de lignes `[offset, offset+limit)` (offset à partir de 1).
-pub(crate) fn read_line_window(path: &str, full: &str, offset: Option<u64>, limit: Option<u64>) -> Value {
+pub(crate) fn read_line_window(
+    path: &str,
+    full: &str,
+    offset: Option<u64>,
+    limit: Option<u64>,
+) -> Value {
     let lines: Vec<&str> = full.lines().collect();
     let total = lines.len();
-    let start = offset.map(|o| (o as usize).saturating_sub(1)).unwrap_or(0).min(total);
+    let start = offset
+        .map(|o| (o as usize).saturating_sub(1))
+        .unwrap_or(0)
+        .min(total);
     let count = limit.map(|l| l as usize).unwrap_or(400).min(2_000);
     let end = (start + count).min(total);
     let content = lines[start..end].join("\n");
@@ -739,7 +742,10 @@ pub(crate) fn line_diff_stats(path: &str, old: &str, new: &str) -> (usize, usize
             out.push('\n');
         }
         if a.len() > show_old {
-            out.push_str(&format!("… {} lignes retirées non affichées\n", a.len() - show_old));
+            out.push_str(&format!(
+                "… {} lignes retirées non affichées\n",
+                a.len() - show_old
+            ));
         }
         for line in b.iter().take(show_new) {
             out.push('+');
@@ -747,7 +753,10 @@ pub(crate) fn line_diff_stats(path: &str, old: &str, new: &str) -> (usize, usize
             out.push('\n');
         }
         if b.len() > show_new {
-            out.push_str(&format!("… {} lignes ajoutées non affichées\n", b.len() - show_new));
+            out.push_str(&format!(
+                "… {} lignes ajoutées non affichées\n",
+                b.len() - show_new
+            ));
         }
         return (b.len(), a.len(), out);
     }

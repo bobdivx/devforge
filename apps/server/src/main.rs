@@ -6,6 +6,7 @@
 mod acme_routes;
 mod actions_routes;
 mod agent_runs;
+mod android_routes;
 mod auth_routes;
 mod auto_deploy;
 mod auto_deploy_guard;
@@ -29,12 +30,10 @@ mod group_routes;
 mod infra_routes;
 mod infra_sqlite;
 mod llm_routes;
-mod android_routes;
 mod mcp_oauth;
-mod mobile_routes;
 mod mcp_routes;
 mod memory_routes;
-mod rich_chat;
+mod mobile_routes;
 mod paths;
 mod platform_sso;
 #[cfg(test)]
@@ -44,6 +43,7 @@ mod project_oidc;
 mod project_oidc_routes;
 mod project_pg;
 mod project_pg_routes;
+mod rich_chat;
 mod routes;
 mod run_events;
 mod run_routes;
@@ -59,6 +59,7 @@ mod tray;
 mod update_routes;
 mod user_prefs;
 mod wake_causes;
+mod wake_gate;
 mod worker;
 
 use axum::{middleware, routing::get, Json, Router};
@@ -342,6 +343,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(memory_routes::router())
         .merge(run_routes::router())
         .merge(rich_chat::router())
+        .merge(wake_gate::router())
         .merge(backup_routes::router())
         .merge(sso_routes::router())
         .merge(acme_routes::router())

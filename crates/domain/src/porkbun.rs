@@ -84,9 +84,7 @@ pub fn normalize_zone(zone: &str) -> String {
 }
 
 pub fn normalize_fqdn(fqdn: &str) -> String {
-    fqdn.trim()
-        .trim_end_matches('.')
-        .to_lowercase()
+    fqdn.trim().trim_end_matches('.').to_lowercase()
 }
 
 /// Sous-domaine Porkbun (`app`, `*`, `""` pour l’apex).
@@ -102,9 +100,7 @@ pub fn split_host(fqdn: &str, zone: &str) -> Result<String> {
     let suffix = format!(".{zone}");
     fqdn.strip_suffix(&suffix)
         .map(|s| s.to_string())
-        .ok_or_else(|| {
-            DevForgeError::Message(format!("{fqdn} n’appartient pas à la zone {zone}"))
-        })
+        .ok_or_else(|| DevForgeError::Message(format!("{fqdn} n’appartient pas à la zone {zone}")))
 }
 
 pub fn record_kind(content: &str) -> &'static str {
@@ -140,9 +136,7 @@ async fn post_once(base: &str, path: &str, body: &Value) -> Result<PorkbunStatus
         credentials_valid: None,
     });
     if !status.is_success() || parsed.status != "SUCCESS" {
-        let msg = parsed
-            .message
-            .unwrap_or_else(|| format!("HTTP {status}"));
+        let msg = parsed.message.unwrap_or_else(|| format!("HTTP {status}"));
         return Err(DevForgeError::Message(format!("Porkbun: {msg}")));
     }
     Ok(parsed)
@@ -202,7 +196,10 @@ pub async fn upsert_record(creds: &PorkbunCreds, fqdn: &str, content: &str) -> R
     for kind in ["A", "AAAA", "CNAME"] {
         let listed = retrieve(creds, &zone, kind, &name).await?;
         if kind == want {
-            if listed.iter().any(|r| r.content.trim_end_matches('.') == content) {
+            if listed
+                .iter()
+                .any(|r| r.content.trim_end_matches('.') == content)
+            {
                 return Ok(());
             }
             if !listed.is_empty() {
@@ -252,7 +249,13 @@ async fn retrieve(
     }
 }
 
-async fn create(creds: &PorkbunCreds, zone: &str, kind: &str, name: &str, content: &str) -> Result<()> {
+async fn create(
+    creds: &PorkbunCreds,
+    zone: &str,
+    kind: &str,
+    name: &str,
+    content: &str,
+) -> Result<()> {
     let mut body = auth_body(creds);
     body["type"] = json!(kind);
     body["content"] = json!(content);
@@ -262,7 +265,13 @@ async fn create(creds: &PorkbunCreds, zone: &str, kind: &str, name: &str, conten
     Ok(())
 }
 
-async fn edit(creds: &PorkbunCreds, zone: &str, kind: &str, name: &str, content: &str) -> Result<()> {
+async fn edit(
+    creds: &PorkbunCreds,
+    zone: &str,
+    kind: &str,
+    name: &str,
+    content: &str,
+) -> Result<()> {
     let path = if name.is_empty() {
         format!("/dns/editByNameType/{zone}/{kind}")
     } else {

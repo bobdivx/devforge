@@ -123,15 +123,15 @@ impl ProxyFacade {
     }
 
     /// Ensure the Traefik reverse proxy container exists and is running.
-    /// 
+    ///
     /// This is the durable fix for production outages where the Traefik container
     /// was silently deleted, leaving apps unreachable despite being healthy.
-    /// 
+    ///
     /// ## Behavior:
     /// - If missing: creates the container with production config
     /// - If stopped: starts it
     /// - If running: returns immediately (no-op)
-    /// 
+    ///
     /// ## Container configuration:
     /// - Image: traefik:v3.6
     /// - Name: devforge-traefik
@@ -151,9 +151,10 @@ impl ProxyFacade {
     }
 
     pub async fn ensure_traefik_on(&self, server_id: &str) -> Result<Value> {
-        let executor = self.executor.as_ref().ok_or_else(|| {
-            DevForgeError::Message("executor required for ensure_traefik".into())
-        })?;
+        let executor = self
+            .executor
+            .as_ref()
+            .ok_or_else(|| DevForgeError::Message("executor required for ensure_traefik".into()))?;
         let server_id = if server_id.trim().is_empty() {
             "default"
         } else {
@@ -189,10 +190,7 @@ impl ProxyFacade {
                 } else {
                     String::new()
                 };
-                if !expected.is_empty()
-                    && !actual.is_empty()
-                    && actual != expected
-                {
+                if !expected.is_empty() && !actual.is_empty() && actual != expected {
                     eprintln!(
                         "[ensure_traefik] volume /traefik incorrect ({actual} ≠ {expected}) — recreation"
                     );
@@ -209,7 +207,11 @@ impl ProxyFacade {
                     // Dérive de configuration (email ACME, relance, timeouts…) : remplacement
                     // sûr — l’ancien proxy est restauré si le nouveau ne démarre pas.
                     let acme = docker::acme_email();
-                    let want = docker::traefik_config_hash(TRAEFIK_IMAGE, TRAEFIK_NETWORK, acme.as_deref());
+                    let want = docker::traefik_config_hash(
+                        TRAEFIK_IMAGE,
+                        TRAEFIK_NETWORK,
+                        acme.as_deref(),
+                    );
                     let label_cmd = format!(
                         r#"docker inspect {TRAEFIK_CONTAINER_NAME} --format '{{{{index .Config.Labels "{}"}}}}' 2>/dev/null || true"#,
                         docker::TRAEFIK_CONFIG_LABEL
@@ -360,11 +362,19 @@ impl ProxyFacade {
 
         let mut create_res = executor.exec(server_id, "", &create_cmd, 60).await?;
         if !create_res.ok
-            && create_res.output.to_ascii_lowercase().contains("port is already allocated")
+            && create_res
+                .output
+                .to_ascii_lowercase()
+                .contains("port is already allocated")
         {
             eprintln!("[ensure_traefik] 80/443 hôte pris — recréation sans publication (tunnel → devforge-traefik:80)");
             let _ = executor
-                .exec(server_id, "", &format!("docker rm -f {TRAEFIK_CONTAINER_NAME}"), 30)
+                .exec(
+                    server_id,
+                    "",
+                    &format!("docker rm -f {TRAEFIK_CONTAINER_NAME}"),
+                    30,
+                )
                 .await;
             let fallback = docker::traefik_run_command(
                 TRAEFIK_CONTAINER_NAME,
@@ -396,7 +406,6 @@ impl ProxyFacade {
         }
     }
 
-
     /// 80/443 hôte libres ? ZimaOS gateway les tient : publier alors laisse Traefik en Created.
     async fn host_ports_available(
         &self,
@@ -412,9 +421,10 @@ impl ProxyFacade {
 
     /// cloudflared sur le réseau `devforge` → http://devforge-traefik:80 (pas le :80 hôte).
     pub async fn ensure_cloudflared(&self, server_id: &str, tunnel_token: &str) -> Result<Value> {
-        let executor = self.executor.as_ref().ok_or_else(|| {
-            DevForgeError::Message("executor required for cloudflared".into())
-        })?;
+        let executor = self
+            .executor
+            .as_ref()
+            .ok_or_else(|| DevForgeError::Message("executor required for cloudflared".into()))?;
         let server_id = if server_id.trim().is_empty() {
             "default"
         } else {
@@ -422,7 +432,9 @@ impl ProxyFacade {
         };
         let token = tunnel_token.trim();
         if token.is_empty() {
-            return Err(DevForgeError::Message("token tunnel Cloudflare vide".into()));
+            return Err(DevForgeError::Message(
+                "token tunnel Cloudflare vide".into(),
+            ));
         }
         let mark: String = token.chars().rev().take(12).collect();
         let name = "devforge-cloudflared";
@@ -451,7 +463,12 @@ impl ProxyFacade {
             return Ok(json!({"ok": true, "status": "already_running", "container": name}));
         }
         let _ = executor
-            .exec(server_id, "", &format!("docker rm -f {name} 2>/dev/null || true"), 20)
+            .exec(
+                server_id,
+                "",
+                &format!("docker rm -f {name} 2>/dev/null || true"),
+                20,
+            )
             .await;
         let _ = executor
             .exec(
@@ -484,11 +501,11 @@ impl ProxyFacade {
     }
 
     /// Resolve the host filesystem path for Traefik data volume.
-    /// 
+    ///
     /// When DevForge runs inside Docker with a bind mount (e.g. `/DATA/AppData/devforge:/data`),
     /// the `docker run` command executed via mounted docker.sock needs the **host** path,
     /// not the container path.
-    /// 
+    ///
     /// Strategy:
     /// 1. Check explicit env override `DEVFORGE_TRAEFIK_HOST_DIR`
     /// 2. Inspect running DevForge container's mounts where Destination matches `DEVFORGE_DATA_DIR`
@@ -524,7 +541,7 @@ impl ProxyFacade {
 
         // 2. Detect if running in container and find bind mount
         let container_data_dir = &self.traefik_data_dir;
-        
+
         // Try to find DevForge's own container name
         let self_container = std::env::var("DEVFORGE_SELF_CONTAINER")
             .or_else(|_| std::env::var("HOSTNAME"))
@@ -535,8 +552,10 @@ impl ProxyFacade {
             r#"docker inspect --format '{{{{json .Mounts}}}}' {} 2>/dev/null || echo '[]'"#,
             shell_escape(&self_container)
         );
-        let inspect_res = executor.exec(&self.apply_server_id, "", &inspect_cmd, 30).await?;
-        
+        let inspect_res = executor
+            .exec(&self.apply_server_id, "", &inspect_cmd, 30)
+            .await?;
+
         if inspect_res.ok {
             if let Ok(mounts) = serde_json::from_str::<Value>(&inspect_res.output) {
                 if let Some(arr) = mounts.as_array() {
@@ -546,12 +565,13 @@ impl ProxyFacade {
                         if typ != "bind" {
                             continue;
                         }
-                        let dest = mount.get("Destination")
+                        let dest = mount
+                            .get("Destination")
                             .or_else(|| mount.get("Target"))
                             .and_then(|d| d.as_str())
                             .unwrap_or("");
                         let src = mount.get("Source").and_then(|s| s.as_str()).unwrap_or("");
-                        
+
                         if src.is_empty() {
                             continue;
                         }
@@ -607,11 +627,11 @@ impl ProxyFacade {
     ) -> Result<Value> {
         let routes = self.store.list(project_uuid).await?;
         let container = format!("df-{}", project_uuid.chars().take(12).collect::<String>());
-        
+
         // Conflict guard : vérifier chaque Host avant de l'appliquer
         let mut safe_routes = Vec::new();
         let mut conflicts = Vec::new();
-        
+
         if let Some(exec) = &self.executor {
             for route in &routes {
                 let check_cmd = docker::docker_check_host_conflicts(&route.host);
@@ -646,7 +666,7 @@ impl ProxyFacade {
             // Pas d'executor → pas de vérification, on garde tout (mode génération labels seulement)
             safe_routes = routes.clone();
         }
-        
+
         // Générer les labels uniquement pour les routes sûres
         let mut labels = serde_json::Map::new();
         labels.insert("traefik.enable".into(), json!("true"));
@@ -710,9 +730,7 @@ impl ProxyFacade {
                 }
             }
             let cmd = docker::docker_recreate_with_labels(&container, &labels_val);
-            let res = exec
-                .exec(&self.apply_server_id, "", &cmd, 120)
-                .await?;
+            let res = exec.exec(&self.apply_server_id, "", &cmd, 120).await?;
             return Ok(json!({
                 "ok": res.ok,
                 "project_uuid": project_uuid,
@@ -750,10 +768,13 @@ fn shell_escape(s: &str) -> String {
     }
 }
 
-
 /// Chemin hôte pour le volume Traefik (`…/proxy`) à partir du bind mount data.
 /// Exposé pour les tests : ZimaOS monte `/DATA/AppData/devforge:/data`.
-fn host_proxy_from_data_bind(source: &str, destination: &str, container_data_dir: &str) -> Option<String> {
+fn host_proxy_from_data_bind(
+    source: &str,
+    destination: &str,
+    container_data_dir: &str,
+) -> Option<String> {
     let dest = destination.trim_end_matches('/');
     let data = container_data_dir.trim_end_matches('/');
     if dest == "/data" || dest == data {
@@ -802,7 +823,9 @@ mod tests {
     }
 
     use super::*;
-    use devforge_deploy::docker::{traefik_labels, traefik_labels_for_routes, docker_check_host_conflicts};
+    use devforge_deploy::docker::{
+        docker_check_host_conflicts, traefik_labels, traefik_labels_for_routes,
+    };
     use serde_json::json;
 
     #[test]
@@ -824,7 +847,8 @@ mod tests {
             Some("/DATA/AppData/devforge/data/proxy")
         );
         assert_eq!(
-            host_proxy_from_data_bind("/opt/other", "/var/lib/devforge", "/var/lib/devforge").as_deref(),
+            host_proxy_from_data_bind("/opt/other", "/var/lib/devforge", "/var/lib/devforge")
+                .as_deref(),
             Some("/opt/other/proxy")
         );
         assert_eq!(host_proxy_from_data_bind("/x", "/not-data", "/data"), None);
@@ -834,9 +858,9 @@ mod tests {
     fn conflict_guard_filters_conflicting_hosts() {
         // Test que le conflict guard filtre bien les Hosts déjà revendiqués
         // Note: ce test vérifie la logique, pas l'exécution Docker réelle
-        
+
         let cmd = docker_check_host_conflicts("starbasefr.jeser.app");
-        
+
         // Vérifier que la commande est bien formée
         assert!(cmd.contains("docker ps -q"));
         // Les backticks dans Host(...) peuvent être échappés ou entre quotes
@@ -848,18 +872,20 @@ mod tests {
     fn preview_labels_dont_include_production_fqdns() {
         // Regression test : les labels pour conteneurs df-* ne doivent contenir
         // QUE l'URL preview, pas les FQDNs production comme starbasefr.jeser.app
-        
+
         let preview_host = "dev-abc12345.devforge.local";
         let labels = traefik_labels("abc12345-ef01", preview_host, "/", 3000, None);
-        
+
         // Vérifier présence hôte atelier
-        let preview_router = format!("traefik.http.routers.http-df-abc12345-{}.rule", 
-            preview_host.replace('.', "-"));
+        let preview_router = format!(
+            "traefik.http.routers.http-df-abc12345-{}.rule",
+            preview_host.replace('.', "-")
+        );
         assert!(
             labels.get(&preview_router).is_some(),
             "Host dev- doit avoir un router"
         );
-        
+
         // Vérifier absence production (starbasefr ou autre)
         for (key, _) in labels.as_object().unwrap() {
             if key.contains(".rule") {
@@ -959,34 +985,28 @@ mod tests {
 
     #[test]
     fn docker_recreate_with_traefik_host_labels_shell_valid() {
-        let labels = traefik_labels(
-            "fbb6a152-ef01",
-            "starbasefr.jeser.app",
-            "/",
-            4321,
-            None,
-        );
+        let labels = traefik_labels("fbb6a152-ef01", "starbasefr.jeser.app", "/", 4321, None);
         let cmd = docker::docker_recreate_with_labels("df-fbb6a152-ef0", &labels);
-        
+
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join("test_recreate_labels.sh");
         std::fs::write(&script_path, &cmd).expect("failed to write test script");
-        
+
         let output = std::process::Command::new("sh")
             .arg("-n")
             .arg(&script_path)
             .output()
             .expect("failed to run sh -n");
-        
+
         std::fs::remove_file(&script_path).ok();
-        
+
         assert!(
             output.status.success(),
             "Generated shell script has syntax errors:\n{}\n\nScript:\n{}",
             String::from_utf8_lossy(&output.stderr),
             cmd
         );
-        
+
         assert!(cmd.contains("starbasefr.jeser.app"));
         assert!(cmd.contains("4321"));
     }
@@ -1002,26 +1022,26 @@ mod tests {
             None,
         );
         let cmd = docker::docker_recreate_with_labels("df-fbb6a152-ef0", &labels);
-        
+
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join("test_recreate_multi_labels.sh");
         std::fs::write(&script_path, &cmd).expect("failed to write test script");
-        
+
         let output = std::process::Command::new("sh")
             .arg("-n")
             .arg(&script_path)
             .output()
             .expect("failed to run sh -n");
-        
+
         std::fs::remove_file(&script_path).ok();
-        
+
         assert!(
             output.status.success(),
             "Multi-host script has syntax errors:\n{}\n\nScript:\n{}",
             String::from_utf8_lossy(&output.stderr),
             cmd
         );
-        
+
         assert!(cmd.contains("starbasefr.jeser.app"));
         assert!(cmd.contains("starbasefr.com"));
     }
@@ -1036,26 +1056,26 @@ mod tests {
             Some("http://oauth2-proxy:4180/auth"),
         );
         let cmd = docker::docker_recreate_with_labels("df-secure", &labels);
-        
+
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join("test_recreate_sso_labels.sh");
         std::fs::write(&script_path, &cmd).expect("failed to write test script");
-        
+
         let output = std::process::Command::new("sh")
             .arg("-n")
             .arg(&script_path)
             .output()
             .expect("failed to run sh -n");
-        
+
         std::fs::remove_file(&script_path).ok();
-        
+
         assert!(
             output.status.success(),
             "SSO middleware script has syntax errors:\n{}\n\nScript:\n{}",
             String::from_utf8_lossy(&output.stderr),
             cmd
         );
-        
+
         assert!(cmd.contains("forwardauth.address"));
     }
 }

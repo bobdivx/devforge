@@ -50,7 +50,13 @@ pub const ALL_TOOLS: &[&str] = &[
 /// Toujours disponibles : lecture du fil et mémoire durable. Les rôles de surveillance
 /// (runner / actions / crons) n'écrivent qu'en journal et n'oublient rien : règle appliquée
 /// dans l'outil (`tools/memory.rs`), les sous-agents n'écrivent en portée user qu'en journal.
-pub const ALWAYS: &[&str] = &["list_agent_messages", "memory_search", "memory_write", "memory_forget", "ask_user"];
+pub const ALWAYS: &[&str] = &[
+    "list_agent_messages",
+    "memory_search",
+    "memory_write",
+    "memory_forget",
+    "ask_user",
+];
 
 const WORKER: &[&str] = &[
     // workdir
@@ -126,7 +132,13 @@ const REVIEWER: &[&str] = &[
     "read_github_file",
 ];
 
-const WATCHER: &[&str] = &["get_project", "github_workflow_runs", "github_list_prs", "http_smoke", "list_routines"];
+const WATCHER: &[&str] = &[
+    "get_project",
+    "github_workflow_runs",
+    "github_list_prs",
+    "http_smoke",
+    "list_routines",
+];
 
 /// Liste des outils autorisés pour un rôle. `None` = tous (coordinateur, rôle inconnu absent).
 pub fn tools_for_role(role: &str, kind: Option<&str>) -> Option<&'static [&'static str]> {
@@ -190,20 +202,52 @@ mod tests {
 
     #[test]
     fn coordinator_gets_everything_but_security_review_on_demand() {
-        assert!(role_allows("coordinator", None, "write_project_file", false));
-        assert!(!role_allows("coordinator", None, "review_project_security", false));
-        assert!(role_allows("coordinator", None, "review_project_security", true));
+        assert!(role_allows(
+            "coordinator",
+            None,
+            "write_project_file",
+            false
+        ));
+        assert!(!role_allows(
+            "coordinator",
+            None,
+            "review_project_security",
+            false
+        ));
+        assert!(role_allows(
+            "coordinator",
+            None,
+            "review_project_security",
+            true
+        ));
     }
 
     #[test]
     fn subagent_kind_is_a_worker() {
-        assert!(role_allows("custom", Some("subagent"), "write_project_file", false));
-        assert!(!role_allows("deploy", Some("subagent"), "upsert_env_var", false));
+        assert!(role_allows(
+            "custom",
+            Some("subagent"),
+            "write_project_file",
+            false
+        ));
+        assert!(!role_allows(
+            "deploy",
+            Some("subagent"),
+            "upsert_env_var",
+            false
+        ));
     }
 
     #[test]
     fn ask_user_everywhere_but_background_workers() {
-        for role in ["coordinator", "ops", "deploy", "reviewer", "custom", "runner"] {
+        for role in [
+            "coordinator",
+            "ops",
+            "deploy",
+            "reviewer",
+            "custom",
+            "runner",
+        ] {
             assert!(role_allows(role, None, "ask_user", false), "{role}");
         }
         assert!(!role_allows("custom", Some("subagent"), "ask_user", false));

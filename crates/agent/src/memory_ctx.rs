@@ -8,7 +8,9 @@ const RECALL_DAYS: i64 = 90;
 const RECALL_LIMIT: usize = 5;
 
 fn log_prompt() -> bool {
-    std::env::var("DEVFORGE_LOG_PROMPT").map(|v| v == "1").unwrap_or(false)
+    std::env::var("DEVFORGE_LOG_PROMPT")
+        .map(|v| v == "1")
+        .unwrap_or(false)
 }
 
 /// Portées lisibles par ce fil.

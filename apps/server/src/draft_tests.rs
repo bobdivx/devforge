@@ -6,11 +6,24 @@ fn sh(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .arg("-C")
         .arg(dir)
-        .args(["-c", "user.name=T", "-c", "user.email=t@t", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"])
+        .args([
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "init.defaultBranch=main",
+            "-c",
+            "commit.gpgsign=false",
+        ])
         .args(args)
         .output()
         .unwrap();
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).to_string()
 }
 
@@ -27,7 +40,11 @@ impl Drop for Fx {
 }
 
 fn fixture(name: &str) -> Fx {
-    let root = std::env::temp_dir().join(format!("df-draft-{name}-{}-{}", std::process::id(), chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)));
+    let root = std::env::temp_dir().join(format!(
+        "df-draft-{name}-{}-{}",
+        std::process::id(),
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    ));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let remote = root.join("remote.git");
@@ -44,12 +61,25 @@ fn fixture(name: &str) -> Fx {
     sh(&seed, &["commit", "-qm", "init"]);
     sh(&seed, &["branch", "-M", "main"]);
     sh(&seed, &["push", "-q", remote.to_str().unwrap(), "main"]);
-    sh(&root, &["clone", "-q", "-b", "main", remote.to_str().unwrap(), wd.to_str().unwrap()]);
+    sh(
+        &root,
+        &[
+            "clone",
+            "-q",
+            "-b",
+            "main",
+            remote.to_str().unwrap(),
+            wd.to_str().unwrap(),
+        ],
+    );
     Fx { root, remote, wd }
 }
 
 fn paths(st: &DraftStatus) -> Vec<(String, String)> {
-    st.files.iter().map(|f| (f.path.clone(), f.status.clone())).collect()
+    st.files
+        .iter()
+        .map(|f| (f.path.clone(), f.status.clone()))
+        .collect()
 }
 
 #[test]
@@ -69,7 +99,13 @@ fn junk_rules() {
     ] {
         assert!(is_junk(j), "{j} devrait être ignoré");
     }
-    for ok in ["src/app.tsx", "package-lock.json", ".env.example", "public/og-image.png", "docs/build.md"] {
+    for ok in [
+        "src/app.tsx",
+        "package-lock.json",
+        ".env.example",
+        "public/og-image.png",
+        "docs/build.md",
+    ] {
         assert!(!is_junk(ok), "{ok} ne devrait pas être ignoré");
     }
 }
@@ -135,7 +171,10 @@ fn diff_includes_untracked_files_as_added() {
     std::fs::write(fx.wd.join("src/new.ts"), "line1\nline2\n").unwrap();
     std::fs::write(fx.wd.join("README.md"), "hello\nworld\n").unwrap();
     let files = diff(&fx.wd, "main", None).unwrap();
-    let new = files.iter().find(|f| f["path"] == "src/new.ts").expect("nouveau fichier présent");
+    let new = files
+        .iter()
+        .find(|f| f["path"] == "src/new.ts")
+        .expect("nouveau fichier présent");
     assert_eq!(new["status"], "added");
     assert_eq!(new["additions"], 2);
     assert!(new["patch"].as_str().unwrap().contains("+line2"));
@@ -159,7 +198,12 @@ fn validate_pushes_text_and_binary_but_not_junk() {
     let tree = sh(&fx.remote, &["ls-tree", "-r", "--name-only", "main"]);
     assert!(tree.contains("public/og-image.png"));
     assert!(!tree.contains(".devforge-npm-stamp") && !tree.contains(".env"));
-    let blob = Command::new("git").arg("-C").arg(&fx.remote).args(["show", "main:public/og-image.png"]).output().unwrap();
+    let blob = Command::new("git")
+        .arg("-C")
+        .arg(&fx.remote)
+        .args(["show", "main:public/og-image.png"])
+        .output()
+        .unwrap();
     assert_eq!(blob.stdout, png);
     let log = sh(&fx.remote, &["log", "-1", "--format=%an|%s", "main"]);
     assert_eq!(log.trim(), "Mathieu|feat: og image");
@@ -176,7 +220,15 @@ fn validate_pushes_text_and_binary_but_not_junk() {
 fn validate_refuses_when_github_moved() {
     let fx = fixture("behind");
     let other = fx.root.join("other");
-    sh(&fx.root, &["clone", "-q", fx.remote.to_str().unwrap(), other.to_str().unwrap()]);
+    sh(
+        &fx.root,
+        &[
+            "clone",
+            "-q",
+            fx.remote.to_str().unwrap(),
+            other.to_str().unwrap(),
+        ],
+    );
     std::fs::write(other.join("CHANGELOG.md"), "x\n").unwrap();
     sh(&other, &["add", "-A"]);
     sh(&other, &["commit", "-qm", "remote change"]);
@@ -189,7 +241,10 @@ fn validate_refuses_when_github_moved() {
     let u = update_from_github(&fx.wd, "main", Some(&url), ("a", "b")).unwrap();
     assert_eq!(u.merged, 1);
     assert!(fx.wd.join("CHANGELOG.md").is_file());
-    assert_eq!(std::fs::read_to_string(fx.wd.join("README.md")).unwrap(), "local\n");
+    assert_eq!(
+        std::fs::read_to_string(fx.wd.join("README.md")).unwrap(),
+        "local\n"
+    );
     assert!(validate(&fx.wd, "main", &url, "local", ("a", "b")).is_ok());
 }
 
@@ -197,7 +252,15 @@ fn validate_refuses_when_github_moved() {
 fn update_refuses_on_overlap() {
     let fx = fixture("overlap");
     let other = fx.root.join("other");
-    sh(&fx.root, &["clone", "-q", fx.remote.to_str().unwrap(), other.to_str().unwrap()]);
+    sh(
+        &fx.root,
+        &[
+            "clone",
+            "-q",
+            fx.remote.to_str().unwrap(),
+            other.to_str().unwrap(),
+        ],
+    );
     std::fs::write(other.join("README.md"), "remote\n").unwrap();
     sh(&other, &["commit", "-qam", "remote readme"]);
     sh(&other, &["push", "-q", "origin", "main"]);
@@ -205,7 +268,10 @@ fn update_refuses_on_overlap() {
     let url = fx.remote.to_str().unwrap().to_string();
     let e = update_from_github(&fx.wd, "main", Some(&url), ("a", "b")).unwrap_err();
     assert!(e.0.contains("README.md"), "{}", e.0);
-    assert_eq!(std::fs::read_to_string(fx.wd.join("README.md")).unwrap(), "local\n");
+    assert_eq!(
+        std::fs::read_to_string(fx.wd.join("README.md")).unwrap(),
+        "local\n"
+    );
 }
 
 #[test]
@@ -222,16 +288,28 @@ fn discard_backs_up_keeps_deps_and_restores() {
     let b = backup(&fx.wd, &backups, &st.files, "discard").unwrap();
     discard(&fx.wd, "main", None).unwrap();
     assert!(!status(&fx.wd, "main", None).dirty);
-    assert_eq!(std::fs::read_to_string(fx.wd.join("README.md")).unwrap(), "hello\n");
+    assert_eq!(
+        std::fs::read_to_string(fx.wd.join("README.md")).unwrap(),
+        "hello\n"
+    );
     assert!(!fx.wd.join("src/new.ts").exists());
     assert!(fx.wd.join("package-lock.json").is_file());
-    assert!(fx.wd.join("node_modules/x/i.js").is_file(), "dépendances gardées");
-    assert!(fx.wd.join(".devforge-npm-stamp").is_file(), "fichiers internes gardés");
+    assert!(
+        fx.wd.join("node_modules/x/i.js").is_file(),
+        "dépendances gardées"
+    );
+    assert!(
+        fx.wd.join(".devforge-npm-stamp").is_file(),
+        "fichiers internes gardés"
+    );
     assert_eq!(list_backups(&backups).len(), 1);
     restore(&fx.wd, &backups, &b.id).unwrap();
     let back = status(&fx.wd, "main", None);
     assert_eq!(paths(&back), paths(&st));
-    assert_eq!(std::fs::read_to_string(fx.wd.join("README.md")).unwrap(), "changed\n");
+    assert_eq!(
+        std::fs::read_to_string(fx.wd.join("README.md")).unwrap(),
+        "changed\n"
+    );
     assert!(list_backups(&backups).is_empty(), "sauvegarde consommée");
     assert!(restore(&fx.wd, &backups, "../etc").is_err());
 }
@@ -245,7 +323,11 @@ fn old_backups_expire() {
     let b = backup(&fx.wd, &backups, &st.files, "discard").unwrap();
     let mut old = b.clone();
     old.created_at = (chrono::Utc::now() - chrono::Duration::days(8)).to_rfc3339();
-    std::fs::write(backups.join(&b.id).join("manifest.json"), serde_json::to_vec(&old).unwrap()).unwrap();
+    std::fs::write(
+        backups.join(&b.id).join("manifest.json"),
+        serde_json::to_vec(&old).unwrap(),
+    )
+    .unwrap();
     assert!(list_backups(&backups).is_empty());
     assert!(!backups.join(&b.id).exists());
 }
@@ -256,22 +338,45 @@ fn revert_single_file() {
     std::fs::write(fx.wd.join("README.md"), "changed\n").unwrap();
     std::fs::write(fx.wd.join("src/new.ts"), "new\n").unwrap();
     let st = status(&fx.wd, "main", None);
-    let readme = st.files.iter().find(|f| f.path == "README.md").unwrap().clone();
-    let new = st.files.iter().find(|f| f.path == "src/new.ts").unwrap().clone();
+    let readme = st
+        .files
+        .iter()
+        .find(|f| f.path == "README.md")
+        .unwrap()
+        .clone();
+    let new = st
+        .files
+        .iter()
+        .find(|f| f.path == "src/new.ts")
+        .unwrap()
+        .clone();
     revert_file(&fx.wd, "main", &readme).unwrap();
-    assert_eq!(std::fs::read_to_string(fx.wd.join("README.md")).unwrap(), "hello\n");
+    assert_eq!(
+        std::fs::read_to_string(fx.wd.join("README.md")).unwrap(),
+        "hello\n"
+    );
     revert_file(&fx.wd, "main", &new).unwrap();
     assert!(!fx.wd.join("src/new.ts").exists());
     assert!(!status(&fx.wd, "main", None).dirty);
-    let bad = DraftFile { path: "../x".into(), status: "added".into(), old_path: None };
+    let bad = DraftFile {
+        path: "../x".into(),
+        status: "added".into(),
+        old_path: None,
+    };
     assert!(revert_file(&fx.wd, "main", &bad).is_err());
 }
 
 #[test]
 fn tokens_never_leak() {
     let u = token_url("bobdivx/devforge", Some("ghp_secret"));
-    assert_eq!(u, "https://x-access-token:ghp_secret@github.com/bobdivx/devforge.git");
-    assert_eq!(token_url("https://github.com/a/b.git", None), "https://github.com/a/b.git");
+    assert_eq!(
+        u,
+        "https://x-access-token:ghp_secret@github.com/bobdivx/devforge.git"
+    );
+    assert_eq!(
+        token_url("https://github.com/a/b.git", None),
+        "https://github.com/a/b.git"
+    );
     let msg = format!("fatal: unable to access '{u}': 403");
     let r = redact(&msg);
     assert!(!r.contains("ghp_secret"), "{r}");
@@ -280,21 +385,42 @@ fn tokens_never_leak() {
 
 #[test]
 fn suggested_message_from_files() {
-    let f = |p: &str, s: &str| DraftFile { path: p.into(), status: s.into(), old_path: None };
-    assert_eq!(suggested_message(&[f("src/a.ts", "added")]), "feat: ajoute a.ts");
+    let f = |p: &str, s: &str| DraftFile {
+        path: p.into(),
+        status: s.into(),
+        old_path: None,
+    };
     assert_eq!(
-        suggested_message(&[f("a", "modified"), f("b", "added"), f("c", "deleted"), f("d", "modified")]),
+        suggested_message(&[f("src/a.ts", "added")]),
+        "feat: ajoute a.ts"
+    );
+    assert_eq!(
+        suggested_message(&[
+            f("a", "modified"),
+            f("b", "added"),
+            f("c", "deleted"),
+            f("d", "modified")
+        ]),
         "feat: met à jour a, b, c (+1)"
     );
     assert_eq!(suggested_message(&[]), "");
 }
 
-
 #[test]
 fn insight_overlap_and_duplicates() {
     let fx = fixture("insight");
     let seed = fx.root.join("seed2");
-    sh(&fx.root, &["clone", "-q", "-b", "main", fx.remote.to_str().unwrap(), seed.to_str().unwrap()]);
+    sh(
+        &fx.root,
+        &[
+            "clone",
+            "-q",
+            "-b",
+            "main",
+            fx.remote.to_str().unwrap(),
+            seed.to_str().unwrap(),
+        ],
+    );
     // GitHub avance : README modifié + nouveau fichier identique à celui du brouillon.
     std::fs::write(seed.join("README.md"), "remote\n").unwrap();
     std::fs::write(seed.join("same.txt"), "pareil\n").unwrap();
@@ -310,21 +436,65 @@ fn insight_overlap_and_duplicates() {
     let x = remote_insight(&fx.wd, "main", &st);
     assert_eq!(x.overlap, vec!["README.md".to_string()]);
     assert_eq!(x.already_on_github, vec!["same.txt".to_string()]);
-    let a = advise(&AdviceInput { count: st.files.len(), insight: Some(&x), ..Default::default() });
+    let a = advise(&AdviceInput {
+        count: st.files.len(),
+        insight: Some(&x),
+        ..Default::default()
+    });
     assert_eq!(a.level, "review");
     assert!(a.reason.contains("conflit"), "{}", a.reason);
 }
 
 #[test]
 fn advice_rules() {
-    let all_dup = RemoteInsight { behind: 1, overlap: vec![], already_on_github: vec!["a".into(), "b".into()] };
-    assert_eq!(advise(&AdviceInput { count: 2, insight: Some(&all_dup), ..Default::default() }).level, "delete");
-    let a = advise(&AdviceInput { count: 1, repair_obsolete_since: Some("2026-10-10T21:00:00Z".into()), ..Default::default() });
+    let all_dup = RemoteInsight {
+        behind: 1,
+        overlap: vec![],
+        already_on_github: vec!["a".into(), "b".into()],
+    };
+    assert_eq!(
+        advise(&AdviceInput {
+            count: 2,
+            insight: Some(&all_dup),
+            ..Default::default()
+        })
+        .level,
+        "delete"
+    );
+    let a = advise(&AdviceInput {
+        count: 1,
+        repair_obsolete_since: Some("2026-10-10T21:00:00Z".into()),
+        ..Default::default()
+    });
     assert_eq!(a.level, "delete");
     assert!(a.reason.contains("réussi depuis"));
-    assert_eq!(advise(&AdviceInput { count: 1, lockfile_only: true, ..Default::default() }).level, "delete");
-    assert_eq!(advise(&AdviceInput { count: 3, age_days: Some(12), ..Default::default() }).label, "À vérifier");
-    let fresh = advise(&AdviceInput { count: 3, age_days: Some(0), ..Default::default() });
+    assert_eq!(
+        advise(&AdviceInput {
+            count: 1,
+            lockfile_only: true,
+            ..Default::default()
+        })
+        .level,
+        "delete"
+    );
+    assert_eq!(
+        advise(&AdviceInput {
+            count: 3,
+            age_days: Some(12),
+            ..Default::default()
+        })
+        .label,
+        "À vérifier"
+    );
+    let fresh = advise(&AdviceInput {
+        count: 3,
+        age_days: Some(0),
+        ..Default::default()
+    });
     assert_eq!((fresh.level, fresh.label), ("keep", "Garder"));
-    assert!(is_lockfile("web/package-lock.json") && is_lockfile("Cargo.lock") && !is_lockfile("src/lock.ts"));
+    assert!(
+        is_lockfile("web/package-lock.json")
+            && is_lockfile("Cargo.lock")
+            && !is_lockfile("src/lock.ts")
+    );
 }

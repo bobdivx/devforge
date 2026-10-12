@@ -104,7 +104,9 @@ impl Tool for McpListRemoteToolsTool {
                     return Err(devforge_shared::DevForgeError::missing_mcp(id));
                 }
                 if err_str.contains("auth") || err_str.contains("401") || err_str.contains("403") {
-                    return Err(devforge_shared::DevForgeError::mcp_auth_failed(id, &err_str));
+                    return Err(devforge_shared::DevForgeError::mcp_auth_failed(
+                        id, &err_str,
+                    ));
                 }
                 Ok(json!({"ok": false, "error": err_str}))
             }

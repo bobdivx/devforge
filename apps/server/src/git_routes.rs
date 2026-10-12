@@ -185,7 +185,10 @@ pub(crate) fn parse_porcelain(raw: &str) -> Vec<(String, String)> {
             let status: String = line.chars().take(2).collect();
             let rest: String = line.chars().skip(3).collect();
             let path = rest.rsplit(" -> ").next().unwrap_or(&rest).trim();
-            let path = path.strip_prefix('"').and_then(|p| p.strip_suffix('"')).unwrap_or(path);
+            let path = path
+                .strip_prefix('"')
+                .and_then(|p| p.strip_suffix('"'))
+                .unwrap_or(path);
             if path.is_empty() || crate::draft::is_junk(path) {
                 return None;
             }
@@ -439,13 +442,19 @@ async fn git_diff(
         let workdir = project_resolved_workdir(&project)?;
         // Workdir local : même calcul que le brouillon (fichiers nouveaux inclus, bruit exclu).
         {
-            let branch = project.git_branch.clone().filter(|b| !b.is_empty()).unwrap_or_else(|| "main".into());
+            let branch = project
+                .git_branch
+                .clone()
+                .filter(|b| !b.is_empty())
+                .unwrap_or_else(|| "main".into());
             let wd = std::path::PathBuf::from(&workdir);
             let only = q.path.clone().filter(|p| !p.trim().is_empty());
-            let files = tokio::task::spawn_blocking(move || crate::draft::diff(&wd, &branch, only.as_deref()))
-                .await
-                .map_err(map_err)?
-                .map_err(|e| ApiError::message(e.0))?;
+            let files = tokio::task::spawn_blocking(move || {
+                crate::draft::diff(&wd, &branch, only.as_deref())
+            })
+            .await
+            .map_err(map_err)?
+            .map_err(|e| ApiError::message(e.0))?;
             let files: Vec<Value> = files
                 .into_iter()
                 .map(|f| {

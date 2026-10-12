@@ -287,6 +287,9 @@ mod tests {
 
     #[test]
     fn normalize_strips_slash() {
-        assert_eq!(normalize_origin("http://10.0.0.2:8000/"), "http://10.0.0.2:8000");
+        assert_eq!(
+            normalize_origin("http://10.0.0.2:8000/"),
+            "http://10.0.0.2:8000"
+        );
     }
 }

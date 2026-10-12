@@ -45,7 +45,15 @@ impl Tool for ListProjectAgentsTool {
         if project_uuid.is_empty() {
             return Ok(json!({"ok": false, "error": "project_uuid requis"}));
         }
-        let rows: Vec<(String, String, String, String, Option<String>, String, String)> = sqlx::query_as(
+        let rows: Vec<(
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+        )> = sqlx::query_as(
             r#"SELECT uuid, name, role, kind, parent_agent_uuid, status, updated_at
                FROM project_agents WHERE project_uuid = $1
                ORDER BY CASE WHEN role = 'coordinator' THEN 0 ELSE 1 END,
@@ -58,17 +66,19 @@ impl Tool for ListProjectAgentsTool {
 
         let agents: Vec<Value> = rows
             .into_iter()
-            .map(|(uuid, name, role, kind, parent_agent_uuid, status, updated_at)| {
-                json!({
-                    "uuid": uuid,
-                    "name": name,
-                    "role": role,
-                    "kind": kind,
-                    "parent_agent_uuid": parent_agent_uuid,
-                    "status": status,
-                    "updated_at": updated_at,
-                })
-            })
+            .map(
+                |(uuid, name, role, kind, parent_agent_uuid, status, updated_at)| {
+                    json!({
+                        "uuid": uuid,
+                        "name": name,
+                        "role": role,
+                        "kind": kind,
+                        "parent_agent_uuid": parent_agent_uuid,
+                        "status": status,
+                        "updated_at": updated_at,
+                    })
+                },
+            )
             .collect();
 
         Ok(json!({
@@ -135,18 +145,20 @@ impl Tool for ListAgentMessagesTool {
 
         let messages: Vec<Value> = rows
             .into_iter()
-            .map(|(uuid, role, content, tool_calls_json, provider, created_at)| {
-                let tools: Value =
-                    serde_json::from_str(&tool_calls_json).unwrap_or_else(|_| json!([]));
-                json!({
-                    "uuid": uuid,
-                    "role": role,
-                    "content": content,
-                    "tool_calls": tools,
-                    "provider": provider,
-                    "created_at": created_at,
-                })
-            })
+            .map(
+                |(uuid, role, content, tool_calls_json, provider, created_at)| {
+                    let tools: Value =
+                        serde_json::from_str(&tool_calls_json).unwrap_or_else(|_| json!([]));
+                    json!({
+                        "uuid": uuid,
+                        "role": role,
+                        "content": content,
+                        "tool_calls": tools,
+                        "provider": provider,
+                        "created_at": created_at,
+                    })
+                },
+            )
             .collect();
 
         Ok(json!({
@@ -214,8 +226,7 @@ impl Tool for ListAgentToolFailuresTool {
 
         let mut failures: Vec<Value> = Vec::new();
         for (msg_uuid, tool_calls_json, created_at) in rows {
-            let tools: Vec<Value> =
-                serde_json::from_str(&tool_calls_json).unwrap_or_default();
+            let tools: Vec<Value> = serde_json::from_str(&tool_calls_json).unwrap_or_default();
             for t in tools {
                 let ok = t
                     .get("result")
@@ -389,16 +400,17 @@ impl Tool for CreateProjectAgentTool {
         };
 
         // Vérifier que le parent existe et appartient au projet.
-        let parent_ok: Option<(String,)> = sqlx::query_as(
-            "SELECT uuid FROM project_agents WHERE uuid = $1 AND project_uuid = $2",
-        )
-        .bind(&parent_agent_uuid)
-        .bind(project_uuid)
-        .fetch_optional(self.pool.as_ref())
-        .await
-        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let parent_ok: Option<(String,)> =
+            sqlx::query_as("SELECT uuid FROM project_agents WHERE uuid = $1 AND project_uuid = $2")
+                .bind(&parent_agent_uuid)
+                .bind(project_uuid)
+                .fetch_optional(self.pool.as_ref())
+                .await
+                .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
         if parent_ok.is_none() {
-            return Ok(json!({"ok": false, "error": "parent_agent_uuid introuvable sur ce projet"}));
+            return Ok(
+                json!({"ok": false, "error": "parent_agent_uuid introuvable sur ce projet"}),
+            );
         }
 
         let agent_uuid = uuid::Uuid::new_v4().to_string();
@@ -451,14 +463,13 @@ impl Tool for CreateProjectAgentTool {
             .execute(self.pool.as_ref())
             .await;
 
-            let existing: Option<(String,)> = sqlx::query_as(
-                "SELECT uuid FROM agent_runs WHERE message_uuid = $1",
-            )
-            .bind(&msg_uuid)
-            .fetch_optional(self.pool.as_ref())
-            .await
-            .ok()
-            .flatten();
+            let existing: Option<(String,)> =
+                sqlx::query_as("SELECT uuid FROM agent_runs WHERE message_uuid = $1")
+                    .bind(&msg_uuid)
+                    .fetch_optional(self.pool.as_ref())
+                    .await
+                    .ok()
+                    .flatten();
             if existing.is_some() {
                 enqueued = true;
             } else {

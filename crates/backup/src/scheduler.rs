@@ -161,7 +161,10 @@ impl BackupScheduler {
             }
 
             let interval = Duration::from_secs((config.interval_hours as u64) * 3600);
-            tracing::info!(next_run_hours = config.interval_hours, "prochain backup automatique dans {interval:?}");
+            tracing::info!(
+                next_run_hours = config.interval_hours,
+                "prochain backup automatique dans {interval:?}"
+            );
             sleep(interval).await;
         }
     }

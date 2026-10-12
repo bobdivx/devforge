@@ -244,7 +244,15 @@ async fn spec_worker_plan(
     .map_err(|e| e.to_string())?;
     let brief: Vec<(&str, &str, &str, &str, bool)> = rows
         .iter()
-        .map(|r| (r.0.as_str(), r.1.as_str(), r.2.as_str(), r.3.as_str(), r.4 != 0))
+        .map(|r| {
+            (
+                r.0.as_str(),
+                r.1.as_str(),
+                r.2.as_str(),
+                r.3.as_str(),
+                r.4 != 0,
+            )
+        })
         .collect();
     let (used, _) = sdd::choose_spec_providers(&brief, &preferred);
     if used.is_empty() {

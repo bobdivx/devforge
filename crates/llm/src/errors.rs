@@ -66,13 +66,14 @@ pub fn humanize_llm_error(raw_error: &str) -> String {
     }
 
     // Pattern 404 - modèle introuvable
-    if normalized.contains("404") && (normalized.contains("model") || normalized.contains("Model")) {
+    if normalized.contains("404") && (normalized.contains("model") || normalized.contains("Model"))
+    {
         return "Modèle introuvable.".to_string();
     }
 
-
     // Pattern quota sans 429 explicite
-    if normalized.to_lowercase().contains("quota") || normalized.to_lowercase().contains("exceeded") {
+    if normalized.to_lowercase().contains("quota") || normalized.to_lowercase().contains("exceeded")
+    {
         return "Quota dépassé. Réessaie plus tard.".to_string();
     }
 
@@ -83,18 +84,33 @@ pub fn humanize_llm_error(raw_error: &str) -> String {
 fn handle_unreachable(error: &str) -> Option<String> {
     let l = error.to_lowercase();
     if l.contains("connection refused") {
-        return Some("Fournisseur injoignable : connexion refusée. Vérifie l’URL et que le service tourne.".into());
+        return Some(
+            "Fournisseur injoignable : connexion refusée. Vérifie l’URL et que le service tourne."
+                .into(),
+        );
     }
-    if l.contains("dns error") || l.contains("failed to lookup address") || l.contains("name or service not known") {
+    if l.contains("dns error")
+        || l.contains("failed to lookup address")
+        || l.contains("name or service not known")
+    {
         return Some("Fournisseur injoignable : nom d’hôte introuvable. Vérifie l’URL.".into());
     }
-    if l.contains("no route to host") || l.contains("network is unreachable") || l.contains("host is unreachable") {
-        return Some("Fournisseur injoignable : hôte hors d’atteinte. Vérifie l’URL et le réseau.".into());
+    if l.contains("no route to host")
+        || l.contains("network is unreachable")
+        || l.contains("host is unreachable")
+    {
+        return Some(
+            "Fournisseur injoignable : hôte hors d’atteinte. Vérifie l’URL et le réseau.".into(),
+        );
     }
     if l.contains("timed out") || l.contains("timeout") {
         return Some("Fournisseur injoignable : délai dépassé.".into());
     }
-    if l.contains("connection reset") || l.contains("connection closed") || l.contains("error sending request") || l.contains("connect error") {
+    if l.contains("connection reset")
+        || l.contains("connection closed")
+        || l.contains("error sending request")
+        || l.contains("connect error")
+    {
         return Some("Fournisseur injoignable : connexion interrompue. Vérifie l’URL et que le service tourne.".into());
     }
     None
@@ -107,8 +123,16 @@ fn provider_message(error: &str) -> Option<String> {
     let v: Value = serde_json::from_str(&error[start..]).ok()?;
     v.get("error")
         .and_then(|e| e.as_str().map(str::to_string))
-        .or_else(|| v.pointer("/error/message").and_then(|m| m.as_str()).map(str::to_string))
-        .or_else(|| v.get("message").and_then(|m| m.as_str()).map(str::to_string))
+        .or_else(|| {
+            v.pointer("/error/message")
+                .and_then(|m| m.as_str())
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            v.get("message")
+                .and_then(|m| m.as_str())
+                .map(str::to_string)
+        })
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty())
 }
@@ -143,13 +167,18 @@ fn handle_rate_limit(error: &str) -> Option<String> {
     let retry_seconds = extract_retry_seconds(error);
 
     // Vérifier si c'est un quota free-tier
-    let is_free_tier = error.to_lowercase().contains("free") 
+    let is_free_tier = error.to_lowercase().contains("free")
         || error.to_lowercase().contains("tier")
         || error.to_lowercase().contains("quota");
 
     match (is_free_tier, retry_seconds) {
-        (true, Some(secs)) => Some(format!("Quota dépassé (free-tier). Réessaie dans ~{}s.", secs)),
-        (true, None) => Some("Quota dépassé (free-tier). Réessaie dans quelques instants.".to_string()),
+        (true, Some(secs)) => Some(format!(
+            "Quota dépassé (free-tier). Réessaie dans ~{}s.",
+            secs
+        )),
+        (true, None) => {
+            Some("Quota dépassé (free-tier). Réessaie dans quelques instants.".to_string())
+        }
         (false, Some(secs)) => Some(format!("Trop de requêtes. Réessaie dans ~{}s.", secs)),
         (false, None) => Some("Trop de requêtes. Réessaie plus tard.".to_string()),
     }
@@ -262,7 +291,10 @@ mod tests {
     fn test_loopback_only_403_is_not_invalid_key() {
         let raw = r#"LLM 403 Forbidden: {"code":"loopback-only","error":"plaintext requests are accepted only from loopback; cluster peers must use the mTLS ingress"}"#;
         let r = humanize_llm_error(raw);
-        assert!(r.starts_with("Accès refusé par le fournisseur : plaintext requests"), "{r}");
+        assert!(
+            r.starts_with("Accès refusé par le fournisseur : plaintext requests"),
+            "{r}"
+        );
         let bad = r#"LLM 403 Forbidden: {"error":{"message":"Incorrect API key provided"}}"#;
         assert_eq!(humanize_llm_error(bad), "Clé API invalide ou refusée.");
     }
@@ -324,7 +356,9 @@ mod tests {
 /// Classe d'erreur LLM : décide des nouveaux essais (P1-09).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LlmErrorKind {
-    RateLimited { retry_after: Option<std::time::Duration> },
+    RateLimited {
+        retry_after: Option<std::time::Duration>,
+    },
     Server,
     Timeout,
     Auth,
@@ -359,7 +393,10 @@ pub fn classify(e: &devforge_shared::DevForgeError) -> LlmErrorKind {
 pub fn classify_message(msg: &str) -> LlmErrorKind {
     let l = msg.to_lowercase();
     // Facturation / quota épuisé : réessayer ne sert à rien, on passe au suivant.
-    if l.contains("insufficient_quota") || l.contains("spending limit") || l.contains("available credits") {
+    if l.contains("insufficient_quota")
+        || l.contains("spending limit")
+        || l.contains("available credits")
+    {
         return LlmErrorKind::Other;
     }
     let status = Regex::new(r"\bLLM (\d{3})\b")
@@ -368,20 +405,30 @@ pub fn classify_message(msg: &str) -> LlmErrorKind {
         .and_then(|c| c.get(1))
         .and_then(|m| m.as_str().parse::<u16>().ok());
     match status {
-        Some(429) => return LlmErrorKind::RateLimited { retry_after: parse_retry_after(msg) },
+        Some(429) => {
+            return LlmErrorKind::RateLimited {
+                retry_after: parse_retry_after(msg),
+            }
+        }
         Some(401) | Some(403) => return LlmErrorKind::Auth,
         Some(400) | Some(404) | Some(413) | Some(422) => return LlmErrorKind::BadRequest,
         Some(408) => return LlmErrorKind::Timeout,
         Some(s) if (500..600).contains(&s) => return LlmErrorKind::Server,
         _ => {}
     }
-    if l.contains("resource_exhausted") || l.contains("rate limit") || l.contains("too many requests") {
-        return LlmErrorKind::RateLimited { retry_after: parse_retry_after(msg) };
+    if l.contains("resource_exhausted")
+        || l.contains("rate limit")
+        || l.contains("too many requests")
+    {
+        return LlmErrorKind::RateLimited {
+            retry_after: parse_retry_after(msg),
+        };
     }
     if l.contains("timed out") || l.contains("timeout") {
         return LlmErrorKind::Timeout;
     }
-    if l.contains("llm http:") || l.contains("connection reset") || l.contains("connection closed") {
+    if l.contains("llm http:") || l.contains("connection reset") || l.contains("connection closed")
+    {
         return LlmErrorKind::Server;
     }
     if l.contains("llm json") || l.contains("parse") {
@@ -399,15 +446,38 @@ mod classify_tests {
     fn classifies_common_errors() {
         assert_eq!(
             classify_message("LLM 429 Too Many Requests (retry-after=3s): slow down"),
-            LlmErrorKind::RateLimited { retry_after: Some(Duration::from_secs(3)) }
+            LlmErrorKind::RateLimited {
+                retry_after: Some(Duration::from_secs(3))
+            }
         );
-        assert_eq!(classify_message("LLM 429 Too Many Requests: x"), LlmErrorKind::RateLimited { retry_after: None });
-        assert_eq!(classify_message("LLM 503 Service Unavailable: x"), LlmErrorKind::Server);
-        assert_eq!(classify_message("LLM 401 Unauthorized: bad key"), LlmErrorKind::Auth);
-        assert_eq!(classify_message("LLM 400 Bad Request: x"), LlmErrorKind::BadRequest);
-        assert_eq!(classify_message("LLM HTTP: operation timed out"), LlmErrorKind::Timeout);
-        assert_eq!(classify_message("LLM 429: insufficient_quota"), LlmErrorKind::Other);
-        assert_eq!(classify_message("LLM JSON: expected value"), LlmErrorKind::Parse);
+        assert_eq!(
+            classify_message("LLM 429 Too Many Requests: x"),
+            LlmErrorKind::RateLimited { retry_after: None }
+        );
+        assert_eq!(
+            classify_message("LLM 503 Service Unavailable: x"),
+            LlmErrorKind::Server
+        );
+        assert_eq!(
+            classify_message("LLM 401 Unauthorized: bad key"),
+            LlmErrorKind::Auth
+        );
+        assert_eq!(
+            classify_message("LLM 400 Bad Request: x"),
+            LlmErrorKind::BadRequest
+        );
+        assert_eq!(
+            classify_message("LLM HTTP: operation timed out"),
+            LlmErrorKind::Timeout
+        );
+        assert_eq!(
+            classify_message("LLM 429: insufficient_quota"),
+            LlmErrorKind::Other
+        );
+        assert_eq!(
+            classify_message("LLM JSON: expected value"),
+            LlmErrorKind::Parse
+        );
     }
 
     #[test]

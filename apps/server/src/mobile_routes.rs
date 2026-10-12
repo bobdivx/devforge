@@ -232,7 +232,9 @@ pub fn conversation_waiting(
     if has_plan(tool_calls_json) {
         return Some("plan");
     }
-    let tail = content.trim_end().trim_end_matches(|c: char| !c.is_alphanumeric() && c != '?' && c != '？');
+    let tail = content
+        .trim_end()
+        .trim_end_matches(|c: char| !c.is_alphanumeric() && c != '?' && c != '？');
     if tail.ends_with('?') || tail.ends_with('？') {
         return Some("question");
     }
@@ -254,7 +256,11 @@ fn has_plan(tool_calls_json: &str) -> bool {
 pub fn excerpt(content: &str, max: usize) -> String {
     let flat: String = content
         .lines()
-        .map(|l| l.trim().trim_start_matches(['#', '>', '-', '*', ' ']).trim())
+        .map(|l| {
+            l.trim()
+                .trim_start_matches(['#', '>', '-', '*', ' '])
+                .trim()
+        })
         .filter(|l| !l.is_empty() && !l.starts_with("```"))
         .collect::<Vec<_>>()
         .join(" ")
@@ -306,7 +312,10 @@ async fn conversations(
             if root.exists() {
                 devforge_agent::sdd::list_features(&root)
                     .ok()
-                    .and_then(|fs| fs.into_iter().find(|f| f.phase == "awaiting_validation" && !f.dismissed))
+                    .and_then(|fs| {
+                        fs.into_iter()
+                            .find(|f| f.phase == "awaiting_validation" && !f.dismissed)
+                    })
             } else {
                 None
             }
@@ -316,7 +325,15 @@ async fn conversations(
             continue;
         }
         let (role, content, tools, created_at, agent_status) = row
-            .map(|r| (r.1.as_str(), r.2.as_str(), r.3.as_str(), r.4.clone(), r.5.as_str()))
+            .map(|r| {
+                (
+                    r.1.as_str(),
+                    r.2.as_str(),
+                    r.3.as_str(),
+                    r.4.clone(),
+                    r.5.as_str(),
+                )
+            })
             .unwrap_or(("", "", "[]", String::new(), "idle"));
         let waiting = conversation_waiting(role, content, tools, spec.is_some());
         let created = spec
@@ -342,7 +359,10 @@ async fn conversations(
         let wa = a["waiting"].is_null();
         let wb = b["waiting"].is_null();
         wa.cmp(&wb).then_with(|| {
-            b["created_at"].as_str().unwrap_or("").cmp(a["created_at"].as_str().unwrap_or(""))
+            b["created_at"]
+                .as_str()
+                .unwrap_or("")
+                .cmp(a["created_at"].as_str().unwrap_or(""))
         })
     });
     Ok(Json(json!({ "data": { "conversations": items } })))

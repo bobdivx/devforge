@@ -328,7 +328,9 @@ impl LeaderClient {
             .http
             .post(&url)
             .bearer_auth(secret)
-            .timeout(std::time::Duration::from_secs(timeout_secs.saturating_add(15)))
+            .timeout(std::time::Duration::from_secs(
+                timeout_secs.saturating_add(15),
+            ))
             .json(&serde_json::json!({
                 "workdir": "/",
                 "command": command,

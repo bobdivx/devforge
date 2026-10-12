@@ -94,9 +94,12 @@ pub fn next_run_time(expr: &str, timezone: Option<&str>) -> Option<DateTime<Utc>
     let tz = timezone
         .and_then(|tz_str| tz_str.parse::<chrono_tz::Tz>().ok())
         .unwrap_or(chrono_tz::UTC);
-    
+
     let _now = Utc::now().with_timezone(&tz);
-    schedule.upcoming(tz).next().map(|dt| dt.with_timezone(&Utc))
+    schedule
+        .upcoming(tz)
+        .next()
+        .map(|dt| dt.with_timezone(&Utc))
 }
 
 /// Fuseau IANA connu (ex. « Europe/Paris »).
@@ -118,7 +121,12 @@ pub fn is_five_fields(expr: &str) -> bool {
 }
 
 /// Faut-il poster le résultat d'une routine dans le fil ? (`on_change` : seulement si le résumé change.)
-pub fn should_notify(notify: &str, previous_hash: Option<&str>, new_hash: &str, failed: bool) -> bool {
+pub fn should_notify(
+    notify: &str,
+    previous_hash: Option<&str>,
+    new_hash: &str,
+    failed: bool,
+) -> bool {
     match notify {
         "always" => true,
         "on_failure" => failed,
@@ -171,7 +179,10 @@ mod tests {
         let c = summary_hash("ÉCHEC : popcornn.app répond 502");
         assert_eq!(a, b, "les chiffres ne comptent pas");
         assert_ne!(a, c);
-        assert!(should_notify("on_change", None, &a, false), "premier passage");
+        assert!(
+            should_notify("on_change", None, &a, false),
+            "premier passage"
+        );
         assert!(!should_notify("on_change", Some(&a), &b, false));
         assert!(should_notify("on_change", Some(&a), &c, true));
         assert!(!should_notify("on_failure", None, &a, false));

@@ -643,12 +643,12 @@ async fn mcp_handle_one(state: &AppState, abilities: &[String], raw: Value) -> O
                 Ok(result) => {
                     crate::spec_routes::schedule_started_worker(state.clone(), &result);
                     rpc_ok(json!({
-                    "content": [{
-                        "type": "text",
-                        "text": serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()),
-                    }],
-                    "isError": false,
-                }))
+                        "content": [{
+                            "type": "text",
+                            "text": serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()),
+                        }],
+                        "isError": false,
+                    }))
                 }
                 Err(e) => rpc_ok(json!({
                     "content": [{ "type": "text", "text": e.to_string() }],
@@ -904,8 +904,8 @@ async fn link_project_resource(
                     key: key.into(),
                     value: value.into(),
                     secret: true,
-                            preview_allowed: false,
-        },
+                    preview_allowed: false,
+                },
             )
             .await
             .map_err(|e| ApiError::message(e.to_string()))?;
@@ -919,8 +919,8 @@ async fn link_project_resource(
                 key: "TURSO_DATABASE_URL_AUTH".into(),
                 value: with_auth,
                 secret: true,
-                        preview_allowed: false,
-        },
+                preview_allowed: false,
+            },
         )
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;

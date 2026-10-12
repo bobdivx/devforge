@@ -60,10 +60,7 @@ pub fn dev_container_name(project_uuid: &str) -> String {
 ///
 /// `apex` = zone publique de l'app (`domain_apex`), si connue.
 pub fn dev_fqdn(prod_fqdn: &str, apex: Option<&str>) -> Option<String> {
-    let host = prod_fqdn
-        .trim()
-        .trim_end_matches('.')
-        .to_ascii_lowercase();
+    let host = prod_fqdn.trim().trim_end_matches('.').to_ascii_lowercase();
     let labels: Vec<&str> = host.split('.').collect();
     if labels.len() < 2 || labels.iter().any(|l| l.is_empty()) {
         return None;
@@ -128,13 +125,14 @@ fn normalize_branch(raw: &str) -> Result<String, ApiError> {
         && !b.contains("..")
         && !b.ends_with('/')
         && !b.ends_with(".lock")
-        && b
-            .chars()
+        && b.chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'));
     if valid {
         Ok(b)
     } else {
-        Err(ApiError::message(format!("Nom de branche invalide : {raw}")))
+        Err(ApiError::message(format!(
+            "Nom de branche invalide : {raw}"
+        )))
     }
 }
 
@@ -340,7 +338,13 @@ async fn deploy_dev_now(
 ) -> Result<Json<Value>, ApiError> {
     let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
     dev_supported(&project)?;
-    if project.dev_branch.as_deref().unwrap_or("").trim().is_empty() {
+    if project
+        .dev_branch
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
         return Err(ApiError::message("Environnement dev désactivé."));
     }
     let dep = start_dev_deploy(&state, &project, "Redéploiement dev", None).await?;
@@ -509,11 +513,7 @@ pub(crate) async fn run_dev_deploy(
         },
         cancelled: false,
     };
-    let Some(branch) = project
-        .dev_branch
-        .clone()
-        .filter(|b| !b.trim().is_empty())
-    else {
+    let Some(branch) = project.dev_branch.clone().filter(|b| !b.trim().is_empty()) else {
         return fail("environnement dev désactivé".into());
     };
     let Some(host) = dev_host_for(project) else {
@@ -623,7 +623,10 @@ pub(crate) async fn run_dev_deploy(
                 "superseded",
             )
             .await;
-            state.deploy.abort_in_flight_swap(&instance, &server_id).await;
+            state
+                .deploy
+                .abort_in_flight_swap(&instance, &server_id)
+                .await;
             DeployRunOutcome {
                 result: devforge_deploy::DeployResult {
                     ok: false,
@@ -819,8 +822,15 @@ pub(crate) async fn poll_dev(state: &AppState, project: &Project) {
     let gh = crate::routes::project_github(state, &project.workspace_uuid).await;
     if let Ok(c) = gh.compare(&owner, &repo, &base, branch).await {
         if c.ahead_by > 0 {
-            let tip = c.commits.last().map(|c| c.sha.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| c.head_sha.clone());
-            if crate::auto_deploy_guard::gate(state, project, "dev", &tip).await != crate::auto_deploy_guard::Gate::Go {
+            let tip = c
+                .commits
+                .last()
+                .map(|c| c.sha.clone())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| c.head_sha.clone());
+            if crate::auto_deploy_guard::gate(state, project, "dev", &tip).await
+                != crate::auto_deploy_guard::Gate::Go
+            {
                 return;
             }
             let msg = format!("DEV · auto-deploy ({} commit(s))", c.ahead_by);
@@ -849,7 +859,10 @@ mod tests {
 
     #[test]
     fn dev_host_apex_uses_dev_subdomain() {
-        assert_eq!(dev_fqdn("example.com", None).as_deref(), Some("dev.example.com"));
+        assert_eq!(
+            dev_fqdn("example.com", None).as_deref(),
+            Some("dev.example.com")
+        );
         assert_eq!(
             dev_fqdn("www.example.com", None).as_deref(),
             Some("dev.example.com")
@@ -858,7 +871,10 @@ mod tests {
             dev_fqdn("shop.example.co", Some("shop.example.co")).as_deref(),
             Some("dev.shop.example.co")
         );
-        assert_eq!(dev_fqdn("EXAMPLE.com.", None).as_deref(), Some("dev.example.com"));
+        assert_eq!(
+            dev_fqdn("EXAMPLE.com.", None).as_deref(),
+            Some("dev.example.com")
+        );
     }
 
     #[test]
@@ -899,7 +915,10 @@ mod tests {
 
     #[test]
     fn branch_names_are_validated() {
-        assert_eq!(normalize_branch("refs/heads/feat/x").ok().as_deref(), Some("feat/x"));
+        assert_eq!(
+            normalize_branch("refs/heads/feat/x").ok().as_deref(),
+            Some("feat/x")
+        );
         assert!(normalize_branch("main; rm -rf /").is_err());
         assert!(normalize_branch("-x").is_err());
         assert!(normalize_branch("a..b").is_err());

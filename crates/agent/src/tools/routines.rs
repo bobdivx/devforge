@@ -34,14 +34,19 @@ pub fn validate(args: &Value) -> std::result::Result<RoutineSpec, String> {
     if name.is_empty() {
         return Err("name requis".into());
     }
-    let schedule = s(args, "schedule").split_whitespace().collect::<Vec<_>>().join(" ");
+    let schedule = s(args, "schedule")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     if !devforge_cron::is_five_fields(&schedule) {
         return Err("schedule : expression cron à 5 champs attendue (ex. « 0 8 * * * »)".into());
     }
     devforge_cron::validate_cron_expression(&schedule)?;
     match devforge_cron::min_interval_minutes(&schedule) {
         Some(m) if m < MIN_INTERVAL_MINUTES => {
-            return Err(format!("fréquence trop élevée ({m} min) : {MIN_INTERVAL_MINUTES} min minimum"))
+            return Err(format!(
+                "fréquence trop élevée ({m} min) : {MIN_INTERVAL_MINUTES} min minimum"
+            ))
         }
         None => return Err("schedule sans prochaine exécution".into()),
         _ => {}
@@ -57,7 +62,9 @@ pub fn validate(args: &Value) -> std::result::Result<RoutineSpec, String> {
     };
     let prompt: String = s(args, "prompt").chars().take(1000).collect();
     if prompt.chars().count() < 10 {
-        return Err("prompt : consigne autonome requise (avec un critère de succès vérifiable)".into());
+        return Err(
+            "prompt : consigne autonome requise (avec un critère de succès vérifiable)".into(),
+        );
     }
     let agent_role = match s(args, "agent_role") {
         "" => "ops".to_string(),
@@ -69,7 +76,14 @@ pub fn validate(args: &Value) -> std::result::Result<RoutineSpec, String> {
         n if NOTIFY.contains(&n) => n.to_string(),
         n => return Err(format!("notify inconnu : {n}")),
     };
-    Ok(RoutineSpec { name, schedule, timezone, prompt, agent_role, notify })
+    Ok(RoutineSpec {
+        name,
+        schedule,
+        timezone,
+        prompt,
+        agent_role,
+        notify,
+    })
 }
 
 fn routine_json(r: &devforge_cron::ProjectCron) -> Value {
@@ -127,13 +141,17 @@ impl Tool for CreateRoutineTool {
             Err(e) => return Ok(json!({"ok": false, "error": e})),
         };
         let pool = self.pool.as_ref();
-        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM project_crons WHERE project_uuid = $1 AND kind = 'agent'")
-            .bind(&project)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let count: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM project_crons WHERE project_uuid = $1 AND kind = 'agent'",
+        )
+        .bind(&project)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
         if count.0 >= MAX_AGENT_ROUTINES {
-            return Ok(json!({"ok": false, "error": format!("{MAX_AGENT_ROUTINES} routines d'agent au plus par projet : supprime-en une d'abord")}));
+            return Ok(
+                json!({"ok": false, "error": format!("{MAX_AGENT_ROUTINES} routines d'agent au plus par projet : supprime-en une d'abord")}),
+            );
         }
         // Agent cible : le fil permanent du rôle demandé, sinon le Coordinateur.
         let target: Option<(String, String)> = sqlx::query_as(
@@ -147,13 +165,20 @@ impl Tool for CreateRoutineTool {
         .await
         .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
         let Some((agent_uuid, agent_role)) = target else {
-            return Ok(json!({"ok": false, "error": "aucun agent permanent dans ce projet pour exécuter la routine"}));
+            return Ok(
+                json!({"ok": false, "error": "aucun agent permanent dans ce projet pour exécuter la routine"}),
+            );
         };
         let caller = s(&args, "caller_agent_uuid");
-        let created_by = if caller.is_empty() { "agent".to_string() } else { format!("agent:{caller}") };
+        let created_by = if caller.is_empty() {
+            "agent".to_string()
+        } else {
+            format!("agent:{caller}")
+        };
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
-        let next = devforge_cron::next_run_time(&spec.schedule, Some(&spec.timezone)).map(|d| d.to_rfc3339());
+        let next = devforge_cron::next_run_time(&spec.schedule, Some(&spec.timezone))
+            .map(|d| d.to_rfc3339());
         sqlx::query(
             r#"INSERT INTO project_crons (id, project_uuid, name, cron_expression, command, enabled, timezone,
                    last_status, last_run_at, next_run_at, created_at, updated_at, kind, agent_uuid, prompt, created_by, notify)
@@ -204,11 +229,13 @@ impl Tool for ListRoutinesTool {
     }
     async fn execute(&self, args: Value) -> Result<Value> {
         let project = s(&args, "project_uuid");
-        let rows = sqlx::query_as::<_, devforge_cron::ProjectCron>("SELECT * FROM project_crons WHERE project_uuid = $1 ORDER BY created_at")
-            .bind(project)
-            .fetch_all(self.pool.as_ref())
-            .await
-            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let rows = sqlx::query_as::<_, devforge_cron::ProjectCron>(
+            "SELECT * FROM project_crons WHERE project_uuid = $1 ORDER BY created_at",
+        )
+        .bind(project)
+        .fetch_all(self.pool.as_ref())
+        .await
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
         Ok(json!({"ok": true, "routines": rows.iter().map(routine_json).collect::<Vec<_>>()}))
     }
 }
@@ -235,17 +262,24 @@ impl Tool for DeleteRoutineTool {
     async fn execute(&self, args: Value) -> Result<Value> {
         let project = s(&args, "project_uuid");
         let id = s(&args, "id");
-        let row: Option<devforge_cron::ProjectCron> = sqlx::query_as("SELECT * FROM project_crons WHERE id = $1 AND project_uuid = $2")
-            .bind(id)
-            .bind(project)
-            .fetch_optional(self.pool.as_ref())
-            .await
-            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let row: Option<devforge_cron::ProjectCron> =
+            sqlx::query_as("SELECT * FROM project_crons WHERE id = $1 AND project_uuid = $2")
+                .bind(id)
+                .bind(project)
+                .fetch_optional(self.pool.as_ref())
+                .await
+                .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
         let Some(row) = row else {
             return Ok(json!({"ok": false, "error": "routine introuvable dans ce projet"}));
         };
-        let by_agent = row.created_by.as_deref().is_some_and(|c| c.starts_with("agent"));
-        let confirmed = args.get("confirmed").and_then(|v| v.as_bool()).unwrap_or(false);
+        let by_agent = row
+            .created_by
+            .as_deref()
+            .is_some_and(|c| c.starts_with("agent"));
+        let confirmed = args
+            .get("confirmed")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         if !by_agent && !confirmed {
             return Ok(json!({
                 "ok": false,
@@ -253,7 +287,10 @@ impl Tool for DeleteRoutineTool {
                 "error": format!("« {} » a été créée par l'utilisateur : demande-lui confirmation avec ask_user, puis rappelle delete_routine avec confirmed=true.", row.name),
             }));
         }
-        sqlx::query("DELETE FROM project_crons WHERE id = $1").bind(id).execute(self.pool.as_ref()).await
+        sqlx::query("DELETE FROM project_crons WHERE id = $1")
+            .bind(id)
+            .execute(self.pool.as_ref())
+            .await
             .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
         Ok(json!({"ok": true, "deleted": row.name}))
     }
@@ -283,7 +320,9 @@ mod tests {
         assert_eq!(spec.notify, "on_change");
         assert!(validate(&args("0 8 * *")).is_err(), "4 champs");
         assert!(validate(&args("0 0 8 * * *")).is_err(), "6 champs");
-        assert!(validate(&json!({"name": "x", "schedule": "0 8 * * *", "prompt": "court"})).is_err());
+        assert!(
+            validate(&json!({"name": "x", "schedule": "0 8 * * *", "prompt": "court"})).is_err()
+        );
         let mut a = args("0 8 * * *");
         a["timezone"] = json!("Mars/Olympus");
         assert!(validate(&a).is_err());

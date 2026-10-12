@@ -62,35 +62,69 @@ fn err(s: impl Into<String>) -> DraftError {
 /* ---------------- Bruit ---------------- */
 
 const JUNK_DIRS: &[&str] = &[
-    "node_modules", "dist", "build", ".astro", ".next", ".nuxt", ".output", ".svelte-kit", ".vercel",
-    ".turbo", ".cache", ".parcel-cache", "coverage", ".nyc_output", "target", "__pycache__", ".pytest_cache",
+    "node_modules",
+    "dist",
+    "build",
+    ".astro",
+    ".next",
+    ".nuxt",
+    ".output",
+    ".svelte-kit",
+    ".vercel",
+    ".turbo",
+    ".cache",
+    ".parcel-cache",
+    "coverage",
+    ".nyc_output",
+    "target",
+    "__pycache__",
+    ".pytest_cache",
 ];
 
 /// Fichiers internes, sorties de build et secrets : jamais comptés, jamais poussés.
 pub fn is_junk(path: &str) -> bool {
     let path = path.trim_start_matches("./");
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
-    let Some(name) = parts.last() else { return true };
-    if parts
-        .iter()
-        .any(|p| *p == ".devforge" || p.starts_with(".devforge-") || p.starts_with(".devforge_") || p.starts_with(".devforge."))
-    {
+    let Some(name) = parts.last() else {
+        return true;
+    };
+    if parts.iter().any(|p| {
+        *p == ".devforge"
+            || p.starts_with(".devforge-")
+            || p.starts_with(".devforge_")
+            || p.starts_with(".devforge.")
+    }) {
         return true;
     }
-    if parts[..parts.len() - 1].iter().any(|p| JUNK_DIRS.contains(p)) {
+    if parts[..parts.len() - 1]
+        .iter()
+        .any(|p| JUNK_DIRS.contains(p))
+    {
         return true;
     }
     if *name == ".DS_Store" || name.ends_with(".log") || name.ends_with(".pyc") {
         return true;
     }
-    if *name == ".env" || (name.starts_with(".env.") && *name != ".env.example" && *name != ".env.sample") {
+    if *name == ".env"
+        || (name.starts_with(".env.") && *name != ".env.example" && *name != ".env.sample")
+    {
         return true;
     }
     false
 }
 
 /// Motifs ajoutés à `.git/info/exclude` (local, jamais poussé).
-const LOCAL_EXCLUDES: &[&str] = &[".devforge", ".devforge-*", ".devforge.*", ".devforge_*", ".env", ".env.*", "!.env.example", "*.log", ".DS_Store"];
+const LOCAL_EXCLUDES: &[&str] = &[
+    ".devforge",
+    ".devforge-*",
+    ".devforge.*",
+    ".devforge_*",
+    ".env",
+    ".env.*",
+    "!.env.example",
+    "*.log",
+    ".DS_Store",
+];
 
 /* ---------------- git ---------------- */
 
@@ -98,7 +132,14 @@ fn git(workdir: &Path, args: &[&str]) -> R<String> {
     let out = Command::new("git")
         .arg("-C")
         .arg(workdir)
-        .args(["-c", "core.quotepath=off", "-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=20"])
+        .args([
+            "-c",
+            "core.quotepath=off",
+            "-c",
+            "http.lowSpeedLimit=1000",
+            "-c",
+            "http.lowSpeedTime=20",
+        ])
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
@@ -125,7 +166,9 @@ pub fn redact(s: &str) -> String {
     while let Some(i) = rest.find("https://") {
         out.push_str(&rest[..i + 8]);
         rest = &rest[i + 8..];
-        let end = rest.find(|c: char| c.is_whitespace() || c == '\'' || c == '"').unwrap_or(rest.len());
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == '\'' || c == '"')
+            .unwrap_or(rest.len());
         if let Some(at) = rest[..end].find('@') {
             out.push_str("***@");
             rest = &rest[at + 1..];
@@ -158,14 +201,22 @@ fn remote_ref(branch: &str) -> String {
 }
 
 fn has_remote_ref(workdir: &Path, branch: &str) -> bool {
-    git_ok(workdir, &["rev-parse", "--verify", "--quiet", &remote_ref(branch)])
+    git_ok(
+        workdir,
+        &["rev-parse", "--verify", "--quiet", &remote_ref(branch)],
+    )
 }
 
 /// Met à jour `origin/<branche>` depuis GitHub (best effort).
 pub fn fetch(workdir: &Path, branch: &str, url: Option<&str>) -> R<()> {
     let refspec = format!("+refs/heads/{branch}:{}", remote_ref(branch));
     let remote = url.unwrap_or("origin");
-    git(workdir, &["fetch", "--quiet", "--no-tags", remote, &refspec]).map(|_| ()).map_err(|e| err(redact(&e.0)))
+    git(
+        workdir,
+        &["fetch", "--quiet", "--no-tags", remote, &refspec],
+    )
+    .map(|_| ())
+    .map_err(|e| err(redact(&e.0)))
 }
 
 fn base_commit(workdir: &Path, branch: &str) -> Option<String> {
@@ -174,11 +225,16 @@ fn base_commit(workdir: &Path, branch: &str) -> Option<String> {
             return Some(mb.trim().to_string());
         }
     }
-    git(workdir, &["rev-parse", "HEAD"]).ok().map(|s| s.trim().to_string())
+    git(workdir, &["rev-parse", "HEAD"])
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 fn split_nul(s: &str) -> Vec<String> {
-    s.split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect()
+    s.split('\0')
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// Fichiers du brouillon (bruit compris), par rapport à `base`.
@@ -197,7 +253,11 @@ fn raw_files(workdir: &Path, base: Option<&str>) -> R<Vec<DraftFile>> {
                 }
                 let old = toks.get(i + 1).cloned().unwrap_or_default();
                 let new = toks.get(i + 2).cloned().unwrap_or_default();
-                files.push(DraftFile { path: new, status: "renamed".into(), old_path: Some(old) });
+                files.push(DraftFile {
+                    path: new,
+                    status: "renamed".into(),
+                    old_path: Some(old),
+                });
                 i += 3;
             } else {
                 let path = toks.get(i + 1).cloned().unwrap_or_default();
@@ -206,15 +266,26 @@ fn raw_files(workdir: &Path, base: Option<&str>) -> R<Vec<DraftFile>> {
                     'D' => "deleted",
                     _ => "modified",
                 };
-                files.push(DraftFile { path, status: status.into(), old_path: None });
+                files.push(DraftFile {
+                    path,
+                    status: status.into(),
+                    old_path: None,
+                });
                 i += 2;
             }
         }
     }
-    let untracked = git(workdir, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    let untracked = git(
+        workdir,
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+    )?;
     for path in split_nul(&untracked) {
         if !files.iter().any(|f| f.path == path) {
-            files.push(DraftFile { path, status: "added".into(), old_path: None });
+            files.push(DraftFile {
+                path,
+                status: "added".into(),
+                old_path: None,
+            });
         }
     }
     files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -222,20 +293,31 @@ fn raw_files(workdir: &Path, base: Option<&str>) -> R<Vec<DraftFile>> {
 }
 
 fn count(workdir: &Path, range: &str) -> u32 {
-    git(workdir, &["rev-list", "--count", range]).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
+    git(workdir, &["rev-list", "--count", range])
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
 }
 
 fn mtime_rfc3339(workdir: &Path, files: &[DraftFile]) -> Option<String> {
     files
         .iter()
-        .filter_map(|f| std::fs::metadata(workdir.join(&f.path)).ok()?.modified().ok())
+        .filter_map(|f| {
+            std::fs::metadata(workdir.join(&f.path))
+                .ok()?
+                .modified()
+                .ok()
+        })
         .max()
         .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
 }
 
 /// État du brouillon. `fetch_url` : rafraîchit d'abord `origin/<branche>` (lent, réseau).
 pub fn status(workdir: &Path, branch: &str, fetch_url: Option<&str>) -> DraftStatus {
-    let mut st = DraftStatus { branch: branch.to_string(), ..Default::default() };
+    let mut st = DraftStatus {
+        branch: branch.to_string(),
+        ..Default::default()
+    };
     if !workdir.is_dir() {
         st.reason = Some("Le dossier de travail de l'app est introuvable sur ce serveur.".into());
         return st;
@@ -251,7 +333,9 @@ pub fn status(workdir: &Path, branch: &str, fetch_url: Option<&str>) -> DraftSta
     // Fichiers internes DevForge jamais comptés ni proposés à git (local, rien n'est poussé).
     ensure_local_excludes(workdir);
     st.has_remote = has_remote_ref(workdir, branch);
-    st.head = git(workdir, &["rev-parse", "--short=12", "HEAD"]).ok().map(|s| s.trim().to_string());
+    st.head = git(workdir, &["rev-parse", "--short=12", "HEAD"])
+        .ok()
+        .map(|s| s.trim().to_string());
     let base = base_commit(workdir, branch);
     st.base = base.as_ref().map(|b| b.chars().take(12).collect());
     match raw_files(workdir, base.as_deref()) {
@@ -285,7 +369,10 @@ fn synthesize_added_patch(workdir: &Path, path: &str) -> Option<String> {
     let full = workdir.join(path);
     let meta = std::fs::metadata(&full).ok()?;
     if meta.len() > MAX_NEW_FILE_BYTES {
-        return Some(format!("@@ nouveau fichier ({} Ko, trop gros pour l'aperçu) @@", meta.len() / 1024));
+        return Some(format!(
+            "@@ nouveau fichier ({} Ko, trop gros pour l'aperçu) @@",
+            meta.len() / 1024
+        ));
     }
     let bytes = std::fs::read(&full).ok()?;
     let Ok(text) = String::from_utf8(bytes) else {
@@ -307,7 +394,11 @@ pub fn diff(workdir: &Path, branch: &str, only: Option<&str>) -> R<Vec<serde_jso
         return Err(err(st.reason.unwrap_or_default()));
     }
     let base = base_commit(workdir, branch);
-    let files: Vec<&DraftFile> = st.files.iter().filter(|f| only.map_or(true, |p| f.path == p)).collect();
+    let files: Vec<&DraftFile> = st
+        .files
+        .iter()
+        .filter(|f| only.map_or(true, |p| f.path == p))
+        .collect();
     if only.is_some() && files.is_empty() {
         return Err(err("Ce fichier ne fait pas partie du brouillon."));
     }
@@ -315,7 +406,16 @@ pub fn diff(workdir: &Path, branch: &str, only: Option<&str>) -> R<Vec<serde_jso
     for f in files {
         let untracked = base
             .as_deref()
-            .map(|b| !git_ok(workdir, &["cat-file", "-e", &format!("{b}:{}", f.old_path.as_deref().unwrap_or(&f.path))]))
+            .map(|b| {
+                !git_ok(
+                    workdir,
+                    &[
+                        "cat-file",
+                        "-e",
+                        &format!("{b}:{}", f.old_path.as_deref().unwrap_or(&f.path)),
+                    ],
+                )
+            })
             .unwrap_or(true)
             && f.status == "added";
         let patch = if untracked {
@@ -338,8 +438,14 @@ pub fn diff(workdir: &Path, branch: &str, only: Option<&str>) -> R<Vec<serde_jso
             })
         };
         let patch = patch.unwrap_or_default();
-        let additions = patch.lines().filter(|l| l.starts_with('+') && !l.starts_with("+++")).count();
-        let deletions = patch.lines().filter(|l| l.starts_with('-') && !l.starts_with("---")).count();
+        let additions = patch
+            .lines()
+            .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+            .count();
+        let deletions = patch
+            .lines()
+            .filter(|l| l.starts_with('-') && !l.starts_with("---"))
+            .count();
         out.push(serde_json::json!({
             "path": f.path,
             "status": f.status,
@@ -374,7 +480,11 @@ pub fn suggested_message(files: &[DraftFile]) -> String {
         .map(|f| f.path.rsplit('/').next().unwrap_or(&f.path))
         .collect();
     let more = files.len().saturating_sub(3);
-    let tail = if more > 0 { format!(" (+{more})") } else { String::new() };
+    let tail = if more > 0 {
+        format!(" (+{more})")
+    } else {
+        String::new()
+    };
     format!("{verb} {}{tail}", names.join(", "))
 }
 
@@ -388,11 +498,17 @@ pub struct Validated {
 }
 
 fn ensure_local_excludes(workdir: &Path) {
-    let Ok(git_dir) = git(workdir, &["rev-parse", "--git-dir"]) else { return };
+    let Ok(git_dir) = git(workdir, &["rev-parse", "--git-dir"]) else {
+        return;
+    };
     let git_dir = workdir.join(git_dir.trim());
     let path = git_dir.join("info").join("exclude");
     let current = std::fs::read_to_string(&path).unwrap_or_default();
-    let missing: Vec<&str> = LOCAL_EXCLUDES.iter().copied().filter(|p| !current.lines().any(|l| l.trim() == *p)).collect();
+    let missing: Vec<&str> = LOCAL_EXCLUDES
+        .iter()
+        .copied()
+        .filter(|p| !current.lines().any(|l| l.trim() == *p))
+        .collect();
     if missing.is_empty() {
         return;
     }
@@ -414,7 +530,13 @@ fn git_dir(workdir: &Path) -> R<PathBuf> {
 }
 
 /// Commit des fichiers du brouillon (bruit exclu) puis push sur `<branche>`.
-pub fn validate(workdir: &Path, branch: &str, push_url: &str, message: &str, author: (&str, &str)) -> R<Validated> {
+pub fn validate(
+    workdir: &Path,
+    branch: &str,
+    push_url: &str,
+    message: &str,
+    author: (&str, &str),
+) -> R<Validated> {
     let message = message.trim();
     if message.is_empty() {
         return Err(err("Le message de validation est vide."));
@@ -457,7 +579,20 @@ pub fn validate(workdir: &Path, branch: &str, push_url: &str, message: &str, aut
         let name = format!("user.name={}", author.0);
         let email = format!("user.email={}", author.1);
         let msg_arg = msg_path.display().to_string();
-        git(workdir, &["-c", &name, "-c", &email, "commit", "--quiet", "--no-verify", "-F", &msg_arg])?;
+        git(
+            workdir,
+            &[
+                "-c",
+                &name,
+                "-c",
+                &email,
+                "commit",
+                "--quiet",
+                "--no-verify",
+                "-F",
+                &msg_arg,
+            ],
+        )?;
     }
     let _ = std::fs::remove_file(&spec_path);
     let _ = std::fs::remove_file(&msg_path);
@@ -471,8 +606,14 @@ pub fn validate(workdir: &Path, branch: &str, push_url: &str, message: &str, aut
         }
     })?;
     let _ = git(workdir, &["update-ref", &remote_ref(branch), "HEAD"]);
-    let sha = git(workdir, &["rev-parse", "--short=12", "HEAD"])?.trim().to_string();
-    Ok(Validated { sha, files: st.files.len(), branch: branch.to_string() })
+    let sha = git(workdir, &["rev-parse", "--short=12", "HEAD"])?
+        .trim()
+        .to_string();
+    Ok(Validated {
+        sha,
+        files: st.files.len(),
+        branch: branch.to_string(),
+    })
 }
 
 /* ---------------- Sauvegardes ---------------- */
@@ -534,7 +675,10 @@ pub fn backup(workdir: &Path, root: &Path, files: &[DraftFile], reason: &str) ->
             .map_err(|e| err(format!("tar introuvable : {e}")))?;
         if !out.status.success() {
             let _ = std::fs::remove_dir_all(&dir);
-            return Err(err(format!("Sauvegarde impossible : {}", String::from_utf8_lossy(&out.stderr).trim())));
+            return Err(err(format!(
+                "Sauvegarde impossible : {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
         }
     }
     let b = Backup {
@@ -543,16 +687,23 @@ pub fn backup(workdir: &Path, root: &Path, files: &[DraftFile], reason: &str) ->
         reason: reason.to_string(),
         files: keep,
         deleted,
-        head: git(workdir, &["rev-parse", "HEAD"]).ok().map(|s| s.trim().to_string()),
+        head: git(workdir, &["rev-parse", "HEAD"])
+            .ok()
+            .map(|s| s.trim().to_string()),
     };
-    std::fs::write(dir.join("manifest.json"), serde_json::to_vec_pretty(&b).unwrap_or_default())
-        .map_err(|e| err(e.to_string()))?;
+    std::fs::write(
+        dir.join("manifest.json"),
+        serde_json::to_vec_pretty(&b).unwrap_or_default(),
+    )
+    .map_err(|e| err(e.to_string()))?;
     Ok(b)
 }
 
 /// Sauvegardes de moins de 7 jours, les plus récentes d'abord (les plus vieilles sont supprimées).
 pub fn list_backups(root: &Path) -> Vec<Backup> {
-    let Ok(entries) = std::fs::read_dir(root) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
     let cutoff = chrono::Utc::now() - chrono::Duration::days(BACKUP_DAYS);
     let mut out = Vec::new();
     for e in entries.flatten() {
@@ -563,7 +714,8 @@ pub fn list_backups(root: &Path) -> Vec<Backup> {
         else {
             continue;
         };
-        let created = chrono::DateTime::parse_from_rfc3339(&b.created_at).map(|d| d.with_timezone(&chrono::Utc));
+        let created = chrono::DateTime::parse_from_rfc3339(&b.created_at)
+            .map(|d| d.with_timezone(&chrono::Utc));
         if created.map(|c| c < cutoff).unwrap_or(true) {
             let _ = std::fs::remove_dir_all(&dir);
             continue;
@@ -594,7 +746,10 @@ pub fn restore(workdir: &Path, root: &Path, id: &str) -> R<Backup> {
             .output()
             .map_err(|e| err(format!("tar introuvable : {e}")))?;
         if !out.status.success() {
-            return Err(err(format!("Restauration impossible : {}", String::from_utf8_lossy(&out.stderr).trim())));
+            return Err(err(format!(
+                "Restauration impossible : {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
         }
     }
     for p in b.deleted.iter().filter(|p| safe_rel(p)) {
@@ -607,7 +762,14 @@ pub fn restore(workdir: &Path, root: &Path, id: &str) -> R<Backup> {
 /* ---------------- Supprimer / annuler ---------------- */
 
 fn clean_excludes() -> Vec<String> {
-    let mut v: Vec<String> = vec![".devforge".into(), ".devforge-*".into(), ".devforge.*".into(), ".devforge_*".into(), ".env".into(), ".env.*".into()];
+    let mut v: Vec<String> = vec![
+        ".devforge".into(),
+        ".devforge-*".into(),
+        ".devforge.*".into(),
+        ".devforge_*".into(),
+        ".env".into(),
+        ".env.*".into(),
+    ];
     v.extend(JUNK_DIRS.iter().map(|d| d.to_string()));
     v
 }
@@ -617,7 +779,11 @@ pub fn discard(workdir: &Path, branch: &str, fetch_url: Option<&str>) -> R<Strin
     if let Some(url) = fetch_url {
         let _ = fetch(workdir, branch, Some(url));
     }
-    let target = if has_remote_ref(workdir, branch) { remote_ref(branch) } else { "HEAD".to_string() };
+    let target = if has_remote_ref(workdir, branch) {
+        remote_ref(branch)
+    } else {
+        "HEAD".to_string()
+    };
     git(workdir, &["reset", "--quiet", "--hard", &target])?;
     let mut args: Vec<String> = vec!["clean".into(), "-fdq".into()];
     for e in clean_excludes() {
@@ -626,7 +792,9 @@ pub fn discard(workdir: &Path, branch: &str, fetch_url: Option<&str>) -> R<Strin
     }
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     git(workdir, &refs)?;
-    Ok(git(workdir, &["rev-parse", "--short=12", "HEAD"])?.trim().to_string())
+    Ok(git(workdir, &["rev-parse", "--short=12", "HEAD"])?
+        .trim()
+        .to_string())
 }
 
 /// Remet un seul fichier comme sur GitHub (ou le retire s'il est nouveau).
@@ -635,16 +803,41 @@ pub fn revert_file(workdir: &Path, branch: &str, file: &DraftFile) -> R<()> {
         return Err(err("Chemin invalide."));
     }
     let base = base_commit(workdir, branch);
-    let in_base = |p: &str| base.as_deref().map(|b| git_ok(workdir, &["cat-file", "-e", &format!("{b}:{p}")])).unwrap_or(false);
+    let in_base = |p: &str| {
+        base.as_deref()
+            .map(|b| git_ok(workdir, &["cat-file", "-e", &format!("{b}:{p}")]))
+            .unwrap_or(false)
+    };
     if let Some(old) = file.old_path.as_deref() {
         if in_base(old) {
-            git(workdir, &["checkout", base.as_deref().unwrap_or("HEAD"), "--", old])?;
+            git(
+                workdir,
+                &["checkout", base.as_deref().unwrap_or("HEAD"), "--", old],
+            )?;
         }
     }
     if in_base(&file.path) {
-        git(workdir, &["checkout", base.as_deref().unwrap_or("HEAD"), "--", &file.path])?;
+        git(
+            workdir,
+            &[
+                "checkout",
+                base.as_deref().unwrap_or("HEAD"),
+                "--",
+                &file.path,
+            ],
+        )?;
     } else {
-        let _ = git(workdir, &["rm", "--quiet", "--cached", "--ignore-unmatch", "--", &file.path]);
+        let _ = git(
+            workdir,
+            &[
+                "rm",
+                "--quiet",
+                "--cached",
+                "--ignore-unmatch",
+                "--",
+                &file.path,
+            ],
+        );
         let full = workdir.join(&file.path);
         if full.is_file() {
             std::fs::remove_file(&full).map_err(|e| err(e.to_string()))?;
@@ -662,9 +855,15 @@ pub struct Updated {
 }
 
 /// Avance le workdir jusqu'à GitHub si c'est sans risque (pas de commit local, pas de fichier en commun).
-pub fn update_from_github(workdir: &Path, branch: &str, fetch_url: Option<&str>, author: (&str, &str)) -> R<Updated> {
+pub fn update_from_github(
+    workdir: &Path,
+    branch: &str,
+    fetch_url: Option<&str>,
+    author: (&str, &str),
+) -> R<Updated> {
     if let Some(url) = fetch_url {
-        fetch(workdir, branch, Some(url)).map_err(|e| err(format!("GitHub injoignable : {}", e.0)))?;
+        fetch(workdir, branch, Some(url))
+            .map_err(|e| err(format!("GitHub injoignable : {}", e.0)))?;
     }
     if !has_remote_ref(workdir, branch) {
         return Err(err("Pas de branche GitHub à suivre pour cette app."));
@@ -673,7 +872,10 @@ pub fn update_from_github(workdir: &Path, branch: &str, fetch_url: Option<&str>,
     let behind = count(workdir, &format!("HEAD..{r}"));
     let head = || git(workdir, &["rev-parse", "--short=12", "HEAD"]).map(|s| s.trim().to_string());
     if behind == 0 {
-        return Ok(Updated { merged: 0, head: head()? });
+        return Ok(Updated {
+            merged: 0,
+            head: head()?,
+        });
     }
     let ahead = count(workdir, &format!("{r}..HEAD"));
     if ahead > 0 {
@@ -684,19 +886,42 @@ pub fn update_from_github(workdir: &Path, branch: &str, fetch_url: Option<&str>,
     }
     let incoming = split_nul(&git(workdir, &["diff", "--name-only", "-z", "HEAD", &r])?);
     let st = status(workdir, branch, None);
-    let overlap: Vec<&String> = incoming.iter().filter(|p| st.files.iter().any(|f| &f.path == *p)).collect();
+    let overlap: Vec<&String> = incoming
+        .iter()
+        .filter(|p| st.files.iter().any(|f| &f.path == *p))
+        .collect();
     if !overlap.is_empty() {
-        let list = overlap.iter().take(5).map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
+        let list = overlap
+            .iter()
+            .take(5)
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
         return Err(err(format!(
             "GitHub et le brouillon ont modifié les mêmes fichiers ({list}). Valide ou supprime d'abord le brouillon pour ces fichiers."
         )));
     }
     let name = format!("user.name={}", author.0);
     let email = format!("user.email={}", author.1);
-    git(workdir, &["-c", &name, "-c", &email, "merge", "--quiet", "--ff-only", "--autostash", &r])?;
-    Ok(Updated { merged: behind, head: head()? })
+    git(
+        workdir,
+        &[
+            "-c",
+            &name,
+            "-c",
+            &email,
+            "merge",
+            "--quiet",
+            "--ff-only",
+            "--autostash",
+            &r,
+        ],
+    )?;
+    Ok(Updated {
+        merged: behind,
+        head: head()?,
+    })
 }
-
 
 /* ---------------- Aide à la décision (garder / supprimer) ---------------- */
 
@@ -734,7 +959,14 @@ pub struct RemoteInsight {
 }
 
 fn same_as_remote(workdir: &Path, remote: &str, f: &DraftFile) -> bool {
-    let on_remote = |p: &str| git(workdir, &["rev-parse", "--verify", "--quiet", &format!("{remote}:{p}")]).ok().map(|s| s.trim().to_string());
+    let on_remote = |p: &str| {
+        git(
+            workdir,
+            &["rev-parse", "--verify", "--quiet", &format!("{remote}:{p}")],
+        )
+        .ok()
+        .map(|s| s.trim().to_string())
+    };
     if let Some(old) = f.old_path.as_deref() {
         if on_remote(old).is_some() {
             return false;
@@ -743,28 +975,50 @@ fn same_as_remote(workdir: &Path, remote: &str, f: &DraftFile) -> bool {
     match f.status.as_str() {
         "deleted" => on_remote(&f.path).is_none(),
         _ => {
-            let Some(remote_blob) = on_remote(&f.path) else { return false };
-            git(workdir, &["hash-object", "--", &f.path]).map(|h| h.trim() == remote_blob).unwrap_or(false)
+            let Some(remote_blob) = on_remote(&f.path) else {
+                return false;
+            };
+            git(workdir, &["hash-object", "--", &f.path])
+                .map(|h| h.trim() == remote_blob)
+                .unwrap_or(false)
         }
     }
 }
 
 /// Compare le brouillon à `origin/<branche>` (déjà récupéré) : retard, fichiers en commun, doublons.
 pub fn remote_insight(workdir: &Path, branch: &str, st: &DraftStatus) -> RemoteInsight {
-    let mut out = RemoteInsight { behind: st.behind, ..Default::default() };
+    let mut out = RemoteInsight {
+        behind: st.behind,
+        ..Default::default()
+    };
     if !st.available || !st.has_remote {
         return out;
     }
     let r = remote_ref(branch);
-    out.already_on_github = st.files.iter().take(300).filter(|f| same_as_remote(workdir, &r, f)).map(|f| f.path.clone()).collect();
+    out.already_on_github = st
+        .files
+        .iter()
+        .take(300)
+        .filter(|f| same_as_remote(workdir, &r, f))
+        .map(|f| f.path.clone())
+        .collect();
     if st.behind > 0 {
-        let incoming = git(workdir, &["diff", "--name-only", "-z", &format!("HEAD...{r}")]).map(|s| split_nul(&s)).unwrap_or_default();
+        let incoming = git(
+            workdir,
+            &["diff", "--name-only", "-z", &format!("HEAD...{r}")],
+        )
+        .map(|s| split_nul(&s))
+        .unwrap_or_default();
         // Identique des deux côtés : pas un conflit.
         out.overlap = st
             .files
             .iter()
             .filter(|f| !out.already_on_github.contains(&f.path))
-            .filter(|f| incoming.iter().any(|p| p == &f.path || f.old_path.as_deref() == Some(p.as_str())))
+            .filter(|f| {
+                incoming
+                    .iter()
+                    .any(|p| p == &f.path || f.old_path.as_deref() == Some(p.as_str()))
+            })
             .map(|f| f.path.clone())
             .collect();
     }
@@ -799,18 +1053,40 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 }
 
 pub fn advise(i: &AdviceInput) -> Advice {
-    let keep = |r: String| Advice { level: "keep", label: "Garder", reason: r };
-    let review = |r: String| Advice { level: "review", label: "À vérifier", reason: r };
-    let delete = |r: String| Advice { level: "delete", label: "Peut être supprimé", reason: r };
+    let keep = |r: String| Advice {
+        level: "keep",
+        label: "Garder",
+        reason: r,
+    };
+    let review = |r: String| Advice {
+        level: "review",
+        label: "À vérifier",
+        reason: r,
+    };
+    let delete = |r: String| Advice {
+        level: "delete",
+        label: "Peut être supprimé",
+        reason: r,
+    };
     let dup = i.insight.map(|x| x.already_on_github.len()).unwrap_or(0);
     if i.count > 0 && dup >= i.count {
-        return delete("Tout ce contenu est déjà sur GitHub : le brouillon n’apporte plus rien.".into());
+        return delete(
+            "Tout ce contenu est déjà sur GitHub : le brouillon n’apporte plus rien.".into(),
+        );
     }
     if let Some(when) = &i.repair_obsolete_since {
         let d = chrono::DateTime::parse_from_rfc3339(when)
-            .map(|t| t.with_timezone(&chrono::Local).format("%d/%m à %H:%M").to_string())
+            .map(|t| {
+                t.with_timezone(&chrono::Local)
+                    .format("%d/%m à %H:%M")
+                    .to_string()
+            })
             .unwrap_or_default();
-        let at = if d.is_empty() { String::new() } else { format!(" (le {d})") };
+        let at = if d.is_empty() {
+            String::new()
+        } else {
+            format!(" (le {d})")
+        };
         return delete(format!("Correctif d’une mise en ligne ratée, mais une mise en ligne a réussi depuis{at} : il n’est sans doute plus utile."));
     }
     if i.lockfile_only {
@@ -827,10 +1103,16 @@ pub fn advise(i: &AdviceInput) -> Advice {
         }
     }
     if let Some(days) = i.age_days.filter(|d| *d >= 7) {
-        return review(format!("Pas touché depuis {days} jours : vérifie qu’il sert encore."));
+        return review(format!(
+            "Pas touché depuis {days} jours : vérifie qu’il sert encore."
+        ));
     }
     if dup > 0 {
-        return review(format!("{} déjà identique{} sur GitHub, le reste est nouveau.", plural(dup, "fichier", "fichiers"), if dup > 1 { "s" } else { "" }));
+        return review(format!(
+            "{} déjà identique{} sur GitHub, le reste est nouveau.",
+            plural(dup, "fichier", "fichiers"),
+            if dup > 1 { "s" } else { "" }
+        ));
     }
     if let Some(x) = i.insight.filter(|x| x.behind > 0) {
         return keep(format!(

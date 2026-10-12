@@ -28,9 +28,20 @@ impl Tool for GitHubListPrsTool {
         })
     }
     async fn execute(&self, arguments: Value) -> Result<Value> {
-        let owner = arguments.get("owner").and_then(|v| v.as_str()).unwrap_or("").trim();
-        let repo = arguments.get("repo").and_then(|v| v.as_str()).unwrap_or("").trim();
-        let state = arguments.get("state").and_then(|v| v.as_str()).unwrap_or("open");
+        let owner = arguments
+            .get("owner")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let repo = arguments
+            .get("repo")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let state = arguments
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("open");
         if owner.is_empty() || repo.is_empty() {
             return Ok(json!({"ok": false, "error": "owner et repo requis"}));
         }
@@ -63,8 +74,16 @@ impl Tool for GitHubWorkflowRunsTool {
         })
     }
     async fn execute(&self, arguments: Value) -> Result<Value> {
-        let owner = arguments.get("owner").and_then(|v| v.as_str()).unwrap_or("").trim();
-        let repo = arguments.get("repo").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let owner = arguments
+            .get("owner")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let repo = arguments
+            .get("repo")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
         let branch = arguments.get("branch").and_then(|v| v.as_str());
         if owner.is_empty() || repo.is_empty() {
             return Ok(json!({"ok": false, "error": "owner et repo requis"}));

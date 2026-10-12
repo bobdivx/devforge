@@ -406,7 +406,11 @@ pub(crate) async fn lookup_target(state: &AppState, fqdn: &str) -> Result<Option
 }
 
 /// Pointe un hostname vers une cible précise (CNAME Cloudflare / A Porkbun).
-pub(crate) async fn point_fqdn_to(state: &AppState, fqdn: &str, target: &str) -> Result<(), String> {
+pub(crate) async fn point_fqdn_to(
+    state: &AppState,
+    fqdn: &str,
+    target: &str,
+) -> Result<(), String> {
     let dns = load(state).await;
     if !configured(&dns) {
         return Err("DNS auto non configuré".into());

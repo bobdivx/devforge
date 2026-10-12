@@ -4,15 +4,22 @@
 //! serveur (`inject_tool_defaults`) et écrase toute valeur fournie par le modèle.
 
 use async_trait::async_trait;
-use devforge_memory::{ForgetTarget, MemoryItem, MemoryStore, Scope, SearchReq, Tier, WriteOutcome, WriteReq};
+use devforge_memory::{
+    ForgetTarget, MemoryItem, MemoryStore, Scope, SearchReq, Tier, WriteOutcome, WriteReq,
+};
 use devforge_shared::{Result, Tool};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 
 /// Arguments d'identité réservés au serveur.
-pub const IDENTITY_ARGS: &[&str] =
-    &["user_uuid", "project_uuid", "caller_agent_uuid", "caller_agent_role", "caller_agent_kind"];
+pub const IDENTITY_ARGS: &[&str] = &[
+    "user_uuid",
+    "project_uuid",
+    "caller_agent_uuid",
+    "caller_agent_role",
+    "caller_agent_kind",
+];
 
 struct Who {
     user: Option<String>,
@@ -23,7 +30,11 @@ struct Who {
 }
 
 fn s(args: &Value, k: &str) -> Option<String> {
-    args.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|v| !v.is_empty()).map(str::to_string)
+    args.get(k)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
 }
 
 fn who(args: &Value) -> Who {
@@ -120,7 +131,9 @@ impl Tool for MemorySearchTool {
 
     async fn execute(&self, args: Value) -> Result<Value> {
         let w = who(&args);
-        let Some(user) = w.user.clone() else { return Ok(no_user()) };
+        let Some(user) = w.user.clone() else {
+            return Ok(no_user());
+        };
         let query = s(&args, "query").unwrap_or_default();
         let scopes = match s(&args, "scope").as_deref().unwrap_or("all") {
             "all" => readable_scopes(&w),
@@ -153,7 +166,11 @@ impl Tool for MemorySearchTool {
             tiers,
             kinds: s(&args, "kind").into_iter().collect(),
             since,
-            limit: args.get("limit").and_then(|v| v.as_u64()).unwrap_or(8).clamp(1, 20) as usize,
+            limit: args
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(8)
+                .clamp(1, 20) as usize,
             include_superseded: false,
             min_match: 1,
         };
@@ -200,17 +217,23 @@ impl Tool for MemoryWriteTool {
 
     async fn execute(&self, args: Value) -> Result<Value> {
         let w = who(&args);
-        let Some(user) = w.user.clone() else { return Ok(no_user()) };
+        let Some(user) = w.user.clone() else {
+            return Ok(no_user());
+        };
         let scope_name = s(&args, "scope").unwrap_or_else(|| "project".into());
         let tier_name = s(&args, "tier").unwrap_or_else(|| "log".into());
         let Some(tier) = Tier::parse(&tier_name) else {
             return Ok(json!({"ok": false, "error": format!("tier inconnu : {tier_name}")}));
         };
         if watcher(&w.role) && tier != Tier::Log {
-            return Ok(json!({"ok": false, "error": format!("le rôle {} n'écrit que dans le journal (tier=log)", w.role)}));
+            return Ok(
+                json!({"ok": false, "error": format!("le rôle {} n'écrit que dans le journal (tier=log)", w.role)}),
+            );
         }
         if w.kind == "subagent" && scope_name == "user" && tier != Tier::Log {
-            return Ok(json!({"ok": false, "error": "un sous-agent n'écrit en portée user que dans le journal (tier=log)"}));
+            return Ok(
+                json!({"ok": false, "error": "un sous-agent n'écrit en portée user que dans le journal (tier=log)"}),
+            );
         }
         let scope = match scope_of(&scope_name, &w) {
             Ok(sc) => sc,
@@ -233,7 +256,11 @@ impl Tool for MemoryWriteTool {
             source_ref: None,
             confidence: 1.0,
             expires_in: hours.map(|h| Duration::from_secs(h.clamp(1, 168) * 3600)),
-            created_by: w.agent.as_deref().map(|a| format!("agent:{a}")).unwrap_or_else(|| "agent".into()),
+            created_by: w
+                .agent
+                .as_deref()
+                .map(|a| format!("agent:{a}"))
+                .unwrap_or_else(|| "agent".into()),
         };
         Ok(match self.store.write(req).await {
             Ok(WriteOutcome::Rejected(e)) => json!({"ok": false, "error": e}),
@@ -282,15 +309,25 @@ impl Tool for MemoryForgetTool {
 
     async fn execute(&self, args: Value) -> Result<Value> {
         let w = who(&args);
-        let Some(user) = w.user.clone() else { return Ok(no_user()) };
+        let Some(user) = w.user.clone() else {
+            return Ok(no_user());
+        };
         if watcher(&w.role) {
-            return Ok(json!({"ok": false, "error": format!("le rôle {} ne peut pas oublier de souvenirs", w.role)}));
+            return Ok(
+                json!({"ok": false, "error": format!("le rôle {} ne peut pas oublier de souvenirs", w.role)}),
+            );
         }
         let target = if let Some(uuid) = s(&args, "uuid") {
             // Seulement ce que ce fil peut lire (pas la mémoire d'un autre projet).
             match self.store.get(&user, &uuid).await {
-                Ok(Some(item)) if readable_scopes(&w).contains(&item.scope) => ForgetTarget::Uuid(uuid),
-                Ok(_) => return Ok(json!({"ok": false, "error": "souvenir introuvable dans ce contexte"})),
+                Ok(Some(item)) if readable_scopes(&w).contains(&item.scope) => {
+                    ForgetTarget::Uuid(uuid)
+                }
+                Ok(_) => {
+                    return Ok(
+                        json!({"ok": false, "error": "souvenir introuvable dans ce contexte"}),
+                    )
+                }
                 Err(e) => return Ok(json!({"ok": false, "error": e.to_string()})),
             }
         } else if let (Some(key), Some(scope)) = (s(&args, "key"), s(&args, "scope")) {
@@ -301,11 +338,15 @@ impl Tool for MemoryForgetTool {
         } else {
             return Ok(json!({"ok": false, "error": "uuid, ou key + scope, requis"}));
         };
-        Ok(match self.store.forget(&user, target, s(&args, "reason")).await {
-            Ok(0) => json!({"ok": false, "error": "rien à oublier (déjà oublié ou introuvable)"}),
-            Ok(n) => json!({"ok": true, "forgotten": n}),
-            Err(e) => json!({"ok": false, "error": e.to_string()}),
-        })
+        Ok(
+            match self.store.forget(&user, target, s(&args, "reason")).await {
+                Ok(0) => {
+                    json!({"ok": false, "error": "rien à oublier (déjà oublié ou introuvable)"})
+                }
+                Ok(n) => json!({"ok": true, "forgotten": n}),
+                Err(e) => json!({"ok": false, "error": e.to_string()}),
+            },
+        )
     }
 }
 
@@ -328,8 +369,12 @@ mod tests {
     fn tools() -> (MemorySearchTool, MemoryWriteTool, MemoryForgetTool) {
         let store: Arc<dyn MemoryStore> = Arc::new(InMemoryStore::new());
         (
-            MemorySearchTool { store: store.clone() },
-            MemoryWriteTool { store: store.clone() },
+            MemorySearchTool {
+                store: store.clone(),
+            },
+            MemoryWriteTool {
+                store: store.clone(),
+            },
             MemoryForgetTool { store },
         )
     }
@@ -344,7 +389,11 @@ mod tests {
             .unwrap();
         assert_eq!(r["outcome"], "inserted", "{r}");
         // Visible depuis un autre projet / fil.
-        let mut other = ctx_args(json!({"query": "réponses courtes"}), "coordinator", "required");
+        let mut other = ctx_args(
+            json!({"query": "réponses courtes"}),
+            "coordinator",
+            "required",
+        );
         other["project_uuid"] = json!("p2");
         other["caller_agent_uuid"] = json!("a2");
         let found = search.execute(other).await.unwrap();
@@ -357,11 +406,22 @@ mod tests {
         assert_eq!(r["outcome"], "superseded");
         // « Oublie ça »
         let f = forget
-            .execute(ctx_args(json!({"key": "pref.reply.length", "scope": "user"}), "coordinator", "required"))
+            .execute(ctx_args(
+                json!({"key": "pref.reply.length", "scope": "user"}),
+                "coordinator",
+                "required",
+            ))
             .await
             .unwrap();
         assert_eq!(f["forgotten"], 1);
-        let found = search.execute(ctx_args(json!({"query": "réponses"}), "coordinator", "required")).await.unwrap();
+        let found = search
+            .execute(ctx_args(
+                json!({"query": "réponses"}),
+                "coordinator",
+                "required",
+            ))
+            .await
+            .unwrap();
         assert_eq!(found["count"], 0);
     }
 
@@ -372,23 +432,48 @@ mod tests {
             .execute(ctx_args(json!({"content": "le token GitHub est ghp_xxx…", "scope": "user", "tier": "profile", "kind": "fact"}), "coordinator", "required"))
             .await
             .unwrap();
-        assert_eq!(r, json!({"ok": false, "error": "secret détecté — non enregistré"}));
+        assert_eq!(
+            r,
+            json!({"ok": false, "error": "secret détecté — non enregistré"})
+        );
     }
 
     #[tokio::test]
     async fn role_rules() {
         let (_, write, forget) = tools();
         let profile = json!({"content": "Le runner principal est sur le NAS.", "scope": "project", "tier": "profile", "kind": "infra"});
-        let r = write.execute(ctx_args(profile.clone(), "runner", "required")).await.unwrap();
+        let r = write
+            .execute(ctx_args(profile.clone(), "runner", "required"))
+            .await
+            .unwrap();
         assert_eq!(r["ok"], false);
         let mut log = profile.clone();
         log["tier"] = json!("log");
-        assert_eq!(write.execute(ctx_args(log, "crons", "required")).await.unwrap()["ok"], true);
-        let f = forget.execute(ctx_args(json!({"key": "x.y.z", "scope": "user"}), "actions", "required")).await.unwrap();
+        assert_eq!(
+            write
+                .execute(ctx_args(log, "crons", "required"))
+                .await
+                .unwrap()["ok"],
+            true
+        );
+        let f = forget
+            .execute(ctx_args(
+                json!({"key": "x.y.z", "scope": "user"}),
+                "actions",
+                "required",
+            ))
+            .await
+            .unwrap();
         assert_eq!(f["ok"], false);
         // Sous-agent : portée user seulement en journal.
         let user_profile = json!({"content": "Préfère le tutoiement.", "scope": "user", "tier": "profile", "kind": "preference"});
-        assert_eq!(write.execute(ctx_args(user_profile, "worker", "subagent")).await.unwrap()["ok"], false);
+        assert_eq!(
+            write
+                .execute(ctx_args(user_profile, "worker", "subagent"))
+                .await
+                .unwrap()["ok"],
+            false
+        );
     }
 
     #[tokio::test]
@@ -398,7 +483,14 @@ mod tests {
             .execute(ctx_args(json!({"content": "Le site est en Astro.", "scope": "project", "tier": "profile", "kind": "fact"}), "coordinator", "required"))
             .await
             .unwrap();
-        let found = search.execute(ctx_args(json!({"query": "astro"}), "coordinator", "required")).await.unwrap();
+        let found = search
+            .execute(ctx_args(
+                json!({"query": "astro"}),
+                "coordinator",
+                "required",
+            ))
+            .await
+            .unwrap();
         assert!(found["items"][0]["confidence"].as_f64().unwrap() < 1.0);
         let mut anon = ctx_args(json!({"query": "astro"}), "coordinator", "required");
         anon.as_object_mut().unwrap().remove("user_uuid");

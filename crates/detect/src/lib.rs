@@ -87,9 +87,7 @@ fn has_file(tree: &FileTree, name: &str) -> bool {
     let n = name.to_lowercase();
     tree.keys().any(|k| {
         let k = norm_path(k);
-        k.eq_ignore_ascii_case(name)
-            || k.ends_with(&format!("/{n}"))
-            || k.to_lowercase() == n
+        k.eq_ignore_ascii_case(name) || k.ends_with(&format!("/{n}")) || k.to_lowercase() == n
     })
 }
 
@@ -131,7 +129,10 @@ fn parse_dockerfile_exposes(dockerfile: &str) -> Vec<ExposedPort> {
         if !upper.starts_with("EXPOSE ") {
             continue;
         }
-        let raw = t.split_once(char::is_whitespace).map(|(_, r)| r).unwrap_or("");
+        let raw = t
+            .split_once(char::is_whitespace)
+            .map(|(_, r)| r)
+            .unwrap_or("");
         for token in raw.split_whitespace() {
             if let Some((port, protocol)) = parse_port_token(token) {
                 found.push(ExposedPort {
@@ -455,9 +456,7 @@ struct NodeHit {
 
 fn dep_has(pkg: &Value, name: &str) -> bool {
     // Use object key lookup — JSON Pointer breaks on scoped packages (`@astrojs/node`).
-    pkg.get("dependencies")
-        .and_then(|d| d.get(name))
-        .is_some()
+    pkg.get("dependencies").and_then(|d| d.get(name)).is_some()
         || pkg
             .get("devDependencies")
             .and_then(|d| d.get(name))
@@ -501,8 +500,7 @@ fn server_runtime_hints(pkg: &Value, base: &str) -> Vec<String> {
         hints.push("Script build présent — compilation puis npm start.".into());
     } else {
         hints.push(
-            "Pas de script start — ajoute \"start\" dans package.json (ex. node server.js)."
-                .into(),
+            "Pas de script start — ajoute \"start\" dans package.json (ex. node server.js).".into(),
         );
     }
     hints
@@ -511,7 +509,11 @@ fn server_runtime_hints(pkg: &Value, base: &str) -> Vec<String> {
 fn parse_port_digits(s: &str) -> Option<u16> {
     let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
     let port = digits.parse::<u16>().ok()?;
-    if port == 0 { None } else { Some(port) }
+    if port == 0 {
+        None
+    } else {
+        Some(port)
+    }
 }
 
 fn port_after_key(text: &str, key: &str) -> Option<u16> {
@@ -676,8 +678,7 @@ fn detect_node(pkg: &Value, evidence: &mut Vec<String>) -> NodeHit {
         || dep_has(pkg, "@tanstack/start")
     {
         evidence.push("dep:nitro".into());
-        let tanstack =
-            dep_has(pkg, "@tanstack/react-start") || dep_has(pkg, "@tanstack/start");
+        let tanstack = dep_has(pkg, "@tanstack/react-start") || dep_has(pkg, "@tanstack/start");
         return NodeHit {
             framework: FrameworkKind::Nitro,
             label: if tanstack {
@@ -802,13 +803,7 @@ pub fn scan_local_dir(root: &std::path::Path) -> FileTree {
         if path.is_file() {
             let content = std::fs::read_to_string(&path).ok();
             // Cap large files
-            let content = content.and_then(|c| {
-                if c.len() > 200_000 {
-                    None
-                } else {
-                    Some(c)
-                }
-            });
+            let content = content.and_then(|c| if c.len() > 200_000 { None } else { Some(c) });
             tree.insert(name, content);
         } else if path.is_dir() {
             // Record interesting nested markers without full recursion
@@ -893,10 +888,14 @@ fn parse_port_token(token: &str) -> Option<(u16, String)> {
     let parts: Vec<&str> = main.split(':').filter(|p| !p.is_empty()).collect();
     let port = match parts.as_slice() {
         [only] => only.parse::<u16>().ok()?,
-        [host, container] => container.parse::<u16>().ok().filter(|_| host.parse::<u16>().is_ok())?,
-        [_, host, container] => {
-            container.parse::<u16>().ok().filter(|_| host.parse::<u16>().is_ok())?
-        }
+        [host, container] => container
+            .parse::<u16>()
+            .ok()
+            .filter(|_| host.parse::<u16>().is_ok())?,
+        [_, host, container] => container
+            .parse::<u16>()
+            .ok()
+            .filter(|_| host.parse::<u16>().is_ok())?,
         _ => return None,
     };
     if port == 0 {
@@ -1035,7 +1034,10 @@ mod tests {
     #[test]
     fn detects_compose() {
         let mut tree = FileTree::new();
-        tree.insert("docker-compose.yml".into(), Some("services:\n  web:\n".into()));
+        tree.insert(
+            "docker-compose.yml".into(),
+            Some("services:\n  web:\n".into()),
+        );
         let d = detect(&tree);
         assert_eq!(d.framework, FrameworkKind::DockerCompose);
         assert_eq!(d.build_pack, "dockercompose");
@@ -1053,7 +1055,10 @@ mod tests {
         );
         let d = detect(&tree);
         assert_eq!(d.framework, FrameworkKind::Nitro);
-        assert!(!d.is_static, "Nitro / TanStack Start n’est pas un site statique");
+        assert!(
+            !d.is_static,
+            "Nitro / TanStack Start n’est pas un site statique"
+        );
         assert_eq!(d.build_pack, "nixpacks");
         assert_eq!(d.port, 3000);
         assert!(d.publish_directory.is_none());
@@ -1080,7 +1085,10 @@ mod tests {
             Some(r#"{"dependencies":{"astro":"^7.0.0","@astrojs/node":"^11.0.0"}}"#.into()),
         );
         let d = detect(&tree);
-        assert!(!d.is_static, "scoped @astrojs/node must not be treated as static");
+        assert!(
+            !d.is_static,
+            "scoped @astrojs/node must not be treated as static"
+        );
         assert_eq!(d.build_pack, "nixpacks");
         assert_eq!(d.port, 4321);
     }
@@ -1112,7 +1120,10 @@ mod tests {
                     .into(),
             ),
         );
-        tree.insert(".env.example".into(), Some("PORT=8080\nDATABASE_URL=postgres\n".into()));
+        tree.insert(
+            ".env.example".into(),
+            Some("PORT=8080\nDATABASE_URL=postgres\n".into()),
+        );
         let d = detect(&tree);
         assert_eq!(d.framework, FrameworkKind::Express);
         assert!(!d.is_static);

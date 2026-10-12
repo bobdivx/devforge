@@ -126,7 +126,13 @@ impl OpenAiStreamAccumulator {
         // différent sur un appel déjà rempli = nouvel appel.
         if let Some(existing) = self.calls.get(&index) {
             if !id.is_empty() && !existing.id.is_empty() && existing.id != id {
-                index = self.calls.keys().next_back().map(|k| k + 1).unwrap_or(0).max(index + 1);
+                index = self
+                    .calls
+                    .keys()
+                    .next_back()
+                    .map(|k| k + 1)
+                    .unwrap_or(0)
+                    .max(index + 1);
             }
         }
         let entry = self.calls.entry(index).or_default();
@@ -160,7 +166,11 @@ impl OpenAiStreamAccumulator {
             .enumerate()
             .filter(|(_, (_, c))| !c.name.is_empty())
             .map(|(i, (_, c))| ToolCallRequest {
-                id: if c.id.is_empty() { format!("call_{i}") } else { c.id },
+                id: if c.id.is_empty() {
+                    format!("call_{i}")
+                } else {
+                    c.id
+                },
                 name: c.name,
                 arguments: if c.args.trim().is_empty() {
                     json!({})
@@ -172,7 +182,11 @@ impl OpenAiStreamAccumulator {
         AssistantTurn {
             content: self.content,
             finish_reason: self.finish.unwrap_or_else(|| {
-                if tool_calls.is_empty() { "stop".into() } else { "tool_calls".into() }
+                if tool_calls.is_empty() {
+                    "stop".into()
+                } else {
+                    "tool_calls".into()
+                }
             }),
             tool_calls,
         }
@@ -216,7 +230,10 @@ mod tests {
         assert_eq!(turn.tool_calls[0].name, "read_project_file");
         assert_eq!(turn.tool_calls[0].arguments, json!({"path": "src/app.ts"}));
         assert_eq!(turn.tool_calls[1].name, "run_workdir_command");
-        assert_eq!(turn.tool_calls[1].arguments, json!({"command": "npm run build"}));
+        assert_eq!(
+            turn.tool_calls[1].arguments,
+            json!({"command": "npm run build"})
+        );
         assert_eq!(turn.finish_reason, "tool_calls");
     }
 
@@ -244,6 +261,12 @@ mod tests {
         acc.push_str("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"b\",\"function\":{\"name\":\"list_projects\",\"arguments\":\"{}\"}}]}}]}\n");
         acc.push_str("data: [DONE]\n");
         let t = acc.finish();
-        assert_eq!(t.tool_calls.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["get_project", "list_projects"]);
+        assert_eq!(
+            t.tool_calls
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            ["get_project", "list_projects"]
+        );
     }
 }
