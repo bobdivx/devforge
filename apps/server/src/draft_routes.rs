@@ -26,8 +26,14 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/projects/{uuid}/draft/validate", post(validate))
         .route("/api/v1/projects/{uuid}/draft/discard", post(discard))
         .route("/api/v1/projects/{uuid}/draft/restore", post(restore))
-        .route("/api/v1/projects/{uuid}/draft/revert-file", post(revert_file))
-        .route("/api/v1/projects/{uuid}/draft/update-from-github", post(update_from_github))
+        .route(
+            "/api/v1/projects/{uuid}/draft/revert-file",
+            post(revert_file),
+        )
+        .route(
+            "/api/v1/projects/{uuid}/draft/update-from-github",
+            post(update_from_github),
+        )
 }
 
 struct Ctx {
@@ -38,7 +44,10 @@ struct Ctx {
 }
 
 pub(crate) fn branch_of(p: &Project) -> String {
-    p.git_branch.clone().filter(|b| !b.trim().is_empty()).unwrap_or_else(|| "main".into())
+    p.git_branch
+        .clone()
+        .filter(|b| !b.trim().is_empty())
+        .unwrap_or_else(|| "main".into())
 }
 
 pub(crate) fn workdir_of(p: &Project) -> Option<PathBuf> {
@@ -46,19 +55,31 @@ pub(crate) fn workdir_of(p: &Project) -> Option<PathBuf> {
     if configured.is_empty() {
         return None;
     }
-    Some(PathBuf::from(devforge_deploy::resolve_project_workdir(configured, &p.uuid)))
+    Some(PathBuf::from(devforge_deploy::resolve_project_workdir(
+        configured, &p.uuid,
+    )))
 }
 
 async fn ctx(state: &AppState, headers: &HeaderMap, uuid: &str) -> Result<Ctx, ApiError> {
     let (user, _ws, project) = crate::routes::auth_project(state, headers, uuid).await?;
-    let workdir = workdir_of(&project).ok_or_else(|| ApiError::message("Cette app n'a pas de dossier de travail."))?;
+    let workdir = workdir_of(&project)
+        .ok_or_else(|| ApiError::message("Cette app n'a pas de dossier de travail."))?;
     let branch = branch_of(&project);
-    Ok(Ctx { user, project, workdir, branch })
+    Ok(Ctx {
+        user,
+        project,
+        workdir,
+        branch,
+    })
 }
 
 /// URL GitHub avec jeton (compte de l'utilisateur, sinon jeton d'instance) — jamais renvoyée au client.
 async fn remote_url(state: &AppState, c: &Ctx) -> Option<String> {
-    let repo = c.project.git_repository.as_deref().filter(|s| !s.trim().is_empty())?;
+    let repo = c
+        .project
+        .git_repository
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())?;
     let mut token = crate::user_prefs::github_token(&state.pool, &c.user.uuid).await;
     if token.trim().is_empty() {
         token = state.github.instance_token().unwrap_or_default();
@@ -74,7 +95,9 @@ fn backups_root(project_uuid: &str) -> PathBuf {
     draft::backups_root(&data_dir(), project_uuid)
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, draft::DraftError> + Send + 'static) -> Result<T, ApiError> {
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, draft::DraftError> + Send + 'static,
+) -> Result<T, ApiError> {
     tokio::task::spawn_blocking(f)
         .await
         .map_err(|e| ApiError::message(e.to_string()))?
@@ -82,15 +105,32 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, draft::DraftE
 }
 
 async fn audit(state: &AppState, c: &Ctx, status: &str, ref_id: &str, detail: &str) {
-    let who = if c.user.name.trim().is_empty() { &c.user.email } else { &c.user.name };
-    crate::deploy_queue::record_event(&state.pool, &c.project.uuid, "draft", status, ref_id, &format!("{who} · {detail}")).await;
+    let who = if c.user.name.trim().is_empty() {
+        &c.user.email
+    } else {
+        &c.user.name
+    };
+    crate::deploy_queue::record_event(
+        &state.pool,
+        &c.project.uuid,
+        "draft",
+        status,
+        ref_id,
+        &format!("{who} · {detail}"),
+    )
+    .await;
 }
 
 async fn preview_info(state: &AppState, uuid: &str) -> Value {
-    let fut = state.registry.execute("local_preview_status", json!({ "project_uuid": uuid }));
+    let fut = state
+        .registry
+        .execute("local_preview_status", json!({ "project_uuid": uuid }));
     match tokio::time::timeout(Duration::from_secs(3), fut).await {
         Ok(Ok(v)) => {
-            let running = matches!(v.get("status").and_then(|r| r.as_str()), Some("running" | "degraded"));
+            let running = matches!(
+                v.get("status").and_then(|r| r.as_str()),
+                Some("running" | "degraded")
+            );
             let url = v.get("preview_url").cloned().unwrap_or(Value::Null);
             json!({ "running": running, "url": if running { url } else { Value::Null } })
         }
@@ -107,11 +147,21 @@ fn status_json(st: &draft::DraftStatus) -> Value {
 
 fn age_days(updated_at: Option<&str>) -> Option<i64> {
     let t = chrono::DateTime::parse_from_rfc3339(updated_at?).ok()?;
-    Some((chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_days().max(0))
+    Some(
+        (chrono::Utc::now() - t.with_timezone(&chrono::Utc))
+            .num_days()
+            .max(0),
+    )
 }
 
 /// Origine, comparaison GitHub et recommandation (garder / à vérifier / supprimer).
-async fn enrich(state: &AppState, project_uuid: &str, st: &draft::DraftStatus, insight: Option<&draft::RemoteInsight>, out: &mut Value) {
+async fn enrich(
+    state: &AppState,
+    project_uuid: &str,
+    st: &draft::DraftStatus,
+    insight: Option<&draft::RemoteInsight>,
+    out: &mut Value,
+) {
     if !st.dirty {
         return;
     }
@@ -153,7 +203,11 @@ async fn get_draft(
 ) -> Result<Json<Value>, ApiError> {
     let c = ctx(&state, &headers, &uuid).await?;
     let fetch = matches!(q.fetch.as_deref(), Some("1" | "true"));
-    let url = if fetch { remote_url(&state, &c).await } else { None };
+    let url = if fetch {
+        remote_url(&state, &c).await
+    } else {
+        None
+    };
     let (wd, br) = (c.workdir.clone(), c.branch.clone());
     let (st, insight) = blocking(move || {
         let st = draft::status(&wd, &br, url.as_deref());
@@ -162,12 +216,18 @@ async fn get_draft(
     })
     .await?;
     let root = backups_root(&c.project.uuid);
-    let backups = tokio::task::spawn_blocking(move || draft::list_backups(&root)).await.unwrap_or_default();
+    let backups = tokio::task::spawn_blocking(move || draft::list_backups(&root))
+        .await
+        .unwrap_or_default();
     let mut out = status_json(&st);
     enrich(&state, &uuid, &st, insight.as_ref(), &mut out).await;
     out["ok"] = json!(true);
     out["backups"] = json!(backups);
-    out["preview"] = if st.dirty { preview_info(&state, &uuid).await } else { json!({ "running": false, "url": null }) };
+    out["preview"] = if st.dirty {
+        preview_info(&state, &uuid).await
+    } else {
+        json!({ "running": false, "url": null })
+    };
     Ok(Json(out))
 }
 
@@ -203,10 +263,14 @@ async fn validate(
 ) -> Result<Json<Value>, ApiError> {
     let c = ctx(&state, &headers, &uuid).await?;
     if !body.confirm.unwrap_or(false) {
-        return Err(ApiError::message("Confirmation requise pour valider le brouillon."));
+        return Err(ApiError::message(
+            "Confirmation requise pour valider le brouillon.",
+        ));
     }
     let Some(url) = remote_url(&state, &c).await else {
-        return Err(ApiError::message("Cette app n'est pas reliée à un dépôt GitHub."));
+        return Err(ApiError::message(
+            "Cette app n'est pas reliée à un dépôt GitHub.",
+        ));
     };
     let message = body.message.unwrap_or_default();
     let (wd, br) = (c.workdir.clone(), c.branch.clone());
@@ -215,8 +279,17 @@ async fn validate(
     match res {
         Ok(v) => {
             crate::draft_origin::forget(&state.pool, &c.project.uuid, None).await;
-            audit(&state, &c, "validated", &v.sha, &format!("{} fichier(s) envoyés sur GitHub ({})", v.files, v.branch)).await;
-            Ok(Json(json!({ "ok": true, "sha": v.sha, "files": v.files, "branch": v.branch })))
+            audit(
+                &state,
+                &c,
+                "validated",
+                &v.sha,
+                &format!("{} fichier(s) envoyés sur GitHub ({})", v.files, v.branch),
+            )
+            .await;
+            Ok(Json(
+                json!({ "ok": true, "sha": v.sha, "files": v.files, "branch": v.branch }),
+            ))
         }
         Err(e) => {
             audit(&state, &c, "failed", "validate", &e.message).await;
@@ -227,12 +300,20 @@ async fn validate(
 
 fn author_name(c: &Ctx) -> String {
     let n = c.user.name.trim();
-    if n.is_empty() { "DevForge".into() } else { n.to_string() }
+    if n.is_empty() {
+        "DevForge".into()
+    } else {
+        n.to_string()
+    }
 }
 
 fn author_email(c: &Ctx) -> String {
     let e = c.user.email.trim();
-    if e.is_empty() { "devforge@localhost".into() } else { e.to_string() }
+    if e.is_empty() {
+        "devforge@localhost".into()
+    } else {
+        e.to_string()
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -248,7 +329,9 @@ async fn discard(
 ) -> Result<Json<Value>, ApiError> {
     let c = ctx(&state, &headers, &uuid).await?;
     if !body.confirm.unwrap_or(false) {
-        return Err(ApiError::message("Confirmation requise pour supprimer le brouillon."));
+        return Err(ApiError::message(
+            "Confirmation requise pour supprimer le brouillon.",
+        ));
     }
     let url = remote_url(&state, &c).await;
     let root = backups_root(&c.project.uuid);
@@ -270,12 +353,23 @@ async fn discard(
         Ok((b, head, n)) => {
             let _ = tokio::time::timeout(
                 Duration::from_secs(10),
-                state.registry.execute("stop_local_preview", json!({ "project_uuid": uuid })),
+                state
+                    .registry
+                    .execute("stop_local_preview", json!({ "project_uuid": uuid })),
             )
             .await;
             crate::draft_origin::forget(&state.pool, &c.project.uuid, None).await;
-            audit(&state, &c, "discarded", &b.id, &format!("{n} fichier(s) supprimés, sauvegarde 7 jours")).await;
-            Ok(Json(json!({ "ok": true, "backup_id": b.id, "files": n, "head": head })))
+            audit(
+                &state,
+                &c,
+                "discarded",
+                &b.id,
+                &format!("{n} fichier(s) supprimés, sauvegarde 7 jours"),
+            )
+            .await;
+            Ok(Json(
+                json!({ "ok": true, "backup_id": b.id, "files": n, "head": head }),
+            ))
         }
         Err(e) => {
             audit(&state, &c, "failed", "discard", &e.message).await;
@@ -301,8 +395,17 @@ async fn restore(
     let wd = c.workdir.clone();
     let id2 = id.clone();
     let b = blocking(move || draft::restore(&wd, &root, &id2)).await?;
-    audit(&state, &c, "restored", &id, &format!("{} fichier(s) remis", b.files.len() + b.deleted.len())).await;
-    Ok(Json(json!({ "ok": true, "files": b.files.len() + b.deleted.len() })))
+    audit(
+        &state,
+        &c,
+        "restored",
+        &id,
+        &format!("{} fichier(s) remis", b.files.len() + b.deleted.len()),
+    )
+    .await;
+    Ok(Json(
+        json!({ "ok": true, "files": b.files.len() + b.deleted.len() }),
+    ))
 }
 
 #[derive(Deserialize, Default)]
@@ -319,7 +422,9 @@ async fn revert_file(
 ) -> Result<Json<Value>, ApiError> {
     let c = ctx(&state, &headers, &uuid).await?;
     if !body.confirm.unwrap_or(false) {
-        return Err(ApiError::message("Confirmation requise pour annuler ce fichier."));
+        return Err(ApiError::message(
+            "Confirmation requise pour annuler ce fichier.",
+        ));
     }
     let path = body.path.unwrap_or_default().trim().to_string();
     if path.is_empty() {
@@ -330,11 +435,9 @@ async fn revert_file(
     let p = path.clone();
     let b = blocking(move || {
         let st = draft::status(&wd, &br, None);
-        let file: DraftFile = st
-            .files
-            .into_iter()
-            .find(|f| f.path == p)
-            .ok_or_else(|| draft::DraftError("Ce fichier ne fait pas partie du brouillon.".into()))?;
+        let file: DraftFile = st.files.into_iter().find(|f| f.path == p).ok_or_else(|| {
+            draft::DraftError("Ce fichier ne fait pas partie du brouillon.".into())
+        })?;
         let b = draft::backup(&wd, &root, std::slice::from_ref(&file), "revert-file")?;
         draft::revert_file(&wd, &br, &file)?;
         Ok(b)
@@ -352,27 +455,44 @@ async fn update_from_github(
 ) -> Result<Json<Value>, ApiError> {
     let c = ctx(&state, &headers, &uuid).await?;
     let Some(url) = remote_url(&state, &c).await else {
-        return Err(ApiError::message("Cette app n'est pas reliée à un dépôt GitHub."));
+        return Err(ApiError::message(
+            "Cette app n'est pas reliée à un dépôt GitHub.",
+        ));
     };
     let (wd, br) = (c.workdir.clone(), c.branch.clone());
     let (name, email) = (author_name(&c), author_email(&c));
-    let u = blocking(move || draft::update_from_github(&wd, &br, Some(&url), (&name, &email))).await?;
+    let u =
+        blocking(move || draft::update_from_github(&wd, &br, Some(&url), (&name, &email))).await?;
     if u.merged > 0 {
-        audit(&state, &c, "updated", &u.head, &format!("{} commit(s) récupérés depuis GitHub", u.merged)).await;
+        audit(
+            &state,
+            &c,
+            "updated",
+            &u.head,
+            &format!("{} commit(s) récupérés depuis GitHub", u.merged),
+        )
+        .await;
     }
-    Ok(Json(json!({ "ok": true, "merged": u.merged, "head": u.head })))
+    Ok(Json(
+        json!({ "ok": true, "merged": u.merged, "head": u.head }),
+    ))
 }
 
 /// Vue globale : toutes les apps de l'espace qui ont un brouillon (sans réseau).
-async fn list_drafts(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Value>, ApiError> {
+async fn list_drafts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
     let (_user, ws) = crate::auth_routes::current_workspace(&state, &headers)
         .await
         .map_err(ApiError::from_auth)?;
-    let projects = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE workspace_uuid = $1 ORDER BY name")
-        .bind(&ws.uuid)
-        .fetch_all(&state.pool)
-        .await
-        .map_err(ApiError::from)?;
+    let projects = sqlx::query_as::<_, Project>(
+        "SELECT * FROM projects WHERE workspace_uuid = $1 ORDER BY name",
+    )
+    .bind(&ws.uuid)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
     let found = tokio::task::spawn_blocking(move || {
         projects
             .into_iter()

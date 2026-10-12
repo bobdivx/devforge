@@ -6,7 +6,9 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::openai::OpenAiCompatibleProvider;
-use crate::{err, humanize_llm_error, provider_from_config, ChatMessage, ChatRequest, LlmProvider, Result};
+use crate::{
+    err, humanize_llm_error, provider_from_config, ChatMessage, ChatRequest, LlmProvider, Result,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbeRequest {
@@ -36,13 +38,9 @@ pub async fn probe(req: &ProbeRequest) -> ProbeResult {
     let list_base = list_base_for(&provider, &req.base_url);
     let chat_base = chat_base_for(&provider, &req.base_url);
 
-    let resolved = OpenAiCompatibleProvider::resolve_model(
-        &provider,
-        &list_base,
-        &req.api_key,
-        &req.model,
-    )
-    .await;
+    let resolved =
+        OpenAiCompatibleProvider::resolve_model(&provider, &list_base, &req.api_key, &req.model)
+            .await;
 
     let (llm, mode) = provider_from_config(
         &provider,
@@ -194,7 +192,7 @@ mod tests {
             model: "models/antigravity-preview-05-2026".into(),
         })
         .await;
-        
+
         // Should fail and have an error message (not just "stub")
         assert!(!r.ok);
         assert!(r.error.is_some());

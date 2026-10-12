@@ -214,7 +214,10 @@ impl GitHubClient for HttpGitHubClient {
             .filter_map(|b| {
                 Some(GitBranch {
                     name: b.get("name")?.as_str()?.to_string(),
-                    protected: b.get("protected").and_then(|p| p.as_bool()).unwrap_or(false),
+                    protected: b
+                        .get("protected")
+                        .and_then(|p| p.as_bool())
+                        .unwrap_or(false),
                     commit_sha: b
                         .get("commit")?
                         .get("sha")?
@@ -386,9 +389,7 @@ impl GitHubClient for HttpGitHubClient {
         head: &str,
     ) -> Result<crate::GitCompare> {
         let data = self
-            .get(&format!(
-                "/repos/{owner}/{repo}/compare/{base}...{head}"
-            ))
+            .get(&format!("/repos/{owner}/{repo}/compare/{base}...{head}"))
             .await?;
         let commits_raw = data
             .get("commits")
@@ -449,10 +450,7 @@ impl GitHubClient for HttpGitHubClient {
                         .to_string(),
                     additions: f.get("additions").and_then(|v| v.as_u64()).unwrap_or(0),
                     deletions: f.get("deletions").and_then(|v| v.as_u64()).unwrap_or(0),
-                    patch: f
-                        .get("patch")
-                        .and_then(|p| p.as_str())
-                        .map(str::to_string),
+                    patch: f.get("patch").and_then(|p| p.as_str()).map(str::to_string),
                     previous_filename: f
                         .get("previous_filename")
                         .and_then(|p| p.as_str())
@@ -574,7 +572,10 @@ impl GitHubClient for HttpGitHubClient {
         path: &str,
         r#ref: Option<&str>,
     ) -> Result<Option<String>> {
-        Ok(self.get_file(owner, repo, path, r#ref).await?.map(|f| f.content))
+        Ok(self
+            .get_file(owner, repo, path, r#ref)
+            .await?
+            .map(|f| f.content))
     }
 
     async fn get_file(
@@ -716,7 +717,9 @@ impl GitHubClient for HttpGitHubClient {
 
     async fn list_repo_runners(&self, owner: &str, repo: &str) -> Result<Vec<RepoRunner>> {
         let data = self
-            .get(&format!("/repos/{owner}/{repo}/actions/runners?per_page=100"))
+            .get(&format!(
+                "/repos/{owner}/{repo}/actions/runners?per_page=100"
+            ))
             .await?;
         let arr = data
             .get("runners")
@@ -835,7 +838,10 @@ impl GitHubClient for HttpGitHubClient {
             full_name,
             name: repo_name,
             owner,
-            private: data.get("private").and_then(|p| p.as_bool()).unwrap_or(private),
+            private: data
+                .get("private")
+                .and_then(|p| p.as_bool())
+                .unwrap_or(private),
             default_branch: data
                 .get("default_branch")
                 .and_then(|b| b.as_str())
@@ -910,14 +916,9 @@ impl GitHubClient for HttpGitHubClient {
         let data = self
             .post_json(&format!("/repos/{owner}/{repo}/hooks"), &body)
             .await?;
-        let id = data
-            .get("id")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| {
-                devforge_shared::DevForgeError::Message(
-                    "GitHub webhook: réponse sans id".into(),
-                )
-            })?;
+        let id = data.get("id").and_then(|v| v.as_u64()).ok_or_else(|| {
+            devforge_shared::DevForgeError::Message("GitHub webhook: réponse sans id".into())
+        })?;
         Ok(RepoWebhook {
             id,
             active: data.get("active").and_then(|v| v.as_bool()).unwrap_or(true),

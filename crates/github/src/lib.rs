@@ -195,13 +195,7 @@ pub trait GitHubClient: Send + Sync {
     async fn list_releases(&self, owner: &str, repo: &str) -> Result<Vec<GitRelease>>;
 
     /// Compare `base`…`head` (sha or branch ref). `behind_by` = commits sur head absents de base.
-    async fn compare(
-        &self,
-        owner: &str,
-        repo: &str,
-        base: &str,
-        head: &str,
-    ) -> Result<GitCompare>;
+    async fn compare(&self, owner: &str, repo: &str, base: &str, head: &str) -> Result<GitCompare>;
 
     /// Met à jour la ref `heads/{branch}` vers `sha` (`force` pour rewind non-fast-forward).
     async fn update_ref(
@@ -268,11 +262,8 @@ pub trait GitHubClient: Send + Sync {
         ))
     }
 
-    async fn create_registration_token(
-        &self,
-        owner: &str,
-        repo: &str,
-    ) -> Result<RegistrationToken>;
+    async fn create_registration_token(&self, owner: &str, repo: &str)
+        -> Result<RegistrationToken>;
 
     async fn list_repo_runners(&self, owner: &str, repo: &str) -> Result<Vec<RepoRunner>>;
 
@@ -558,9 +549,16 @@ impl GitHubFacade {
 
     pub fn mode(&self) -> String {
         if let Some(token) = token_override() {
-            return if token.is_empty() { "off".into() } else { "http".into() };
+            return if token.is_empty() {
+                "off".into()
+            } else {
+                "http".into()
+            };
         }
-        self.mode.read().map(|m| m.clone()).unwrap_or_else(|_| "off".into())
+        self.mode
+            .read()
+            .map(|m| m.clone())
+            .unwrap_or_else(|_| "off".into())
     }
 
     pub fn set_client(&self, client: Arc<dyn GitHubClient>, mode: impl Into<String>) {
@@ -582,10 +580,7 @@ impl GitHubFacade {
         if let Some(token) = token_override() {
             return if token.is_empty() { None } else { Some(token) };
         }
-        self.token
-            .read()
-            .ok()
-            .and_then(|t| t.clone())
+        self.token.read().ok().and_then(|t| t.clone())
     }
 
     fn client(&self) -> Arc<dyn GitHubClient> {
@@ -750,9 +745,7 @@ impl GitHubFacade {
         repo: &str,
         run_id: u64,
     ) -> Result<Vec<WorkflowJob>> {
-        self.client()
-            .list_workflow_jobs(owner, repo, run_id)
-            .await
+        self.client().list_workflow_jobs(owner, repo, run_id).await
     }
 
     pub async fn create_repository(
@@ -798,8 +791,7 @@ impl GitHubFacade {
                 .as_deref()
                 .map(|u| u.trim_end_matches('/') == normalized)
                 .unwrap_or(false)
-                && (h.events.is_empty()
-                    || h.events.iter().any(|e| e == "push" || e == "*"))
+                && (h.events.is_empty() || h.events.iter().any(|e| e == "push" || e == "*"))
         }) {
             return Ok((existing, false));
         }

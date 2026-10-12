@@ -16,8 +16,29 @@ const ALLOWED_BINS: &[&str] = &[
 ];
 
 const BLOCKED_TOKENS: &[&str] = &[
-    ";", "&&", "||", "|", "`", "$(", "${", ">", "<", "\n", "\r", "sudo", "rm ", "rm\t", "chmod",
-    "chown", "curl", "wget", "ssh", "scp", "/bin/", "/usr/bin/", "../",
+    ";",
+    "&&",
+    "||",
+    "|",
+    "`",
+    "$(",
+    "${",
+    ">",
+    "<",
+    "\n",
+    "\r",
+    "sudo",
+    "rm ",
+    "rm\t",
+    "chmod",
+    "chown",
+    "curl",
+    "wget",
+    "ssh",
+    "scp",
+    "/bin/",
+    "/usr/bin/",
+    "../",
 ];
 
 fn validate_command(raw: &str) -> std::result::Result<Vec<String>, String> {
@@ -143,13 +164,12 @@ impl Tool for RunWorkdirCommandTool {
             }
         };
 
-        let project: Option<(String, Option<String>)> = sqlx::query_as(
-            "SELECT uuid, workdir FROM projects WHERE uuid = $1",
-        )
-        .bind(project_uuid)
-        .fetch_optional(self.pool.as_ref())
-        .await
-        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let project: Option<(String, Option<String>)> =
+            sqlx::query_as("SELECT uuid, workdir FROM projects WHERE uuid = $1")
+                .bind(project_uuid)
+                .fetch_optional(self.pool.as_ref())
+                .await
+                .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
         let Some((uuid, workdir_opt)) = project else {
             return Ok(json!({
@@ -178,7 +198,9 @@ impl Tool for RunWorkdirCommandTool {
 
         // P4-05 : processus tué (avec ses enfants) au timeout ou à l'annulation du run
         // (le futur est abandonné → `KillGroupOnDrop`).
-        let run = tokio::time::timeout(Duration::from_secs(timeout), run_killable(&bin, &args, &wd)).await;
+        let run =
+            tokio::time::timeout(Duration::from_secs(timeout), run_killable(&bin, &args, &wd))
+                .await;
         let run = run.map(Ok::<_, std::io::Error>);
         let output = match run {
             Ok(Ok(Ok(o))) => o,
@@ -281,7 +303,11 @@ impl Drop for KillGroupOnDrop {
     }
 }
 
-pub(crate) async fn run_killable(bin: &str, args: &[String], wd: &str) -> std::io::Result<std::process::Output> {
+pub(crate) async fn run_killable(
+    bin: &str,
+    args: &[String],
+    wd: &str,
+) -> std::io::Result<std::process::Output> {
     let mut cmd = tokio::process::Command::new(bin);
     cmd.args(args)
         .current_dir(wd)
@@ -293,7 +319,10 @@ pub(crate) async fn run_killable(bin: &str, args: &[String], wd: &str) -> std::i
     #[cfg(unix)]
     cmd.process_group(0);
     let child = cmd.spawn()?;
-    let mut guard = KillGroupOnDrop { pid: child.id(), done: false };
+    let mut guard = KillGroupOnDrop {
+        pid: child.id(),
+        done: false,
+    };
     let out = child.wait_with_output().await;
     guard.done = true;
     out
@@ -314,6 +343,9 @@ mod kill_tests {
         let r = tokio::time::timeout(Duration::from_millis(300), fut).await;
         assert!(r.is_err(), "doit être interrompu");
         tokio::time::sleep(Duration::from_millis(2500)).await;
-        assert!(!marker.exists(), "le processus enfant a été tué avant d'écrire");
+        assert!(
+            !marker.exists(),
+            "le processus enfant a été tué avant d'écrire"
+        );
     }
 }

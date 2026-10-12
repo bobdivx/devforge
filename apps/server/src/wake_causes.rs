@@ -42,10 +42,20 @@ fn normalizers() -> &'static [(Regex, &'static str)] {
     static RE: OnceLock<Vec<(Regex, &'static str)>> = OnceLock::new();
     RE.get_or_init(|| {
         vec![
-            (Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").unwrap(), "<uuid>"),
+            (
+                Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+                    .unwrap(),
+                "<uuid>",
+            ),
             (Regex::new(r"\b[0-9a-f]{7,40}\b").unwrap(), "<sha>"),
-            (Regex::new(r"(/tmp|/var/folders|/private/var)/[^\s:'\x22]+").unwrap(), "<tmp>"),
-            (Regex::new(r"\d{4}-\d{2}-\d{2}[t ][\d:.]+z?").unwrap(), "<ts>"),
+            (
+                Regex::new(r"(/tmp|/var/folders|/private/var)/[^\s:'\x22]+").unwrap(),
+                "<tmp>",
+            ),
+            (
+                Regex::new(r"\d{4}-\d{2}-\d{2}[t ][\d:.]+z?").unwrap(),
+                "<ts>",
+            ),
             (Regex::new(r"\d+").unwrap(), "<n>"),
             (Regex::new(r"\s+").unwrap(), " "),
         ]
@@ -148,8 +158,19 @@ pub async fn register_failure(
     .fetch_one(pool)
     .await?;
     let (occurrences, last_action, last_wake_at, first_seen) = row;
-    let decision = decide_wake(occurrences as i64, last_action.as_deref(), last_wake_at, Utc::now());
-    Ok(CauseState { hash, occurrences: occurrences as i64, last_action, first_seen, decision })
+    let decision = decide_wake(
+        occurrences as i64,
+        last_action.as_deref(),
+        last_wake_at,
+        Utc::now(),
+    );
+    Ok(CauseState {
+        hash,
+        occurrences: occurrences as i64,
+        last_action,
+        first_seen,
+        decision,
+    })
 }
 
 pub async fn mark_woken(pool: &PgPool, project_uuid: &str, hash: &str) {
@@ -183,10 +204,23 @@ pub fn cause_in_message(content: &str) -> Option<String> {
 /// Action déduite des outils d'un tour de réveil.
 pub fn action_from_tools(tools_json: &str) -> Option<&'static str> {
     let calls: Vec<Value> = serde_json::from_str(tools_json).unwrap_or_default();
-    let name = |c: &Value| c.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let ok = |c: &Value| c.get("result").and_then(|r| r.get("ok")).and_then(|v| v.as_bool()) != Some(false);
+    let name = |c: &Value| {
+        c.get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let ok = |c: &Value| {
+        c.get("result")
+            .and_then(|r| r.get("ok"))
+            .and_then(|v| v.as_bool())
+            != Some(false)
+    };
     let pushed = calls.iter().any(|c| {
-        matches!(name(c).as_str(), "create_github_fix" | "sync_workdir_to_github" | "publish_to_github") && ok(c)
+        matches!(
+            name(c).as_str(),
+            "create_github_fix" | "sync_workdir_to_github" | "publish_to_github"
+        ) && ok(c)
     });
     if pushed {
         return Some("pushed");
@@ -200,7 +234,10 @@ pub fn action_from_tools(tools_json: &str) -> Option<&'static str> {
         return Some("escalated");
     }
     let local = calls.iter().any(|c| {
-        matches!(name(c).as_str(), "write_project_file" | "run_workdir_command") && ok(c)
+        matches!(
+            name(c).as_str(),
+            "write_project_file" | "run_workdir_command"
+        ) && ok(c)
     });
     if local {
         return Some("local_fix");
@@ -209,9 +246,18 @@ pub fn action_from_tools(tools_json: &str) -> Option<&'static str> {
 }
 
 /// Fin d'un tour d'agent : si c'était un réveil lié à une cause, retenir ce qui a été fait.
-pub async fn record_run_action(pool: &PgPool, project_uuid: &str, user_message: &str, tools_json: &str) {
-    let Some(hash) = cause_in_message(user_message) else { return };
-    let Some(action) = action_from_tools(tools_json) else { return };
+pub async fn record_run_action(
+    pool: &PgPool,
+    project_uuid: &str,
+    user_message: &str,
+    tools_json: &str,
+) {
+    let Some(hash) = cause_in_message(user_message) else {
+        return;
+    };
+    let Some(action) = action_from_tools(tools_json) else {
+        return;
+    };
     let _ = sqlx::query(
         r#"UPDATE agent_wake_causes SET last_action = $3
            WHERE project_uuid = $1 AND cause_hash = $2 AND COALESCE(last_action, '') <> 'resolved'"#,
@@ -228,7 +274,9 @@ pub fn escalation_text(state: &CauseState, summary: &str) -> String {
     let first = ago(Utc::now() - state.first_seen);
     let what = match state.last_action.as_deref() {
         Some("local_fix") => "Le correctif local n'a pas été publié.",
-        Some("pushed") => "Le correctif a été poussé mais le déploiement échoue toujours : la cause est ailleurs.",
+        Some("pushed") => {
+            "Le correctif a été poussé mais le déploiement échoue toujours : la cause est ailleurs."
+        }
         Some("escalated") => "La validation de publication est toujours en attente.",
         _ => "La réparation précédente n'a rien changé.",
     };
@@ -262,7 +310,10 @@ mod tests {
         assert_eq!(a.len(), 16);
         let c = cause_hash(KIND_DEPLOY_FAIL, "Port 3000 déjà utilisé");
         assert_ne!(a, c);
-        assert_ne!(cause_hash("health", "package-lock.json désynchronisé"), cause_hash(KIND_DEPLOY_FAIL, "package-lock.json désynchronisé"));
+        assert_ne!(
+            cause_hash("health", "package-lock.json désynchronisé"),
+            cause_hash(KIND_DEPLOY_FAIL, "package-lock.json désynchronisé")
+        );
     }
 
     #[test]
@@ -277,11 +328,23 @@ mod tests {
     fn decisions_follow_the_plan() {
         let now = Utc::now();
         assert_eq!(decide_wake(1, None, None, now), WakeDecision::Normal);
-        assert_eq!(decide_wake(2, Some("local_fix"), Some(now - Duration::minutes(30)), now), WakeDecision::Escalate);
-        assert_eq!(decide_wake(3, Some("escalated"), Some(now - Duration::hours(1)), now), WakeDecision::Silent);
-        assert_eq!(decide_wake(5, Some("escalated"), Some(now - Duration::hours(7)), now), WakeDecision::Escalate);
+        assert_eq!(
+            decide_wake(2, Some("local_fix"), Some(now - Duration::minutes(30)), now),
+            WakeDecision::Escalate
+        );
+        assert_eq!(
+            decide_wake(3, Some("escalated"), Some(now - Duration::hours(1)), now),
+            WakeDecision::Silent
+        );
+        assert_eq!(
+            decide_wake(5, Some("escalated"), Some(now - Duration::hours(7)), now),
+            WakeDecision::Escalate
+        );
         // Une cause résolue qui revient = réveil normal.
-        assert_eq!(decide_wake(4, Some("resolved"), Some(now), now), WakeDecision::Normal);
+        assert_eq!(
+            decide_wake(4, Some("resolved"), Some(now), now),
+            WakeDecision::Normal
+        );
     }
 
     #[test]
@@ -291,7 +354,14 @@ mod tests {
         let d1 = decide_wake(1, None, None, now);
         let d2 = decide_wake(2, Some("local_fix"), Some(now - Duration::minutes(20)), now);
         let d3 = decide_wake(3, Some("escalated"), Some(now - Duration::minutes(5)), now);
-        assert_eq!((d1, d2, d3), (WakeDecision::Normal, WakeDecision::Escalate, WakeDecision::Silent));
+        assert_eq!(
+            (d1, d2, d3),
+            (
+                WakeDecision::Normal,
+                WakeDecision::Escalate,
+                WakeDecision::Silent
+            )
+        );
     }
 
     #[test]
@@ -308,7 +378,10 @@ mod tests {
     #[test]
     fn cause_marker_roundtrip() {
         let h = cause_hash(KIND_DEPLOY_FAIL, "x");
-        assert_eq!(cause_in_message(&format!("Événement…\nCause #{h}\n")), Some(h));
+        assert_eq!(
+            cause_in_message(&format!("Événement…\nCause #{h}\n")),
+            Some(h)
+        );
         assert_eq!(cause_in_message("rien"), None);
     }
 
@@ -336,24 +409,39 @@ mod tests {
         migrate(&pool).await.unwrap();
         let p = "proj-lock";
         let s = "package-lock.json désynchronisé avec package.json (npm ci)";
-        let a = register_failure(&pool, p, KIND_DEPLOY_FAIL, s, "dep-1").await.unwrap();
+        let a = register_failure(&pool, p, KIND_DEPLOY_FAIL, s, "dep-1")
+            .await
+            .unwrap();
         assert_eq!(a.decision, WakeDecision::Normal);
         mark_woken(&pool, p, &a.hash).await;
         // Même déploiement signalé deux fois (auto-repair + wake) : pas de double comptage.
-        let again = register_failure(&pool, p, KIND_DEPLOY_FAIL, s, "dep-1").await.unwrap();
+        let again = register_failure(&pool, p, KIND_DEPLOY_FAIL, s, "dep-1")
+            .await
+            .unwrap();
         assert_eq!(again.occurrences, 1);
-        record_run_action(&pool, p, &format!("AUTO-RÉPARATION\nCause #{}", a.hash),
-            r#"[{"name":"run_workdir_command","result":{"ok":true}}]"#).await;
-        let b = register_failure(&pool, p, KIND_DEPLOY_FAIL, s, "dep-2").await.unwrap();
+        record_run_action(
+            &pool,
+            p,
+            &format!("AUTO-RÉPARATION\nCause #{}", a.hash),
+            r#"[{"name":"run_workdir_command","result":{"ok":true}}]"#,
+        )
+        .await;
+        let b = register_failure(&pool, p, KIND_DEPLOY_FAIL, s, "dep-2")
+            .await
+            .unwrap();
         assert_eq!(b.occurrences, 2);
         assert_eq!(b.last_action.as_deref(), Some("local_fix"));
         assert_eq!(b.decision, WakeDecision::Escalate);
         mark_woken(&pool, p, &b.hash).await;
-        let c = register_failure(&pool, p, KIND_DEPLOY_FAIL, s, "dep-3").await.unwrap();
+        let c = register_failure(&pool, p, KIND_DEPLOY_FAIL, s, "dep-3")
+            .await
+            .unwrap();
         assert_eq!(c.occurrences, 3);
         assert_eq!(c.decision, WakeDecision::Silent);
         resolve_deploy_causes(&pool, p).await;
-        let d = register_failure(&pool, p, KIND_DEPLOY_FAIL, s, "dep-4").await.unwrap();
+        let d = register_failure(&pool, p, KIND_DEPLOY_FAIL, s, "dep-4")
+            .await
+            .unwrap();
         assert_eq!(d.occurrences, 1);
         assert_eq!(d.decision, WakeDecision::Normal);
     }

@@ -85,8 +85,12 @@ async fn cf_request<T: for<'de> Deserialize<'de>>(
         .map_err(|e| fail(format!("Cloudflare HTTP: {e}")))?;
     let status = res.status();
     let text = res.text().await.unwrap_or_default();
-    let parsed: CfEnvelope<T> =
-        serde_json::from_str(&text).map_err(|_| fail(format!("Cloudflare JSON HTTP {status}: {}", text.chars().take(240).collect::<String>())))?;
+    let parsed: CfEnvelope<T> = serde_json::from_str(&text).map_err(|_| {
+        fail(format!(
+            "Cloudflare JSON HTTP {status}: {}",
+            text.chars().take(240).collect::<String>()
+        ))
+    })?;
     if !status.is_success() || !parsed.success {
         let msg = parsed
             .errors
@@ -104,17 +108,14 @@ async fn cf_request<T: for<'de> Deserialize<'de>>(
             }
         )));
     }
-    parsed.result.ok_or_else(|| fail("Cloudflare: réponse vide"))
+    parsed
+        .result
+        .ok_or_else(|| fail("Cloudflare: réponse vide"))
 }
 
 pub async fn ping(token: &str) -> Result<String> {
-    let accounts: Vec<CfAccount> = cf_request(
-        token,
-        reqwest::Method::GET,
-        "/accounts?per_page=5",
-        None,
-    )
-    .await?;
+    let accounts: Vec<CfAccount> =
+        cf_request(token, reqwest::Method::GET, "/accounts?per_page=5", None).await?;
     let a = accounts
         .first()
         .ok_or_else(|| fail("Aucun compte Cloudflare pour ce token"))?;
@@ -130,13 +131,8 @@ pub async fn connect(token: &str, zone: &str) -> Result<CloudflareClient> {
     if token.is_empty() {
         return Err(fail("token Cloudflare manquant"));
     }
-    let accounts: Vec<CfAccount> = cf_request(
-        token,
-        reqwest::Method::GET,
-        "/accounts?per_page=5",
-        None,
-    )
-    .await?;
+    let accounts: Vec<CfAccount> =
+        cf_request(token, reqwest::Method::GET, "/accounts?per_page=5", None).await?;
     let account_id = accounts
         .first()
         .map(|a| a.id.clone())
@@ -178,24 +174,14 @@ pub async fn connect_for_fqdn(token: &str, fqdn: &str) -> Result<CloudflareClien
     if !fqdn.contains('.') {
         return Err(fail(format!("FQDN invalide: {fqdn}")));
     }
-    let accounts: Vec<CfAccount> = cf_request(
-        token,
-        reqwest::Method::GET,
-        "/accounts?per_page=5",
-        None,
-    )
-    .await?;
+    let accounts: Vec<CfAccount> =
+        cf_request(token, reqwest::Method::GET, "/accounts?per_page=5", None).await?;
     let account_id = accounts
         .first()
         .map(|a| a.id.clone())
         .ok_or_else(|| fail("Aucun compte Cloudflare pour ce token"))?;
-    let zones: Vec<CfZone> = cf_request(
-        token,
-        reqwest::Method::GET,
-        "/zones?per_page=50",
-        None,
-    )
-    .await?;
+    let zones: Vec<CfZone> =
+        cf_request(token, reqwest::Method::GET, "/zones?per_page=50", None).await?;
     let mut best: Option<CfZone> = None;
     for z in zones {
         let name = z.name.trim().trim_end_matches('.').to_lowercase();
@@ -211,10 +197,7 @@ pub async fn connect_for_fqdn(token: &str, fqdn: &str) -> Result<CloudflareClien
             .map(|b| name.len() > b.name.len())
             .unwrap_or(true);
         if better {
-            best = Some(CfZone {
-                id: z.id,
-                name,
-            });
+            best = Some(CfZone { id: z.id, name });
         }
     }
     let z = best.ok_or_else(|| {
@@ -270,10 +253,7 @@ impl CloudflareClient {
         let raw: Value = cf_request(
             &self.token,
             reqwest::Method::GET,
-            &format!(
-                "/accounts/{}/cfd_tunnel/{tunnel_id}/token",
-                self.account_id
-            ),
+            &format!("/accounts/{}/cfd_tunnel/{tunnel_id}/token", self.account_id),
             None,
         )
         .await?;
@@ -335,18 +315,16 @@ impl CloudflareClient {
             let u = k.to_ascii_uppercase();
             u == "CNAME" || u == "A" || u == "AAAA"
         };
-        let content_is_target = |c: &str| {
-            c.trim()
-                .trim_end_matches('.')
-                .eq_ignore_ascii_case(&target)
-        };
+        let content_is_target =
+            |c: &str| c.trim().trim_end_matches('.').eq_ignore_ascii_case(&target);
 
-        let already_ok = existing.iter().any(|r| {
-            r.kind.eq_ignore_ascii_case("CNAME") && content_is_target(&r.content)
-        }) && !existing.iter().any(|r| {
-            is_addr(&r.kind)
-                && !(r.kind.eq_ignore_ascii_case("CNAME") && content_is_target(&r.content))
-        });
+        let already_ok = existing
+            .iter()
+            .any(|r| r.kind.eq_ignore_ascii_case("CNAME") && content_is_target(&r.content))
+            && !existing.iter().any(|r| {
+                is_addr(&r.kind)
+                    && !(r.kind.eq_ignore_ascii_case("CNAME") && content_is_target(&r.content))
+            });
         if already_ok {
             return Ok(());
         }
@@ -366,10 +344,7 @@ impl CloudflareClient {
                 // n’est pas une vraie erreur métier.
                 let msg = e.to_string();
                 if !msg.contains("réponse vide") {
-                    return Err(fail(format!(
-                        "suppression {} {} : {msg}",
-                        rec.kind, fqdn
-                    )));
+                    return Err(fail(format!("suppression {} {} : {msg}", rec.kind, fqdn)));
                 }
             }
         }
@@ -401,9 +376,7 @@ impl CloudflareClient {
             Some((kind, content)) => Err(fail(format!(
                 "après écriture, Cloudflare a encore {kind} {content} (attendu CNAME {target})"
             ))),
-            None => Err(fail(format!(
-                "après écriture, aucun record pour {fqdn}"
-            ))),
+            None => Err(fail(format!("après écriture, aucun record pour {fqdn}"))),
         }
     }
 
@@ -469,10 +442,7 @@ impl CloudflareClient {
             } else {
                 r.kind
             };
-            (
-                kind,
-                r.content.trim().trim_end_matches('.').to_string(),
-            )
+            (kind, r.content.trim().trim_end_matches('.').to_string())
         }))
     }
 }
@@ -521,10 +491,7 @@ mod tests {
 
     #[test]
     fn porkbun_token_split() {
-        assert_eq!(
-            parse_porkbun_token("pk1:sk2"),
-            ("pk1".into(), "sk2".into())
-        );
+        assert_eq!(parse_porkbun_token("pk1:sk2"), ("pk1".into(), "sk2".into()));
         assert_eq!(parse_porkbun_token("only"), ("only".into(), "".into()));
     }
 }

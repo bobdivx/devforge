@@ -45,10 +45,7 @@ pub fn router() -> Router<AppState> {
             "/api/v1/deployments/{uuid}/request-repair",
             post(request_repair),
         )
-        .route(
-            "/api/v1/deployments/{uuid}/cancel",
-            post(cancel_deployment),
-        )
+        .route("/api/v1/deployments/{uuid}/cancel", post(cancel_deployment))
         .route("/api/v1/agent/tools", get(agent_tools))
         .route("/api/v1/agent/chat", post(agent_chat))
         .route("/api/v1/agent/tools/{tool}", post(agent_execute_tool))
@@ -296,7 +293,11 @@ async fn project_list_card(state: &AppState, project: &Project, github_sync: boo
 fn empty_to_none(v: Option<String>) -> Option<String> {
     v.and_then(|s| {
         let t = s.trim().to_string();
-        if t.is_empty() { None } else { Some(t) }
+        if t.is_empty() {
+            None
+        } else {
+            Some(t)
+        }
     })
 }
 
@@ -644,7 +645,6 @@ async fn scaffold_project(
     ))
 }
 
-
 #[derive(Deserialize, Default)]
 struct GetProjectQuery {
     /// Si true : probe HTTP/Docker + compare GitHub (lent). Défaut : Postgres seul.
@@ -890,8 +890,12 @@ async fn update_project(
         body.docker_compose_location
             .or(existing.docker_compose_location),
     )
-    .bind(empty_to_none(body.dockerfile_path.or(existing.dockerfile_path)))
-    .bind(empty_to_none(body.docker_build_context.or(existing.docker_build_context)))
+    .bind(empty_to_none(
+        body.dockerfile_path.or(existing.dockerfile_path),
+    ))
+    .bind(empty_to_none(
+        body.docker_build_context.or(existing.docker_build_context),
+    ))
     .bind(is_sso_protected)
     .bind(has_own_user_system)
     .bind(auto_deploy)
@@ -961,7 +965,11 @@ async fn delete_project(
         timeout: None,
     };
     let _ = state.deploy.stop(&ctx).await;
-    if project.dev_branch.as_deref().is_some_and(|b| !b.trim().is_empty()) {
+    if project
+        .dev_branch
+        .as_deref()
+        .is_some_and(|b| !b.trim().is_empty())
+    {
         let _ = crate::dev_env::teardown(&state, &project).await;
     }
 
@@ -1417,7 +1425,6 @@ pub(crate) async fn finish_manual_deploy(
             .await;
         });
     }
-
 }
 
 /// Résultat d'un run : succès/échec build, ou annulé (supersede).
@@ -1576,7 +1583,9 @@ pub(crate) async fn run_real_deploy(
                 result: devforge_deploy::DeployResult {
                     ok: false,
                     git_sha: None,
-                    logs: "[devforge] Déploiement annulé : remplacé par un déploiement plus récent\n".into(),
+                    logs:
+                        "[devforge] Déploiement annulé : remplacé par un déploiement plus récent\n"
+                            .into(),
                 },
                 cancelled: true,
             }
@@ -1786,13 +1795,10 @@ async fn cancel_deployment(
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::not_found("project"))?;
 
-    let cancelled = crate::deploy_queue::cancel_one_deployment(
-        &state.deploy_queue,
-        &state.pool,
-        &uuid,
-    )
-    .await
-    .map_err(ApiError::from)?;
+    let cancelled =
+        crate::deploy_queue::cancel_one_deployment(&state.deploy_queue, &state.pool, &uuid)
+            .await
+            .map_err(ApiError::from)?;
 
     if !cancelled {
         return Err(ApiError::message(
@@ -2070,7 +2076,12 @@ pub(crate) async fn wake_project_agent(
         .flatten();
         if let Some((count,)) = already {
             if count > 0 {
-                tracing::info!(project_uuid, agent_uuid, marker, "wake agent déjà envoyé, skip");
+                tracing::info!(
+                    project_uuid,
+                    agent_uuid,
+                    marker,
+                    "wake agent déjà envoyé, skip"
+                );
                 return Ok(());
             }
         }
@@ -2122,7 +2133,15 @@ pub(crate) async fn wake_project_agent(
     .map_err(|e| e.to_string())?;
 
     let title = crate::agent_runs::wake_title(marker, content);
-    let _ = crate::agent_runs::enqueue_with(&state.pool, project_uuid, agent_uuid, &msg_uuid, "wake", Some(&title)).await;
+    let _ = crate::agent_runs::enqueue_with(
+        &state.pool,
+        project_uuid,
+        agent_uuid,
+        &msg_uuid,
+        "wake",
+        Some(&title),
+    )
+    .await;
     let _ = trigger_agent_turn(state, project_uuid, agent_uuid).await;
     tracing::info!(project_uuid, agent_uuid, marker, "wake agent lancé");
     Ok(())
@@ -2222,10 +2241,47 @@ async fn agent_cron_tick(state: &AppState) -> Result<(), String> {
             agent_uuid,
             &now[..16.min(now.len())]
         );
-        if let Err(e) =
-            wake_project_agent(state, &project_uuid, &agent_uuid, &marker, &content).await
-        {
-            tracing::warn!(agent_uuid, error = %e, "wake cron agent échoué");
+        // P1-10 : contrôle de changement avant le run (état du projet + consigne).
+        let wake_key = format!("cron_agent:{agent_uuid}");
+        let gate = match crate::wake_gate::project_by_uuid(state, &project_uuid).await {
+            Some(project) => {
+                let observed = crate::wake_gate::observe(
+                    state,
+                    &project,
+                    true,
+                    serde_json::json!({ "instructions": content }),
+                )
+                .await;
+                Some(
+                    crate::wake_gate::check(
+                        &state.pool,
+                        &project_uuid,
+                        "cron_agent",
+                        &wake_key,
+                        "Agent planifié",
+                        &observed,
+                    )
+                    .await,
+                )
+            }
+            None => None,
+        };
+        if gate.as_ref().is_none_or(|g| g.launch()) {
+            let r = wake_project_agent(state, &project_uuid, &agent_uuid, &marker, &content).await;
+            if let Err(e) = &r {
+                tracing::warn!(agent_uuid, error = %e, "wake cron agent échoué");
+            }
+            if let Some(g) = &gate {
+                crate::wake_gate::after_wake(
+                    &state.pool,
+                    &project_uuid,
+                    &wake_key,
+                    &agent_uuid,
+                    g,
+                    &r,
+                )
+                .await;
+            }
         }
         let next = {
             let v: serde_json::Value =
@@ -2293,7 +2349,10 @@ pub(crate) async fn handle_deploy_failure(
         Err(e) => {
             tracing::warn!(error = %e, project_uuid, "cause de réveil non enregistrée — réveil normal");
             crate::wake_causes::CauseState {
-                hash: crate::wake_causes::cause_hash(crate::wake_causes::KIND_DEPLOY_FAIL, &summary),
+                hash: crate::wake_causes::cause_hash(
+                    crate::wake_causes::KIND_DEPLOY_FAIL,
+                    &summary,
+                ),
                 occurrences: 1,
                 last_action: None,
                 first_seen: chrono::Utc::now(),
@@ -2319,6 +2378,18 @@ pub(crate) async fn handle_deploy_failure(
     let content = match cause.decision {
         crate::wake_causes::WakeDecision::Silent => {
             tracing::info!(project_uuid, cause = %cause.hash, "même cause déjà escaladée : pas de réveil");
+            crate::wake_gate::record(
+                &state.pool,
+                project_uuid,
+                "deploy_fail",
+                &format!("deploy_fail:{}", cause.hash),
+                "Échec de déploiement",
+                crate::wake_gate::SKIPPED,
+                &format!("même cause déjà escaladée (P1-07, n={})", cause.occurrences),
+                &cause.hash,
+                None,
+            )
+            .await;
             return Ok(());
         }
         crate::wake_causes::WakeDecision::Escalate => format!(
@@ -2352,7 +2423,29 @@ pub(crate) async fn handle_deploy_failure(
         }
     };
     let marker = crate::db::coordinator_deploy_fail_marker(dep_uuid);
+    let wake_key = format!("deploy_fail:{}", cause.hash);
+    let gate = crate::wake_gate::Gate {
+        decision: crate::wake_gate::Decision::Launch {
+            cause: String::new(),
+        },
+        hash: cause.hash.clone(),
+        log_id: crate::wake_gate::record(
+            &state.pool,
+            project_uuid,
+            "deploy_fail",
+            &wake_key,
+            "Échec de déploiement",
+            crate::wake_gate::LAUNCHED,
+            &format!("{:?} (P1-07, n={})", cause.decision, cause.occurrences),
+            &cause.hash,
+            None,
+        )
+        .await,
+    };
     let r = wake_coordinator(state, project_uuid, &marker, &content).await;
+    if let Ok(Some(coord)) = crate::db::ensure_coordinator_agent(&state.pool, project_uuid).await {
+        crate::wake_gate::after_wake(&state.pool, project_uuid, &wake_key, &coord, &gate, &r).await;
+    }
     let event_marker = format!("{marker}:event-agents");
     let _ = wake_event_agents(state, project_uuid, "deploy_fail", &event_marker, &content).await;
     crate::wake_causes::mark_woken(&state.pool, project_uuid, &cause.hash).await;
@@ -2397,7 +2490,12 @@ async fn post_deploy_smoke(state: &AppState, project_uuid: &str, dep_uuid: &str,
     let mut verdict = None;
     let mut last = serde_json::Value::Null;
     for attempt in 0..3u64 {
-        tokio::time::sleep(std::time::Duration::from_secs(if attempt == 0 { delay } else { delay * 2 })).await;
+        tokio::time::sleep(std::time::Duration::from_secs(if attempt == 0 {
+            delay
+        } else {
+            delay * 2
+        }))
+        .await;
         last = devforge_agent::smoke_url(url, None).await;
         verdict = devforge_agent::post_deploy_verdict(&last);
         if verdict.is_none() {
@@ -2408,11 +2506,16 @@ async fn post_deploy_smoke(state: &AppState, project_uuid: &str, dep_uuid: &str,
         Some(st) => format!(
             "\n[vérification] GET {url} → {st} ({} ms){}\n",
             last.get("elapsed_ms").and_then(|v| v.as_u64()).unwrap_or(0),
-            last.get("title").and_then(|v| v.as_str()).map(|t| format!(" « {t} »")).unwrap_or_default()
+            last.get("title")
+                .and_then(|v| v.as_str())
+                .map(|t| format!(" « {t} »"))
+                .unwrap_or_default()
         ),
         None => format!(
             "\n[vérification] GET {url} → injoignable ({})\n",
-            last.get("error").and_then(|v| v.as_str()).unwrap_or("erreur réseau")
+            last.get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("erreur réseau")
         ),
     };
     let _ = sqlx::query("UPDATE deployments SET logs = COALESCE(logs, '') || $1 WHERE uuid = $2")
@@ -2464,15 +2567,50 @@ async fn wake_coordinator_health(
          explique l’impact, et propose les prochaines actions. Pour un diagnostic approfondi, \
          spawn un sous-agent (kind=subagent, parent_agent_uuid=ton uuid) plutôt qu’un nouveau chat permanent."
     );
+    // P1-10 : même état observé qu'au dernier réveil santé → pas de run.
+    let wake_key = format!("health:{status}");
+    let Some(project) = crate::wake_gate::project_by_uuid(state, project_uuid).await else {
+        return Err("projet introuvable".into());
+    };
+    let observed = crate::wake_gate::observe(
+        state,
+        &project,
+        false,
+        serde_json::json!({ "health": status }),
+    )
+    .await;
+    let gate = crate::wake_gate::check(
+        &state.pool,
+        project_uuid,
+        "health",
+        &wake_key,
+        label,
+        &observed,
+    )
+    .await;
+    if !gate.launch() {
+        return Ok(());
+    }
     let r = wake_coordinator(state, project_uuid, &marker, &content).await;
+    if let Ok(Some(coord)) = crate::db::ensure_coordinator_agent(&state.pool, project_uuid).await {
+        crate::wake_gate::after_wake(&state.pool, project_uuid, &wake_key, &coord, &gate, &r).await;
+    }
     let event_marker = format!("{marker}:event-agents");
-    let event = if status == "unrouted" { "unrouted" } else { "unhealthy" };
+    let event = if status == "unrouted" {
+        "unrouted"
+    } else {
+        "unhealthy"
+    };
     let _ = wake_event_agents(state, project_uuid, event, &event_marker, &content).await;
     r
 }
 
 /// Auto-trigger repair after failed deployment (max once per deployment uuid).
-async fn auto_trigger_repair(state: &AppState, dep_uuid: &str, cause_hash: &str) -> Result<(), String> {
+async fn auto_trigger_repair(
+    state: &AppState,
+    dep_uuid: &str,
+    cause_hash: &str,
+) -> Result<(), String> {
     // Check if repair already attempted for this deployment
     let already_attempted: Option<(i64,)> = sqlx::query_as(
         "SELECT COUNT(*) FROM agent_messages WHERE content LIKE $1 AND content LIKE $2",
@@ -2606,6 +2744,7 @@ pub(crate) async fn execute_claimed_run(
 ) -> Result<(), String> {
     let out = execute_claimed_run_inner(state, run).await;
     crate::run_routes::on_run_finished(state, &run.uuid).await;
+    crate::wake_gate::finish_by_run(&state.pool, &run.uuid).await;
     out
 }
 
@@ -2623,6 +2762,8 @@ async fn execute_claimed_run_inner(
     let mut ctx = load_agent_context(state, &run.project_uuid, &run.agent_uuid).await;
     ctx.run_uuid = Some(run.uuid.clone());
     ctx.cancel = Some(cancel.clone());
+    // P1-10 : personne devant l'écran → les actions distantes s'arrêtent à une demande de validation.
+    ctx.unattended = crate::wake_gate::is_unattended(&run.content);
     if ctx
         .history
         .last()
@@ -2671,12 +2812,8 @@ async fn execute_claimed_run_inner(
                 .await
             }
             None => {
-                crate::spec_routes::block_spec_no_provider(
-                    &state,
-                    &run.project_uuid,
-                    &run.content,
-                )
-                .await;
+                crate::spec_routes::block_spec_no_provider(&state, &run.project_uuid, &run.content)
+                    .await;
                 let note = devforge_agent::sdd::NOTE_NO_TOOL_PROVIDER;
                 crate::agent_runs::save_assistant_and_finish(
                     &state.pool,
@@ -2768,12 +2905,19 @@ async fn execute_claimed_run_inner(
                 return Ok(());
             }
             crate::agent_runs::fail_run(&state.pool, &run.uuid, &run.agent_uuid, &message).await;
-            let _ = handle.tx.send(devforge_agent::AgentEvent::Error { message: message.clone(), retryable: false });
+            let _ = handle.tx.send(devforge_agent::AgentEvent::Error {
+                message: message.clone(),
+                retryable: false,
+            });
             return Err(message);
         }
     };
     let tools_json = serde_json::to_string(&result.tool_calls).unwrap_or_else(|_| "[]".into());
-    let status = if cancel.is_cancelled() { "cancelled" } else { "completed" };
+    let status = if cancel.is_cancelled() {
+        "cancelled"
+    } else {
+        "completed"
+    };
     let _ = handle.tx.send(devforge_agent::AgentEvent::Reply {
         content: result.reply.clone(),
         provider: result.provider.clone(),
@@ -2797,7 +2941,13 @@ async fn execute_claimed_run_inner(
     if status == "cancelled" {
         return Ok(());
     }
-    crate::wake_causes::record_run_action(&state.pool, &run.project_uuid, &run.content, &tools_json).await;
+    crate::wake_causes::record_run_action(
+        &state.pool,
+        &run.project_uuid,
+        &run.content,
+        &tools_json,
+    )
+    .await;
     schedule_preview_repair(
         state.clone(),
         run.project_uuid.clone(),
@@ -2914,6 +3064,7 @@ pub(crate) async fn load_agent_context(
 ) -> devforge_agent::AgentChatContext {
     let mut ctx = devforge_agent::AgentChatContext {
         images: Vec::new(),
+        unattended: false,
         project_uuid: Some(project_uuid.to_string()),
         agent_uuid: Some(agent_uuid.to_string()),
         agent_role: None,
@@ -3174,8 +3325,8 @@ async fn attach_project_sqlite(state: &AppState, project: &Project) -> Result<()
                 key: "DATABASE_URL".into(),
                 value: "sqlite:data/app.db?mode=rwc".into(),
                 secret: false,
-                        preview_allowed: false,
-        },
+                preview_allowed: false,
+            },
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -3191,6 +3342,7 @@ async fn agent_chat(
     let (user, workspace) = require_auth(&state, &headers).await?;
     let mut ctx = devforge_agent::AgentChatContext {
         images: Vec::new(),
+        unattended: false,
         project_uuid: body.project_uuid.clone().filter(|s| !s.is_empty()),
         agent_uuid: body.agent_uuid.clone().filter(|s| !s.is_empty()),
         agent_role: None,
@@ -3268,22 +3420,29 @@ async fn agent_chat(
     let want_stream = body.stream.unwrap_or(false);
     let run_uuid = match (project_uuid.as_ref(), agent_uuid.as_ref()) {
         (Some(project_uuid), Some(agent_uuid)) => {
-            {
-                let turn = crate::rich_chat::prepare_user_turn(
+            let turn = crate::rich_chat::prepare_user_turn(
+                &state,
+                &user.uuid,
+                project_uuid,
+                agent_uuid,
+                &user_message,
+                body.answer.as_ref(),
+                body.reply_to.as_deref(),
+                &body.attachments,
+            )
+            .await?;
+            ctx.images = turn.images;
+            user_message = turn.for_model;
+            Some(
+                begin_agent_run_with(
                     &state,
-                    &user.uuid,
                     project_uuid,
                     agent_uuid,
-                    &user_message,
-                    body.answer.as_ref(),
-                    body.reply_to.as_deref(),
-                    &body.attachments,
+                    &turn.persisted,
+                    &turn.extras,
                 )
-                .await?;
-                ctx.images = turn.images;
-                user_message = turn.for_model;
-                Some(begin_agent_run_with(&state, project_uuid, agent_uuid, &turn.persisted, &turn.extras).await?)
-            }
+                .await?,
+            )
         }
         _ => None,
     };
@@ -3417,10 +3576,13 @@ async fn agent_chat(
         });
 
         if let (Some(run), None) = (run_uuid.as_ref(), ev_rx.as_ref()) {
-            return Ok(crate::run_routes::sse_from(crate::run_events::follow(state.pool.clone(), run.clone(), 0)));
+            return Ok(crate::run_routes::sse_from(crate::run_events::follow(
+                state.pool.clone(),
+                run.clone(),
+                0,
+            )));
         }
         let ev_rx = ev_rx.expect("canal direct sans run");
-
 
         let stream = stream::unfold(ev_rx, |mut rx| async move {
             match rx.recv().await {
@@ -3503,10 +3665,15 @@ async fn begin_agent_run_with(
     message: &str,
     extras: &crate::agent_runs::UserTurnExtras,
 ) -> Result<String, ApiError> {
-    let run_uuid =
-        crate::agent_runs::record_user_turn_with(&state.pool, project_uuid, agent_uuid, message, extras)
-            .await
-            .map_err(ApiError::message)?;
+    let run_uuid = crate::agent_runs::record_user_turn_with(
+        &state.pool,
+        project_uuid,
+        agent_uuid,
+        message,
+        extras,
+    )
+    .await
+    .map_err(ApiError::message)?;
     let claimed = crate::agent_runs::try_claim(&state.pool, &run_uuid)
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;
@@ -3660,8 +3827,8 @@ async fn upsert_env(
                 key: body.key,
                 value: body.value,
                 secret: body.secret.unwrap_or(true),
-                        preview_allowed: false,
-        },
+                preview_allowed: false,
+            },
         )
         .await
         .map_err(|e| ApiError::message(e.to_string()))?;
@@ -3765,7 +3932,6 @@ pub struct PublishProjectBody {
     pub description: Option<String>,
     pub private: Option<bool>,
 }
-
 
 async fn grant_publish(state: &AppState, project_uuid: &str) -> Result<(), ApiError> {
     let now = chrono::Utc::now();
@@ -4094,7 +4260,10 @@ async fn site_reach(state: &AppState, project: &Project) -> &'static str {
 
 /// Statut depuis Postgres uniquement (dernier déploiement + status stocké).
 /// Pas de probe HTTP/Docker — pour list/get project instantanés.
-pub(crate) async fn resolve_project_status_db(state: &AppState, project: &Project) -> Result<String, ApiError> {
+pub(crate) async fn resolve_project_status_db(
+    state: &AppState,
+    project: &Project,
+) -> Result<String, ApiError> {
     let latest: Option<(String,)> = sqlx::query_as(
         "SELECT status FROM deployments WHERE project_id = $1 AND environment = 'production' ORDER BY created_at DESC LIMIT 1",
     )
@@ -4104,9 +4273,8 @@ pub(crate) async fn resolve_project_status_db(state: &AppState, project: &Projec
     .map_err(ApiError::from)?;
 
     let derived = match latest.as_ref().map(|(s,)| s.as_str()) {
-        Some("running") | Some("queued") | Some("building") | Some("pending") | Some("deploying") => {
-            "deploying"
-        }
+        Some("running") | Some("queued") | Some("building") | Some("pending")
+        | Some("deploying") => "deploying",
         Some("failed") | Some("error") => "failed",
         Some("ready") | Some("success") | Some("completed") | Some("live") => {
             // Conserver le dernier statut de reach connu (live/unhealthy/unrouted/stopped).
@@ -4133,7 +4301,10 @@ pub(crate) async fn resolve_project_status_db(state: &AppState, project: &Projec
 }
 
 /// Statut avec probe live (HTTP public ou Docker). Lent — réservé à ?live=1.
-pub(crate) async fn resolve_project_status_live(state: &AppState, project: &Project) -> Result<String, ApiError> {
+pub(crate) async fn resolve_project_status_live(
+    state: &AppState,
+    project: &Project,
+) -> Result<String, ApiError> {
     let latest: Option<(String,)> = sqlx::query_as(
         "SELECT status FROM deployments WHERE project_id = $1 AND environment = 'production' ORDER BY created_at DESC LIMIT 1",
     )
@@ -4143,9 +4314,8 @@ pub(crate) async fn resolve_project_status_live(state: &AppState, project: &Proj
     .map_err(ApiError::from)?;
 
     let derived = match latest.as_ref().map(|(s,)| s.as_str()) {
-        Some("running") | Some("queued") | Some("building") | Some("pending") | Some("deploying") => {
-            "deploying"
-        }
+        Some("running") | Some("queued") | Some("building") | Some("pending")
+        | Some("deploying") => "deploying",
         Some("failed") | Some("error") => "failed",
         Some("ready") | Some("success") | Some("completed") | Some("live") => {
             site_reach(state, project).await

@@ -215,7 +215,9 @@ pub fn read_spec_markdown(workdir: &Path, slug: &str) -> Result<Option<String>, 
     if !path.exists() {
         return Ok(None);
     }
-    fs::read_to_string(&path).map(Some).map_err(|e| e.to_string())
+    fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 /// Extrait le bloc Intention d'un spec.md (pour préremplir « Ajuster »).
@@ -719,7 +721,6 @@ pub fn apply_implement_turn(
     Ok(next)
 }
 
-
 /// Le tour n'a même pas produit de réponse (quota, crédits, hôte injoignable).
 /// On n'incrémente pas les essais : ce n'est pas un travail vide du modèle.
 pub fn provider_failure_note(error: &str) -> String {
@@ -1085,16 +1086,24 @@ mod tests {
         let created = specify(&dir, "Template", "Une page.").unwrap();
         let approved = approve(&dir, &created.slug).unwrap();
         assert_eq!(approved.attempts, 1);
-        let dump = r#"{"name":"write_project_file","arguments":{"path":"README.md","content":"exemple"}}"#;
+        let dump =
+            r#"{"name":"write_project_file","arguments":{"path":"README.md","content":"exemple"}}"#;
         let report = TurnReport {
             reply: dump.into(),
             write_paths: vec!["README.md".into(), "README.md".into()],
             provider: "Ollama NAS".into(),
         };
-        assert!(implement_turn_is_empty(&report.reply, &report.write_paths, Verdict::Missing));
+        assert!(implement_turn_is_empty(
+            &report.reply,
+            &report.write_paths,
+            Verdict::Missing
+        ));
         let stopped = apply_implement_turn(&approved, Verdict::Missing, &report).unwrap();
         assert_eq!(stopped.phase, PHASE_FAILED);
-        assert_eq!(stopped.attempts, 1, "un tour vide ne consomme pas les essais");
+        assert_eq!(
+            stopped.attempts, 1,
+            "un tour vide ne consomme pas les essais"
+        );
         assert_eq!(stopped.blocker, "empty");
         assert!(stopped.note.contains("Ollama NAS"));
         assert!(stopped.note.contains("n'a pas fait le travail"));
@@ -1122,7 +1131,11 @@ mod tests {
             write_paths: vec!["src/pages/index.astro".into()],
             provider: "Gemini".into(),
         };
-        assert!(!implement_turn_is_empty(&real.reply, &real.write_paths, Verdict::Missing));
+        assert!(!implement_turn_is_empty(
+            &real.reply,
+            &real.write_paths,
+            Verdict::Missing
+        ));
         let again = apply_implement_turn(&approved, Verdict::Missing, &real).unwrap();
         assert_eq!(again.phase, PHASE_IMPLEMENT);
         assert_eq!(again.attempts, 2);
@@ -1147,7 +1160,9 @@ mod tests {
         assert!(skipped.iter().any(|(name, reason)| {
             name == "Ollama NAS" && reason.contains("ne sait pas appeler les outils")
         }));
-        assert!(skipped.iter().any(|(name, reason)| name == "Ancien" && reason == "désactivé"));
+        assert!(skipped
+            .iter()
+            .any(|(name, reason)| name == "Ancien" && reason == "désactivé"));
         let (used, _) = choose_spec_providers(&rows, "dem");
         assert_eq!(used[0].name, "Demeter");
         assert!(provider_label_for_user("stub").is_empty());

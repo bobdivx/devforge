@@ -52,8 +52,16 @@ pub fn initial_status(active: i64) -> &'static str {
 
 /// Nom de worker lisible et court à partir du titre.
 pub fn worker_name(title: &str) -> String {
-    let slug: String = title_key(title).split(' ').take(4).collect::<Vec<_>>().join("-");
-    let slug = if slug.is_empty() { "tache".to_string() } else { slug };
+    let slug: String = title_key(title)
+        .split(' ')
+        .take(4)
+        .collect::<Vec<_>>()
+        .join("-");
+    let slug = if slug.is_empty() {
+        "tache".to_string()
+    } else {
+        slug
+    };
     format!("worker-{}", slug.chars().take(40).collect::<String>())
 }
 
@@ -101,7 +109,9 @@ impl Tool for DelegateTaskTool {
         let reuse = s(&args, "reuse_worker_uuid");
         let parent_run = s(&args, "parent_run_uuid");
         if project_uuid.is_empty() || caller.is_empty() {
-            return Ok(json!({"ok": false, "error": "delegate_task doit être appelé depuis un fil agent de projet"}));
+            return Ok(
+                json!({"ok": false, "error": "delegate_task doit être appelé depuis un fil agent de projet"}),
+            );
         }
         if title.is_empty() || instructions.is_empty() {
             return Ok(json!({"ok": false, "error": "title et instructions requis"}));
@@ -116,7 +126,11 @@ impl Tool for DelegateTaskTool {
                 .map_err(db)?;
         match role {
             Some((r,)) if r == "coordinator" => {}
-            Some(_) => return Ok(json!({"ok": false, "error": "delegate_task est réservé au Coordinateur"})),
+            Some(_) => {
+                return Ok(
+                    json!({"ok": false, "error": "delegate_task est réservé au Coordinateur"}),
+                )
+            }
             None => return Ok(json!({"ok": false, "error": "agent appelant introuvable"})),
         }
 
@@ -130,7 +144,10 @@ impl Tool for DelegateTaskTool {
         .fetch_all(pool)
         .await
         .map_err(db)?;
-        if let Some((run, worker, status, t)) = active.iter().find(|(_, _, _, t)| t.as_deref().map(title_key).as_deref() == Some(key.as_str())) {
+        if let Some((run, worker, status, t)) = active
+            .iter()
+            .find(|(_, _, _, t)| t.as_deref().map(title_key).as_deref() == Some(key.as_str()))
+        {
             return Ok(json!({
                 "ok": true,
                 "status": "already_running",
@@ -208,11 +225,13 @@ impl Tool for DelegateTaskTool {
         .execute(pool)
         .await
         .map_err(db)?;
-        let _ = sqlx::query("UPDATE project_agents SET status = 'working', updated_at = $1 WHERE uuid = $2")
-            .bind(&now)
-            .bind(&worker_uuid)
-            .execute(pool)
-            .await;
+        let _ = sqlx::query(
+            "UPDATE project_agents SET status = 'working', updated_at = $1 WHERE uuid = $2",
+        )
+        .bind(&now)
+        .bind(&worker_uuid)
+        .execute(pool)
+        .await;
         if status == "pending" {
             if let Some(l) = worker_launcher() {
                 l.launch(project_uuid, &worker_uuid, &run_uuid);
@@ -243,7 +262,13 @@ mod tests {
 
     #[test]
     fn title_key_ignores_case_and_punctuation() {
-        assert_eq!(title_key("Refais la page d'accueil !"), title_key("refais  la page d accueil"));
-        assert_eq!(worker_name("Refais toute la page d'accueil"), "worker-refais-toute-la-page");
+        assert_eq!(
+            title_key("Refais la page d'accueil !"),
+            title_key("refais  la page d accueil")
+        );
+        assert_eq!(
+            worker_name("Refais toute la page d'accueil"),
+            "worker-refais-toute-la-page"
+        );
     }
 }

@@ -17,12 +17,7 @@ impl LlmProvider for StubLlmProvider {
 
     async fn chat(&self, req: ChatRequest) -> Result<AssistantTurn> {
         // After tools ran: summarize last tool result.
-        if let Some(tool_msg) = req
-            .messages
-            .iter()
-            .rev()
-            .find(|m| m.role == Role::Tool)
-        {
+        if let Some(tool_msg) = req.messages.iter().rev().find(|m| m.role == Role::Tool) {
             let name = tool_msg.name.as_deref().unwrap_or("tool");
             let preview: String = tool_msg.content.chars().take(600).collect();
             return Ok(AssistantTurn {
@@ -143,14 +138,22 @@ impl ScriptedLlmProvider {
 
     /// Tour texte seul.
     pub fn text(content: &str) -> AssistantTurn {
-        AssistantTurn { content: content.into(), tool_calls: vec![], finish_reason: "stop".into() }
+        AssistantTurn {
+            content: content.into(),
+            tool_calls: vec![],
+            finish_reason: "stop".into(),
+        }
     }
 
     /// Tour avec un appel d'outil.
     pub fn tool(id: &str, name: &str, arguments: serde_json::Value) -> AssistantTurn {
         AssistantTurn {
             content: String::new(),
-            tool_calls: vec![ToolCallRequest { id: id.into(), name: name.into(), arguments }],
+            tool_calls: vec![ToolCallRequest {
+                id: id.into(),
+                name: name.into(),
+                arguments,
+            }],
             finish_reason: "tool_calls".into(),
         }
     }
@@ -161,7 +164,11 @@ impl ScriptedLlmProvider {
             content: String::new(),
             tool_calls: calls
                 .into_iter()
-                .map(|(id, name, arguments)| ToolCallRequest { id: id.into(), name: name.into(), arguments })
+                .map(|(id, name, arguments)| ToolCallRequest {
+                    id: id.into(),
+                    name: name.into(),
+                    arguments,
+                })
                 .collect(),
             finish_reason: "tool_calls".into(),
         }

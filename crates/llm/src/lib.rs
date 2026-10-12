@@ -21,7 +21,9 @@ pub use catalog::{
 pub use errors::{classify, classify_message, humanize_llm_error, LlmErrorKind};
 pub use health::{probe, ProbeRequest, ProbeResult};
 pub use openai::OpenAiCompatibleProvider;
-pub use resilient::{with_retry_notifier, ChainEntry, ResilientLlmProvider, RetryNotifier, RetryPolicy};
+pub use resilient::{
+    with_retry_notifier, ChainEntry, ResilientLlmProvider, RetryNotifier, RetryPolicy,
+};
 pub use sse::OpenAiStreamAccumulator;
 pub use stub::{ScriptedLlmProvider, StubLlmProvider};
 
@@ -107,7 +109,11 @@ impl ChatMessage {
         }
     }
 
-    pub fn tool_result(tool_call_id: impl Into<String>, name: impl Into<String>, content: impl Into<String>) -> Self {
+    pub fn tool_result(
+        tool_call_id: impl Into<String>,
+        name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
         Self {
             role: Role::Tool,
             content: content.into(),
@@ -152,7 +158,11 @@ pub trait LlmProvider: Send + Sync {
     }
     async fn chat(&self, req: ChatRequest) -> Result<AssistantTurn>;
     /// Streaming (P2-02). Par défaut : appelle `chat()` et émet tout le texte en un seul morceau.
-    async fn chat_stream(&self, req: ChatRequest, on_delta: &DeltaSink<'_>) -> Result<AssistantTurn> {
+    async fn chat_stream(
+        &self,
+        req: ChatRequest,
+        on_delta: &DeltaSink<'_>,
+    ) -> Result<AssistantTurn> {
         let t = self.chat(req).await?;
         if !t.content.is_empty() {
             on_delta(&t.content);
@@ -213,7 +223,11 @@ pub fn provider_from_config(
                 return (Arc::new(StubLlmProvider), "stub".into());
             }
             let provider = if let Some(base) = custom_base {
-                OpenAiCompatibleProvider::new(base, if key.is_empty() { "sk-local" } else { key }, model)
+                OpenAiCompatibleProvider::new(
+                    base,
+                    if key.is_empty() { "sk-local" } else { key },
+                    model,
+                )
             } else {
                 OpenAiCompatibleProvider::openai(key, model)
             };
@@ -224,8 +238,8 @@ pub fn provider_from_config(
                 tracing::warn!("gemini sans clé — stub");
                 return (Arc::new(StubLlmProvider), "stub".into());
             }
-            let base = custom_base
-                .unwrap_or("https://generativelanguage.googleapis.com/v1beta/openai");
+            let base =
+                custom_base.unwrap_or("https://generativelanguage.googleapis.com/v1beta/openai");
             let m = if model == "auto" || model.is_empty() || model == "gpt-4o-mini" {
                 "gemini-2.5-flash"
             } else {
@@ -241,7 +255,9 @@ pub fn provider_from_config(
             let base = match custom_base {
                 Some(b) if !b.contains("api.anthropic.com") => b,
                 _ => {
-                    tracing::warn!("anthropic sans proxy OpenAI-compat — stub (utilise OpenRouter)");
+                    tracing::warn!(
+                        "anthropic sans proxy OpenAI-compat — stub (utilise OpenRouter)"
+                    );
                     return (Arc::new(StubLlmProvider), "stub".into());
                 }
             };
@@ -393,8 +409,25 @@ pub fn model_supports_vision(model: &str) -> bool {
     }
     let m = model.to_ascii_lowercase();
     const VISION: &[&str] = &[
-        "gpt-4o", "gpt-4.1", "gpt-5", "o3", "o4", "claude-3", "claude-sonnet", "claude-opus", "claude-haiku", "gemini",
-        "grok-4", "grok-2-vision", "vision", "llava", "pixtral", "qwen2.5-vl", "qwen-vl", "llama-4", "gemma-3",
+        "gpt-4o",
+        "gpt-4.1",
+        "gpt-5",
+        "o3",
+        "o4",
+        "claude-3",
+        "claude-sonnet",
+        "claude-opus",
+        "claude-haiku",
+        "gemini",
+        "grok-4",
+        "grok-2-vision",
+        "vision",
+        "llava",
+        "pixtral",
+        "qwen2.5-vl",
+        "qwen-vl",
+        "llama-4",
+        "gemma-3",
     ];
     VISION.iter().any(|k| m.contains(k))
 }
@@ -415,7 +448,10 @@ mod vision_tests {
     fn images_skip_serialization_when_empty() {
         let v = serde_json::to_value(ChatMessage::user("x")).unwrap();
         assert!(v.get("images").is_none());
-        let m = ChatMessage::user("x").with_images(vec![ImagePart { name: "a.png".into(), data_url: "data:image/png;base64,AA".into() }]);
+        let m = ChatMessage::user("x").with_images(vec![ImagePart {
+            name: "a.png".into(),
+            data_url: "data:image/png;base64,AA".into(),
+        }]);
         assert_eq!(m.images.len(), 1);
     }
 }

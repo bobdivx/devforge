@@ -7,7 +7,9 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use devforge_memory::{rules, ListReq, MemoryItem, MemoryStore, Scope, Tier, WriteOutcome, WriteReq};
+use devforge_memory::{
+    rules, ListReq, MemoryItem, MemoryStore, Scope, Tier, WriteOutcome, WriteReq,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -18,7 +20,10 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/v1/memory", get(list_memory).post(create_memory).delete(erase_memory))
+        .route(
+            "/api/v1/memory",
+            get(list_memory).post(create_memory).delete(erase_memory),
+        )
         .route(
             "/api/v1/memory/{uuid}",
             axum::routing::patch(correct_memory).delete(forget_memory),
@@ -29,7 +34,10 @@ pub fn router() -> Router<AppState> {
 }
 
 fn store(state: &AppState) -> Result<Arc<dyn MemoryStore>, ApiError> {
-    state.registry.memory().ok_or_else(|| ApiError::message("mémoire indisponible"))
+    state
+        .registry
+        .memory()
+        .ok_or_else(|| ApiError::message("mémoire indisponible"))
 }
 
 async fn auth(state: &AppState, headers: &HeaderMap) -> Result<(String, String), ApiError> {
@@ -128,16 +136,22 @@ async fn agent_names(state: &AppState, items: &[MemoryItem]) -> HashMap<String, 
     if ids.is_empty() {
         return HashMap::new();
     }
-    sqlx::query_as::<_, (String, String)>("SELECT uuid, name FROM project_agents WHERE uuid = ANY($1)")
-        .bind(&ids)
-        .fetch_all(&state.pool)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .collect()
+    sqlx::query_as::<_, (String, String)>(
+        "SELECT uuid, name FROM project_agents WHERE uuid = ANY($1)",
+    )
+    .bind(&ids)
+    .fetch_all(&state.pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .collect()
 }
 
-fn item_json(i: &MemoryItem, projects: &HashMap<String, String>, agents: &HashMap<String, String>) -> Value {
+fn item_json(
+    i: &MemoryItem,
+    projects: &HashMap<String, String>,
+    agents: &HashMap<String, String>,
+) -> Value {
     let by_agent = i.created_by.strip_prefix("agent:");
     json!({
         "uuid": i.uuid,
@@ -164,7 +178,10 @@ fn item_json(i: &MemoryItem, projects: &HashMap<String, String>, agents: &HashMa
 }
 
 async fn items_json(state: &AppState, items: &[MemoryItem]) -> Vec<Value> {
-    let (p, a) = (project_names(state, items).await, agent_names(state, items).await);
+    let (p, a) = (
+        project_names(state, items).await,
+        agent_names(state, items).await,
+    );
     items.iter().map(|i| item_json(i, &p, &a)).collect()
 }
 
@@ -199,7 +216,9 @@ async fn list_memory(
     let (user, _) = auth(&state, &headers).await?;
     let store = store(&state)?;
     let req = ListReq {
-        scope: q.scope.filter(|s| matches!(s.as_str(), "user" | "project" | "agent")),
+        scope: q
+            .scope
+            .filter(|s| matches!(s.as_str(), "user" | "project" | "agent")),
         tier: q.tier.as_deref().and_then(Tier::parse),
         query: q.q,
         project_uuid: q.project_uuid,
@@ -254,7 +273,9 @@ struct CreateBody {
 fn outcome_json(o: WriteOutcome) -> Result<Value, ApiError> {
     match o {
         WriteOutcome::Rejected(e) => Err(ApiError::message(e)),
-        WriteOutcome::Superseded { old, new } => Ok(json!({"ok": true, "outcome": "superseded", "uuid": new, "replaced": old})),
+        WriteOutcome::Superseded { old, new } => {
+            Ok(json!({"ok": true, "outcome": "superseded", "uuid": new, "replaced": old}))
+        }
         o => Ok(json!({"ok": true, "outcome": o.label(), "uuid": o.uuid()})),
     }
 }
@@ -268,7 +289,11 @@ async fn create_memory(
     let scope = match b.scope.as_deref().unwrap_or("user") {
         "user" => Scope::User,
         "project" => {
-            let p = b.project_uuid.clone().filter(|p| !p.is_empty()).ok_or_else(|| ApiError::message("projet requis"))?;
+            let p = b
+                .project_uuid
+                .clone()
+                .filter(|p| !p.is_empty())
+                .ok_or_else(|| ApiError::message("projet requis"))?;
             if !project_in_workspace(&state, &p, &team).await {
                 return Err(ApiError::forbidden("projet hors de ton espace"));
             }
@@ -276,13 +301,22 @@ async fn create_memory(
         }
         _ => return Err(ApiError::message("portée : user ou project")),
     };
-    let tier = Tier::parse(b.tier.as_deref().unwrap_or("profile")).ok_or_else(|| ApiError::message("tier inconnu"))?;
-    let mut req = WriteReq::new(&user, scope, tier, b.kind.as_deref().unwrap_or("fact"), &b.content);
+    let tier = Tier::parse(b.tier.as_deref().unwrap_or("profile"))
+        .ok_or_else(|| ApiError::message("tier inconnu"))?;
+    let mut req = WriteReq::new(
+        &user,
+        scope,
+        tier,
+        b.kind.as_deref().unwrap_or("fact"),
+        &b.content,
+    );
     req.key = b.key.filter(|k| !k.trim().is_empty());
     req.source = "user_said".into();
     req.created_by = "user".into();
     req.project_uuid = b.project_uuid;
-    req.expires_in = b.expires_in_hours.map(|h| std::time::Duration::from_secs(h.clamp(1, 168) * 3600));
+    req.expires_in = b
+        .expires_in_hours
+        .map(|h| std::time::Duration::from_secs(h.clamp(1, 168) * 3600));
     let out = store(&state)?.write(req).await.map_err(mem_err)?;
     Ok(Json(outcome_json(out)?))
 }
@@ -299,7 +333,10 @@ async fn correct_memory(
     Json(b): Json<CorrectBody>,
 ) -> Result<Json<Value>, ApiError> {
     let (user, _) = auth(&state, &headers).await?;
-    let out = store(&state)?.correct(&user, &uuid, &b.content).await.map_err(mem_err)?;
+    let out = store(&state)?
+        .correct(&user, &uuid, &b.content)
+        .await
+        .map_err(mem_err)?;
     Ok(Json(outcome_json(out)?))
 }
 
@@ -310,7 +347,11 @@ async fn forget_memory(
 ) -> Result<Json<Value>, ApiError> {
     let (user, _) = auth(&state, &headers).await?;
     let n = store(&state)?
-        .forget(&user, devforge_memory::ForgetTarget::Uuid(uuid), Some("oublié depuis les réglages".into()))
+        .forget(
+            &user,
+            devforge_memory::ForgetTarget::Uuid(uuid),
+            Some("oublié depuis les réglages".into()),
+        )
         .await
         .map_err(mem_err)?;
     if n == 0 {
@@ -327,7 +368,9 @@ async fn erase_memory(
 ) -> Result<Json<Value>, ApiError> {
     let (user, _) = auth(&state, &headers).await?;
     if q.all != Some(true) || q.confirm.as_deref() != Some("EFFACER") {
-        return Err(ApiError::message("confirmation requise : all=true&confirm=EFFACER"));
+        return Err(ApiError::message(
+            "confirmation requise : all=true&confirm=EFFACER",
+        ));
     }
     let n = store(&state)?.erase_all(&user).await.map_err(mem_err)?;
     tracing::info!(user_uuid = %user, erased = n, "mémoire : tout effacé à la demande de l'utilisateur");
@@ -340,23 +383,45 @@ async fn memory_history(
     Path(uuid): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let (user, _) = auth(&state, &headers).await?;
-    let items = store(&state)?.history(&user, &uuid).await.map_err(mem_err)?;
-    Ok(Json(json!({"ok": true, "items": items_json(&state, &items).await})))
+    let items = store(&state)?
+        .history(&user, &uuid)
+        .await
+        .map_err(mem_err)?;
+    Ok(Json(
+        json!({"ok": true, "items": items_json(&state, &items).await}),
+    ))
 }
 
-async fn set_pin(state: AppState, headers: HeaderMap, uuid: String, pinned: bool) -> Result<Json<Value>, ApiError> {
+async fn set_pin(
+    state: AppState,
+    headers: HeaderMap,
+    uuid: String,
+    pinned: bool,
+) -> Result<Json<Value>, ApiError> {
     let (user, _) = auth(&state, &headers).await?;
-    if !store(&state)?.set_pinned(&user, &uuid, pinned).await.map_err(mem_err)? {
+    if !store(&state)?
+        .set_pinned(&user, &uuid, pinned)
+        .await
+        .map_err(mem_err)?
+    {
         return Err(ApiError::not_found("souvenir"));
     }
     Ok(Json(json!({"ok": true, "pinned": pinned})))
 }
 
-async fn pin_memory(State(state): State<AppState>, headers: HeaderMap, Path(uuid): Path<String>) -> Result<Json<Value>, ApiError> {
+async fn pin_memory(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
     set_pin(state, headers, uuid, true).await
 }
 
-async fn unpin_memory(State(state): State<AppState>, headers: HeaderMap, Path(uuid): Path<String>) -> Result<Json<Value>, ApiError> {
+async fn unpin_memory(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
     set_pin(state, headers, uuid, false).await
 }
 
@@ -367,7 +432,8 @@ async fn unpin_memory(State(state): State<AppState>, headers: HeaderMap, Path(uu
 /// SHA court s'il ressemble à un vrai commit (« pending », « unknown » ignorés).
 fn short_sha(sha: &str) -> Option<String> {
     let sha = sha.trim();
-    (sha.len() >= 7 && sha.chars().all(|c| c.is_ascii_hexdigit())).then(|| sha.chars().take(7).collect())
+    (sha.len() >= 7 && sha.chars().all(|c| c.is_ascii_hexdigit()))
+        .then(|| sha.chars().take(7).collect())
 }
 
 async fn deployment_sha(state: &AppState, dep_uuid: &str) -> Option<String> {
@@ -381,19 +447,39 @@ async fn deployment_sha(state: &AppState, dep_uuid: &str) -> Option<String> {
     sha.as_deref().and_then(short_sha)
 }
 
-pub(crate) async fn system_write(state: &AppState, project_uuid: &str, kind: &str, key: Option<String>, content: String, source_ref: &str) {
-    let Some(store) = state.registry.memory() else { return };
-    let Some(owner) = project_owner(&state.pool, project_uuid).await else {
-        tracing::debug!(project_uuid, "mémoire : pas de propriétaire, journal non écrit");
+pub(crate) async fn system_write(
+    state: &AppState,
+    project_uuid: &str,
+    kind: &str,
+    key: Option<String>,
+    content: String,
+    source_ref: &str,
+) {
+    let Some(store) = state.registry.memory() else {
         return;
     };
-    let mut req = WriteReq::new(&owner, Scope::Project(project_uuid.to_string()), Tier::Log, kind, &content);
+    let Some(owner) = project_owner(&state.pool, project_uuid).await else {
+        tracing::debug!(
+            project_uuid,
+            "mémoire : pas de propriétaire, journal non écrit"
+        );
+        return;
+    };
+    let mut req = WriteReq::new(
+        &owner,
+        Scope::Project(project_uuid.to_string()),
+        Tier::Log,
+        kind,
+        &content,
+    );
     req.key = key;
     req.source = "system".into();
     req.source_ref = Some(source_ref.to_string());
     req.created_by = "system".into();
     match store.write(req).await {
-        Ok(WriteOutcome::Rejected(e)) => tracing::info!(project_uuid, error = %e, "mémoire : journal système refusé"),
+        Ok(WriteOutcome::Rejected(e)) => {
+            tracing::info!(project_uuid, error = %e, "mémoire : journal système refusé")
+        }
         Ok(_) => {}
         Err(e) => tracing::warn!(project_uuid, error = %e, "mémoire : journal système non écrit"),
     }
@@ -401,8 +487,16 @@ pub(crate) async fn system_write(state: &AppState, project_uuid: &str, kind: &st
 
 /// Déploiement réussi et vérifié : une ligne à jour par projet (clé `deploy.last_success`,
 /// l'historique reste consultable via les versions remplacées).
-pub async fn record_deploy_success(state: &AppState, project_uuid: &str, dep_uuid: &str, smoke: &str) {
-    let sha = deployment_sha(state, dep_uuid).await.map(|s| format!(" {s}")).unwrap_or_default();
+pub async fn record_deploy_success(
+    state: &AppState,
+    project_uuid: &str,
+    dep_uuid: &str,
+    smoke: &str,
+) {
+    let sha = deployment_sha(state, dep_uuid)
+        .await
+        .map(|s| format!(" {s}"))
+        .unwrap_or_default();
     let day = chrono::Utc::now().format("%d/%m/%Y");
     system_write(
         state,
@@ -423,7 +517,10 @@ pub async fn record_wake_cause(
     cause: &crate::wake_causes::CauseState,
     summary: &str,
 ) {
-    let sha = deployment_sha(state, dep_uuid).await.map(|s| format!(" {s}")).unwrap_or_default();
+    let sha = deployment_sha(state, dep_uuid)
+        .await
+        .map(|s| format!(" {s}"))
+        .unwrap_or_default();
     let decision = match cause.decision {
         crate::wake_causes::WakeDecision::Normal => "réveil et réparation",
         crate::wake_causes::WakeDecision::Escalate => "escalade à l'utilisateur",
@@ -433,14 +530,28 @@ pub async fn record_wake_cause(
         Some(last) => format!("{decision} (précédente : {last})"),
         None => decision.to_string(),
     };
-    let summary: String = summary.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(400).collect();
+    let summary: String = summary
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(400)
+        .collect();
     let content = format!(
         "Échec de déploiement{sha} : {summary} — cause #{} vue {} fois depuis le {}, dernière action : {action}.",
         cause.hash,
         cause.occurrences,
         cause.first_seen.format("%d/%m/%Y"),
     );
-    system_write(state, project_uuid, "incident", Some(format!("wake.cause.{}", cause.hash)), content, dep_uuid).await;
+    system_write(
+        state,
+        project_uuid,
+        "incident",
+        Some(format!("wake.cause.{}", cause.hash)),
+        content,
+        dep_uuid,
+    )
+    .await;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -463,13 +574,18 @@ pub fn spawn_maintenance(state: AppState) {
         let mut last_metrics_day = None;
         loop {
             interval.tick().await;
-            let Some(store) = state.registry.memory() else { return };
+            let Some(store) = state.registry.memory() else {
+                return;
+            };
             if !writable(&state).await {
                 continue;
             }
             let n = crate::run_events::purge(&state.pool).await;
             if n > 0 {
-                tracing::info!(purged = n, "événements de run de plus de 14 jours supprimés");
+                tracing::info!(
+                    purged = n,
+                    "événements de run de plus de 14 jours supprimés"
+                );
             }
             match store.purge_expired().await {
                 Ok(0) => {}
@@ -478,7 +594,9 @@ pub fn spawn_maintenance(state: AppState) {
             }
             let now = chrono::Utc::now();
             let today = now.date_naive();
-            if last_metrics_day.is_none() || (last_metrics_day != Some(today) && now.format("%H").to_string() == "03") {
+            if last_metrics_day.is_none()
+                || (last_metrics_day != Some(today) && now.format("%H").to_string() == "03")
+            {
                 last_metrics_day = Some(today);
                 match store.stats().await {
                     Ok(s) => tracing::info!(
@@ -506,7 +624,11 @@ mod tests {
         let pool = devforge_database::ephemeral_pg().await;
         crate::db::migrate(&pool).await.unwrap();
         crate::db::migrate(&pool).await.unwrap();
-        for (uuid, email, role) in [("u-admin", "a@x", "admin"), ("u-owner", "o@x", "user"), ("u-member", "m@x", "user")] {
+        for (uuid, email, role) in [
+            ("u-admin", "a@x", "admin"),
+            ("u-owner", "o@x", "user"),
+            ("u-member", "m@x", "user"),
+        ] {
             sqlx::query("INSERT INTO users (uuid, email, name, password_hash, role, created_at, updated_at) VALUES ($1,$2,$1,'',$3,'2026-01-01','2026-01-01')")
                 .bind(uuid).bind(email).bind(role).execute(&pool).await.unwrap();
         }
@@ -514,21 +636,35 @@ mod tests {
             .execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO projects (uuid, name, slug, workspace_uuid, created_at, updated_at) VALUES ('p-team','A','a','t1','x','x'), ('p-legacy','B','b','','x','x')")
             .execute(&pool).await.unwrap();
-        assert_eq!(project_owner(&pool, "p-team").await.as_deref(), Some("u-owner"));
-        assert_eq!(project_owner(&pool, "p-legacy").await.as_deref(), Some("u-admin"));
+        assert_eq!(
+            project_owner(&pool, "p-team").await.as_deref(),
+            Some("u-owner")
+        );
+        assert_eq!(
+            project_owner(&pool, "p-legacy").await.as_deref(),
+            Some("u-admin")
+        );
         assert_eq!(project_owner(&pool, "inconnu").await, None);
 
         // Table mémoire utilisable après la migration complète ; aucun secret en base.
         let store = devforge_memory::PgMemoryStore::new(pool.clone());
         let r = store
-            .write(WriteReq::new("u-owner", Scope::Project("p-team".into()), Tier::Log, "fact", "le token est ghp_abcdefghijklmnopqrstuvwxyz0123456789"))
+            .write(WriteReq::new(
+                "u-owner",
+                Scope::Project("p-team".into()),
+                Tier::Log,
+                "fact",
+                "le token est ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            ))
             .await
             .unwrap();
         assert!(matches!(r, WriteOutcome::Rejected(_)));
-        let leaked: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_memories WHERE content ~ 'ghp_|sk-|BEGIN'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let leaked: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM agent_memories WHERE content ~ 'ghp_|sk-|BEGIN'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(leaked, 0);
     }
 

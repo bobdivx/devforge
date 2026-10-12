@@ -18,7 +18,7 @@ impl CronService {
         .bind(project_uuid)
         .fetch_all(&self.pool)
         .await
-            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
         Ok(rows)
     }
 
@@ -31,19 +31,15 @@ impl CronService {
         Ok(row)
     }
 
-    pub async fn create(
-        &self,
-        project_uuid: &str,
-        req: CreateCronRequest,
-    ) -> Result<ProjectCron> {
+    pub async fn create(&self, project_uuid: &str, req: CreateCronRequest) -> Result<ProjectCron> {
         validate_cron_expression(&req.cron_expression)
             .map_err(|e| devforge_shared::DevForgeError::Message(e))?;
 
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
         let enabled = if req.enabled.unwrap_or(true) { 1 } else { 0 };
-        let next = next_run_time(&req.cron_expression, req.timezone.as_deref())
-            .map(|dt| dt.to_rfc3339());
+        let next =
+            next_run_time(&req.cron_expression, req.timezone.as_deref()).map(|dt| dt.to_rfc3339());
 
         sqlx::query(
             r#"INSERT INTO project_crons (
@@ -63,12 +59,11 @@ impl CronService {
         .bind(&now)
         .execute(&self.pool)
         .await
-            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
-        let cron = self
-            .get(&id)
-            .await?
-            .ok_or_else(|| devforge_shared::DevForgeError::Message("cron non trouvé après création".into()))?;
+        let cron = self.get(&id).await?.ok_or_else(|| {
+            devforge_shared::DevForgeError::Message("cron non trouvé après création".into())
+        })?;
         Ok(cron)
     }
 
@@ -111,12 +106,11 @@ impl CronService {
         .bind(id)
         .execute(&self.pool)
         .await
-            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
-        let cron = self
-            .get(id)
-            .await?
-            .ok_or_else(|| devforge_shared::DevForgeError::Message("cron introuvable après mise à jour".into()))?;
+        let cron = self.get(id).await?.ok_or_else(|| {
+            devforge_shared::DevForgeError::Message("cron introuvable après mise à jour".into())
+        })?;
         Ok(cron)
     }
 
@@ -163,7 +157,7 @@ impl CronService {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
         Ok(rows)
     }
 
@@ -182,7 +176,7 @@ impl CronService {
         .bind(&now)
         .execute(&self.pool)
         .await
-            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
         Ok(run_id)
     }
@@ -208,7 +202,7 @@ impl CronService {
         .bind(run_id)
         .execute(&self.pool)
         .await
-            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
         Ok(())
     }
@@ -233,7 +227,7 @@ impl CronService {
         .bind(cron_id)
         .execute(&self.pool)
         .await
-            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
         Ok(())
     }
@@ -250,7 +244,7 @@ impl CronService {
         .bind(&now)
         .fetch_all(&self.pool)
         .await
-            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
         Ok(rows)
     }

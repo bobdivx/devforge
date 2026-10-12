@@ -33,8 +33,14 @@ fn coerce_value(expected: &str, prop: &Value, v: &Value) -> Option<Value> {
             _ => None,
         },
         ("integer", Value::String(s)) => s.trim().parse::<i64>().ok().map(Value::from),
-        ("integer", Value::Number(n)) if n.is_f64() => n.as_f64().map(|f| Value::from(f.round() as i64)),
-        ("number", Value::String(s)) => s.trim().parse::<f64>().ok().and_then(|f| serde_json::Number::from_f64(f).map(Value::Number)),
+        ("integer", Value::Number(n)) if n.is_f64() => {
+            n.as_f64().map(|f| Value::from(f.round() as i64))
+        }
+        ("number", Value::String(s)) => s
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .and_then(|f| serde_json::Number::from_f64(f).map(Value::Number)),
         ("object", Value::String(s)) => match serde_json::from_str::<Value>(s.trim()) {
             Ok(Value::Object(m)) => Some(Value::Object(m)),
             _ => None,
@@ -64,13 +70,19 @@ fn string_to_array(s: &str, prop: &Value) -> Vec<Value> {
     } else {
         vec![t.to_string()]
     };
-    let item_type = prop.pointer("/items/type").and_then(|v| v.as_str()).unwrap_or("string");
+    let item_type = prop
+        .pointer("/items/type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("string");
     items
         .into_iter()
         .map(|i| clean_item(&i))
         .filter(|i| !i.is_empty())
         .map(|i| match item_type {
-            "integer" => i.parse::<i64>().map(Value::from).unwrap_or(Value::String(i)),
+            "integer" => i
+                .parse::<i64>()
+                .map(Value::from)
+                .unwrap_or(Value::String(i)),
             _ => Value::String(i),
         })
         .collect()
@@ -92,10 +104,15 @@ fn clean_item(s: &str) -> String {
     // Puces markdown / numérotation : « - a », « 1. a », « 2) a »
     let t = t.trim_start_matches(['-', '*', '•']).trim_start();
     let t = match t.find(|c: char| !c.is_ascii_digit()) {
-        Some(i) if i > 0 && (t[i..].starts_with(". ") || t[i..].starts_with(") ")) => t[i + 2..].trim_start(),
+        Some(i) if i > 0 && (t[i..].starts_with(". ") || t[i..].starts_with(") ")) => {
+            t[i + 2..].trim_start()
+        }
         _ => t,
     };
-    t.trim().trim_matches(|c| c == '"' || c == '\'').trim().to_string()
+    t.trim()
+        .trim_matches(|c| c == '"' || c == '\'')
+        .trim()
+        .to_string()
 }
 
 fn split_outside_quotes(s: &str, sep: char) -> Vec<String> {
@@ -177,13 +194,19 @@ mod tests {
 
     #[test]
     fn multiline_steps() {
-        let out = coerce_with(&plan_schema(), json!({"steps": "1. Lire, vérifier\n2. Écrire\n- Tester"}));
+        let out = coerce_with(
+            &plan_schema(),
+            json!({"steps": "1. Lire, vérifier\n2. Écrire\n- Tester"}),
+        );
         assert_eq!(out["steps"], json!(["Lire, vérifier", "Écrire", "Tester"]));
     }
 
     #[test]
     fn scalars() {
-        let out = coerce_with(&plan_schema(), json!({"force": "true", "timeout": "120", "arguments": "{\"a\":1}"}));
+        let out = coerce_with(
+            &plan_schema(),
+            json!({"force": "true", "timeout": "120", "arguments": "{\"a\":1}"}),
+        );
         assert_eq!(out["force"], json!(true));
         assert_eq!(out["timeout"], json!(120));
         assert_eq!(out["arguments"], json!({"a": 1}));

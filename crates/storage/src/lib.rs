@@ -197,7 +197,10 @@ impl ObjectStore for MemoryObjectStore {
     }
 
     async fn delete_object(&self, bucket: &str, key: &str) -> Result<bool> {
-        self.blobs.write().await.remove(&Self::blob_key(bucket, key));
+        self.blobs
+            .write()
+            .await
+            .remove(&Self::blob_key(bucket, key));
         let mut guard = self.objects.write().await;
         let Some(list) = guard.get_mut(bucket) else {
             return Ok(false);
@@ -238,9 +241,7 @@ impl S3ObjectStore {
     }
 
     fn bucket(&self, bucket_name: Option<&str>) -> Result<Bucket> {
-        let name: String = bucket_name
-            .unwrap_or(self.config.bucket.trim())
-            .to_string();
+        let name: String = bucket_name.unwrap_or(self.config.bucket.trim()).to_string();
         let endpoint = normalize_endpoint(&self.config.endpoint)?;
         let region = if self.config.region.trim().is_empty() {
             "fr-par".to_string()
@@ -279,9 +280,7 @@ impl ObjectStore for S3ObjectStore {
         if !res.status().is_success() {
             let status = res.status();
             let body = res.text().await.unwrap_or_default();
-            return Err(DevForgeError::Message(format!(
-                "S3 list {status}: {body}"
-            )));
+            return Err(DevForgeError::Message(format!("S3 list {status}: {body}")));
         }
         let xml = res
             .text()
@@ -324,9 +323,7 @@ impl ObjectStore for S3ObjectStore {
         if !res.status().is_success() {
             let status = res.status();
             let body = res.text().await.unwrap_or_default();
-            return Err(DevForgeError::Message(format!(
-                "S3 put {status}: {body}"
-            )));
+            return Err(DevForgeError::Message(format!("S3 put {status}: {body}")));
         }
         let etag = res
             .headers()
@@ -361,9 +358,7 @@ impl ObjectStore for S3ObjectStore {
         if !res.status().is_success() {
             let status = res.status();
             let body = res.text().await.unwrap_or_default();
-            return Err(DevForgeError::Message(format!(
-                "S3 get {status}: {body}"
-            )));
+            return Err(DevForgeError::Message(format!("S3 get {status}: {body}")));
         }
         res.bytes()
             .await

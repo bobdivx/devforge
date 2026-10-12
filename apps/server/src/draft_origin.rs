@@ -92,13 +92,28 @@ fn written_paths(tools_json: &str) -> Vec<String> {
     calls
         .iter()
         .filter(|c| c.get("name").and_then(|v| v.as_str()) == Some("write_project_file"))
-        .filter(|c| c.get("result").and_then(|r| r.get("ok")).and_then(|v| v.as_bool()) != Some(false))
-        .filter_map(|c| c.get("arguments")?.get("path")?.as_str().map(|p| p.trim_start_matches("./").to_string()))
+        .filter(|c| {
+            c.get("result")
+                .and_then(|r| r.get("ok"))
+                .and_then(|v| v.as_bool())
+                != Some(false)
+        })
+        .filter_map(|c| {
+            c.get("arguments")?
+                .get("path")?
+                .as_str()
+                .map(|p| p.trim_start_matches("./").to_string())
+        })
         .collect()
 }
 
 /// Fichiers du brouillon à attribuer au run (modifiés depuis son début ou écrits par lui).
-pub fn touched_by_run(workdir: &std::path::Path, files: &[DraftFile], since: chrono::DateTime<chrono::Utc>, written: &[String]) -> Vec<String> {
+pub fn touched_by_run(
+    workdir: &std::path::Path,
+    files: &[DraftFile],
+    since: chrono::DateTime<chrono::Utc>,
+    written: &[String],
+) -> Vec<String> {
     let since = since - chrono::Duration::seconds(5);
     files
         .iter()
@@ -123,28 +138,32 @@ pub async fn record_run(state: &AppState, run: &crate::agent_runs::RunRow, tools
     else {
         return;
     };
-    let Some(wd) = crate::draft_routes::workdir_of(&project) else { return };
+    let Some(wd) = crate::draft_routes::workdir_of(&project) else {
+        return;
+    };
     let branch = crate::draft_routes::branch_of(&project);
-    let started: Option<(String,)> = sqlx::query_as("SELECT created_at FROM agent_runs WHERE uuid = $1")
-        .bind(&run.uuid)
-        .fetch_optional(&state.pool)
-        .await
-        .ok()
-        .flatten();
+    let started: Option<(String,)> =
+        sqlx::query_as("SELECT created_at FROM agent_runs WHERE uuid = $1")
+            .bind(&run.uuid)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten();
     let Some(since) = started
         .and_then(|(t,)| chrono::DateTime::parse_from_rfc3339(&t).ok())
         .map(|t| t.with_timezone(&chrono::Utc))
     else {
         return;
     };
-    let agent_name: String = sqlx::query_as::<_, (String,)>("SELECT name FROM project_agents WHERE uuid = $1")
-        .bind(&run.agent_uuid)
-        .fetch_optional(&state.pool)
-        .await
-        .ok()
-        .flatten()
-        .map(|(n,)| n)
-        .unwrap_or_default();
+    let agent_name: String =
+        sqlx::query_as::<_, (String,)>("SELECT name FROM project_agents WHERE uuid = $1")
+            .bind(&run.agent_uuid)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|(n,)| n)
+            .unwrap_or_default();
     let written = written_paths(tools_json);
     let touched = tokio::task::spawn_blocking(move || {
         if !wd.is_dir() {
@@ -192,7 +211,17 @@ pub async fn load(pool: &PgPool, project_uuid: &str) -> HashMap<String, Origin> 
     rows.into_iter()
         .map(|(path, run, agent, name, kind, dep, at)| {
             let opt = |s: String| (!s.is_empty()).then_some(s);
-            (path, Origin { kind, run_uuid: opt(run), agent_uuid: opt(agent), agent_name: opt(name), deployment_uuid: dep, recorded_at: Some(at) })
+            (
+                path,
+                Origin {
+                    kind,
+                    run_uuid: opt(run),
+                    agent_uuid: opt(agent),
+                    agent_name: opt(name),
+                    deployment_uuid: dep,
+                    recorded_at: Some(at),
+                },
+            )
         })
         .collect()
 }
@@ -200,7 +229,9 @@ pub async fn load(pool: &PgPool, project_uuid: &str) -> HashMap<String, Origin> 
 /// Oublie l'origine (brouillon validé / supprimé, fichier annulé).
 pub async fn forget(pool: &PgPool, project_uuid: &str, path: Option<&str>) {
     let q = match path {
-        Some(p) => sqlx::query("DELETE FROM draft_origins WHERE project_uuid = $1 AND path = $2").bind(project_uuid).bind(p.to_string()),
+        Some(p) => sqlx::query("DELETE FROM draft_origins WHERE project_uuid = $1 AND path = $2")
+            .bind(project_uuid)
+            .bind(p.to_string()),
         None => sqlx::query("DELETE FROM draft_origins WHERE project_uuid = $1").bind(project_uuid),
     };
     let _ = q.execute(pool).await;
@@ -212,8 +243,14 @@ pub fn per_file(files: &[DraftFile], known: &HashMap<String, Origin>) -> Vec<Ori
         .iter()
         .map(|f| match known.get(&f.path) {
             Some(o) => o.clone(),
-            None if draft::is_lockfile(&f.path) => Origin { kind: "sync".into(), ..Default::default() },
-            None => Origin { kind: "manual".into(), ..Default::default() },
+            None if draft::is_lockfile(&f.path) => Origin {
+                kind: "sync".into(),
+                ..Default::default()
+            },
+            None => Origin {
+                kind: "manual".into(),
+                ..Default::default()
+            },
         })
         .collect()
 }
@@ -244,7 +281,11 @@ pub fn kinds(origins: &[Origin]) -> Vec<String> {
 
 /// Si une mise en ligne (production) a réussi après le déploiement en échec visé : sa date.
 pub async fn repair_obsolete_since(pool: &PgPool, origins: &[Origin]) -> Option<String> {
-    let deps: Vec<&str> = origins.iter().filter(|o| o.kind == "repair").filter_map(|o| o.deployment_uuid.as_deref()).collect();
+    let deps: Vec<&str> = origins
+        .iter()
+        .filter(|o| o.kind == "repair")
+        .filter_map(|o| o.deployment_uuid.as_deref())
+        .collect();
     if deps.is_empty() || origins.iter().any(|o| o.kind == "feature") {
         return None;
     }
@@ -281,13 +322,22 @@ mod tests {
 
     #[test]
     fn classify_runs() {
-        assert_eq!(classify("AUTO-RÉPARATION DÉPLOIEMENT\n\nLe déploiement dep-123 a échoué."), ("repair", Some("dep-123".into())));
-        assert_eq!(classify("COORD-WAKE:DEPLOY-FAIL:abc-9\n\nÉvénement"), ("repair", Some("abc-9".into())));
+        assert_eq!(
+            classify("AUTO-RÉPARATION DÉPLOIEMENT\n\nLe déploiement dep-123 a échoué."),
+            ("repair", Some("dep-123".into()))
+        );
+        assert_eq!(
+            classify("COORD-WAKE:DEPLOY-FAIL:abc-9\n\nÉvénement"),
+            ("repair", Some("abc-9".into()))
+        );
         assert_eq!(
             classify("Événement projet : échec de déploiement.\nDéploiement : d-7\nDiagnostic"),
             ("repair", Some("d-7".into()))
         );
-        assert_eq!(classify("[réparation preview] l'aperçu ne démarre pas").0, "repair");
+        assert_eq!(
+            classify("[réparation preview] l'aperçu ne démarre pas").0,
+            "repair"
+        );
         assert_eq!(classify("SDD-IMPLEMENT:dark-mode\nfais-le").0, "feature");
         assert_eq!(classify("Ajoute un bouton contact").0, "feature");
         assert_eq!(classify("COORD-WAKE:HEALTH:x").0, "routine");
@@ -295,15 +345,27 @@ mod tests {
 
     #[test]
     fn per_file_defaults_and_summary() {
-        let f = |p: &str| DraftFile { path: p.into(), status: "modified".into(), old_path: None };
+        let f = |p: &str| DraftFile {
+            path: p.into(),
+            status: "modified".into(),
+            old_path: None,
+        };
         let files = vec![f("package-lock.json"), f("src/a.ts"), f("src/b.ts")];
         let mut known = HashMap::new();
         known.insert(
             "src/b.ts".to_string(),
-            Origin { kind: "repair".into(), run_uuid: Some("r1".into()), recorded_at: Some("2026-10-11T00:00:00Z".into()), ..Default::default() },
+            Origin {
+                kind: "repair".into(),
+                run_uuid: Some("r1".into()),
+                recorded_at: Some("2026-10-11T00:00:00Z".into()),
+                ..Default::default()
+            },
         );
         let o = per_file(&files, &known);
-        assert_eq!(o.iter().map(|x| x.kind.as_str()).collect::<Vec<_>>(), vec!["sync", "manual", "repair"]);
+        assert_eq!(
+            o.iter().map(|x| x.kind.as_str()).collect::<Vec<_>>(),
+            vec!["sync", "manual", "repair"]
+        );
         assert_eq!(summary(&o).unwrap().run_uuid.as_deref(), Some("r1"));
         assert_eq!(kinds(&o), vec!["repair", "manual", "sync"]);
     }

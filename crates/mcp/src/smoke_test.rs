@@ -10,48 +10,69 @@ mod tests {
     #[test]
     fn catalog_preset_summary() {
         let presets = catalog();
-        println!("\n╔════════════════════════════════════════════════════════════════════════════╗");
+        println!(
+            "\n╔════════════════════════════════════════════════════════════════════════════╗"
+        );
         println!("║           CATALOGUE MCP DEVFORGE - RÉSUMÉ DES PRESETS                     ║");
-        println!("╚════════════════════════════════════════════════════════════════════════════╝\n");
-        
-        println!("{:<15} {:<12} {:<45} {:<10}", "PRESET", "AUTH_MODE", "URL", "HOSTED");
+        println!(
+            "╚════════════════════════════════════════════════════════════════════════════╝\n"
+        );
+
+        println!(
+            "{:<15} {:<12} {:<45} {:<10}",
+            "PRESET", "AUTH_MODE", "URL", "HOSTED"
+        );
         println!("{}", "─".repeat(90));
-        
+
         for preset in &presets {
             let auth_mode = preset.auth_mode.as_deref().unwrap_or("?");
             let url = preset.default_url.as_deref().unwrap_or("(none)");
-            let hosted = if preset.default_url.is_some() { "✓" } else { "✗" };
-            
+            let hosted = if preset.default_url.is_some() {
+                "✓"
+            } else {
+                "✗"
+            };
+
             let url_display = if url.len() > 45 {
                 format!("{}...", &url[..42])
             } else {
                 url.to_string()
             };
-            
-            println!("{:<15} {:<12} {:<45} {:<10}", 
-                preset.id, 
-                auth_mode, 
-                url_display, 
-                hosted
+
+            println!(
+                "{:<15} {:<12} {:<45} {:<10}",
+                preset.id, auth_mode, url_display, hosted
             );
         }
-        
+
         println!("\n📊 Statistiques:");
         let total = presets.len();
         let with_url = presets.iter().filter(|p| p.default_url.is_some()).count();
-        let token_auth = presets.iter().filter(|p| p.auth_mode.as_deref() == Some("token")).count();
-        let oauth_auth = presets.iter().filter(|p| p.auth_mode.as_deref() == Some("oauth")).count();
-        let self_hosted = presets.iter().filter(|p| p.auth_mode.as_deref() == Some("self_hosted")).count();
-        
+        let token_auth = presets
+            .iter()
+            .filter(|p| p.auth_mode.as_deref() == Some("token"))
+            .count();
+        let oauth_auth = presets
+            .iter()
+            .filter(|p| p.auth_mode.as_deref() == Some("oauth"))
+            .count();
+        let self_hosted = presets
+            .iter()
+            .filter(|p| p.auth_mode.as_deref() == Some("self_hosted"))
+            .count();
+
         println!("  Total presets: {}", total);
         println!("  Avec URL hébergée: {}", with_url);
         println!("  Auth token (Bearer OK): {}", token_auth);
         println!("  Auth OAuth (token insuffisant): {}", oauth_auth);
         println!("  Self-hosted (URL requise): {}", self_hosted);
-        
+
         // Vérifier que tous les presets ont un auth_mode
         let missing_auth = presets.iter().filter(|p| p.auth_mode.is_none()).count();
-        assert_eq!(missing_auth, 0, "Tous les presets doivent avoir un auth_mode");
+        assert_eq!(
+            missing_auth, 0,
+            "Tous les presets doivent avoir un auth_mode"
+        );
     }
 
     /// Vérifie la sérialisation JSON du body MCP sans charset.
@@ -70,14 +91,14 @@ mod tests {
                 }
             }
         });
-        
+
         // serde_json::to_vec ne devrait pas ajouter de charset
         let bytes = serde_json::to_vec(&body).expect("serialization failed");
-        
+
         // Vérifier que c'est du JSON valide
-        let reconstructed: serde_json::Value = 
+        let reconstructed: serde_json::Value =
             serde_json::from_slice(&bytes).expect("deserialization failed");
-        
+
         assert_eq!(
             reconstructed.get("method").and_then(|m| m.as_str()),
             Some("initialize")
@@ -96,18 +117,15 @@ mod tests {
     #[cfg(feature = "reqwest-blocking")]
     fn smoke_test_hosted_urls() {
         let presets = catalog();
-        let hosted: Vec<_> = presets
-            .iter()
-            .filter(|p| p.default_url.is_some())
-            .collect();
-        
+        let hosted: Vec<_> = presets.iter().filter(|p| p.default_url.is_some()).collect();
+
         println!("\n🔍 TEST DE SMOKE - URLs hébergées MCP\n");
         println!("{:<20} {:<50} {:<10}", "PRESET", "URL", "RÉSULTAT");
         println!("{}", "─".repeat(85));
-        
+
         for preset in hosted {
             let url = preset.default_url.as_ref().unwrap();
-            
+
             // Test HTTP HEAD ou OPTIONS pour vérifier l'accessibilité
             // Sans envoyer de secrets - juste tester que le host répond
             match reqwest::blocking::Client::new()
@@ -122,13 +140,14 @@ mod tests {
                     } else {
                         "⚠ status non-2xx"
                     };
-                    println!("{:<20} {:<50} {:<10} ({})", 
-                        preset.id, 
-                        &url[..url.len().min(50)], 
+                    println!(
+                        "{:<20} {:<50} {:<10} ({})",
+                        preset.id,
+                        &url[..url.len().min(50)],
                         result,
                         status
                     );
-                },
+                }
                 Err(e) => {
                     let err_str = if e.is_timeout() {
                         "✗ timeout"
@@ -137,15 +156,16 @@ mod tests {
                     } else {
                         "✗ erreur"
                     };
-                    println!("{:<20} {:<50} {:<10}", 
-                        preset.id, 
-                        &url[..url.len().min(50)], 
+                    println!(
+                        "{:<20} {:<50} {:<10}",
+                        preset.id,
+                        &url[..url.len().min(50)],
                         err_str
                     );
                 }
             }
         }
-        
+
         println!("\n⚠️  Ce test vérifie uniquement l'accessibilité des hosts.");
         println!("    Les vraies requêtes MCP (initialize) nécessitent des tokens.");
     }
@@ -156,7 +176,7 @@ mod tests {
         // L'ancien mcp.turso.tech ne résout plus → migré vers mcp.turso.ai
         let presets = catalog();
         let turso = presets.iter().find(|p| p.id == "turso").unwrap();
-        
+
         assert!(
             turso.default_url.as_deref() == Some("https://mcp.turso.ai/mcp"),
             "Turso URL doit pointer vers mcp.turso.ai (pas l'ancien mcp.turso.tech)"
@@ -171,7 +191,7 @@ mod tests {
             .iter()
             .filter(|p| p.auth_mode.as_deref() == Some("oauth"))
             .collect();
-        
+
         for preset in oauth_presets {
             // Vérifier qu'il y a une documentation tools_help OU setup_intro
             let has_doc = preset.tools_help.is_some() || preset.setup_intro.is_some();
@@ -180,11 +200,12 @@ mod tests {
                 "Preset {} (OAuth) doit avoir tools_help ou setup_intro pour documenter la limitation",
                 preset.id
             );
-            
+
             // Si tools_help existe, vérifier qu'il mentionne OAuth
             if let Some(help) = &preset.tools_help {
-                let mentions_oauth = help.to_lowercase().contains("oauth") 
-                    || help.contains("token") && (help.contains("suffit") || help.contains("insuffisant"));
+                let mentions_oauth = help.to_lowercase().contains("oauth")
+                    || help.contains("token")
+                        && (help.contains("suffit") || help.contains("insuffisant"));
                 assert!(
                     mentions_oauth,
                     "Preset {} tools_help devrait mentionner OAuth ou limitation token",
@@ -202,16 +223,17 @@ mod tests {
             .iter()
             .filter(|p| p.auth_mode.as_deref() == Some("self_hosted"))
             .collect();
-        
+
         for preset in self_hosted {
             // Pour self-hosted, default_url devrait être None ou optionnel
             if preset.default_url.is_some() {
-                println!("⚠️  Preset {} (self-hosted) a une default_url : {}", 
-                    preset.id, 
+                println!(
+                    "⚠️  Preset {} (self-hosted) a une default_url : {}",
+                    preset.id,
                     preset.default_url.as_ref().unwrap()
                 );
             }
-            
+
             // Devrait avoir un field "url" dans fields
             let has_url_field = preset.fields.iter().any(|f| f.key == "url");
             assert!(

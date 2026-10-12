@@ -44,7 +44,8 @@ struct Channel {
     cancel: CancellationToken,
 }
 
-static HUB: LazyLock<Mutex<HashMap<String, Channel>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static HUB: LazyLock<Mutex<HashMap<String, Channel>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
     for sql in [
@@ -111,10 +112,18 @@ pub fn is_live(run_uuid: &str) -> bool {
 }
 
 /// Historique en mémoire (`seq > after`) + abonnement, pris atomiquement.
-pub fn subscribe_live(run_uuid: &str, after: i64) -> Option<(Vec<RunEvent>, broadcast::Receiver<Live>)> {
+pub fn subscribe_live(
+    run_uuid: &str,
+    after: i64,
+) -> Option<(Vec<RunEvent>, broadcast::Receiver<Live>)> {
     let hub = HUB.lock().unwrap();
     let ch = hub.get(run_uuid)?;
-    let past = ch.buffer.iter().filter(|e| e.seq > after).cloned().collect();
+    let past = ch
+        .buffer
+        .iter()
+        .filter(|e| e.seq > after)
+        .cloned()
+        .collect();
     Some((past, ch.tx.subscribe()))
 }
 
@@ -132,7 +141,11 @@ pub fn cancel_local(run_uuid: &str) -> bool {
 /// Événement prêt à stocker : `Reply` voit ses résultats d'outils bornés (16 Ko chacun).
 pub fn to_payload(ev: &AgentEvent) -> (String, Value) {
     let mut v = serde_json::to_value(ev).unwrap_or_else(|_| json!({}));
-    let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("unknown").to_string();
+    let ty = v
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("unknown")
+        .to_string();
     if let AgentEvent::Reply { tool_calls, .. } = ev {
         let bounded: Vec<Value> = tool_calls
             .iter()
@@ -161,11 +174,18 @@ pub struct Sequencer {
 
 impl Sequencer {
     pub fn starting_at(next_seq: i64) -> Self {
-        Self { next_seq, ..Default::default() }
+        Self {
+            next_seq,
+            ..Default::default()
+        }
     }
 
     fn make(&mut self, ty: String, payload: Value) -> RunEvent {
-        let ev = RunEvent { seq: self.next_seq, ty, payload };
+        let ev = RunEvent {
+            seq: self.next_seq,
+            ty,
+            payload,
+        };
         self.next_seq += 1;
         ev
     }
@@ -179,7 +199,9 @@ impl Sequencer {
 
     /// Delta en attente depuis plus que la fenêtre ?
     pub fn delta_due(&self, now: Instant) -> bool {
-        self.delta.as_ref().is_some_and(|(_, _, t)| now.duration_since(*t) >= DELTA_WINDOW)
+        self.delta
+            .as_ref()
+            .is_some_and(|(_, _, t)| now.duration_since(*t) >= DELTA_WINDOW)
     }
 
     /// Événements à émettre pour cet `AgentEvent` (0, 1 ou 2 : delta en attente + événement).
@@ -212,7 +234,12 @@ impl Sequencer {
     }
 
     pub fn progress(&self) -> Value {
-        Value::Array(self.milestones.iter().map(|(l, s)| json!({"label": l, "status": s})).collect())
+        Value::Array(
+            self.milestones
+                .iter()
+                .map(|(l, s)| json!({"label": l, "status": s}))
+                .collect(),
+        )
     }
 }
 
@@ -239,14 +266,16 @@ async fn write_batch(pool: &PgPool, run_uuid: &str, agent_uuid: &str, rows: &mut
 }
 
 async fn last_seq(pool: &PgPool, run_uuid: &str) -> i64 {
-    sqlx::query_scalar::<_, Option<i32>>("SELECT MAX(seq) FROM agent_run_events WHERE run_uuid = $1")
-        .bind(run_uuid)
-        .fetch_one(pool)
-        .await
-        .ok()
-        .flatten()
-        .map(|s| s as i64)
-        .unwrap_or(0)
+    sqlx::query_scalar::<_, Option<i32>>(
+        "SELECT MAX(seq) FROM agent_run_events WHERE run_uuid = $1",
+    )
+    .bind(run_uuid)
+    .fetch_one(pool)
+    .await
+    .ok()
+    .flatten()
+    .map(|s| s as i64)
+    .unwrap_or(0)
 }
 
 /// Canal d'un run : à passer comme `progress` à l'agent ; jeton d'annulation partagé.
@@ -300,16 +329,19 @@ pub async fn start(pool: &PgPool, run_uuid: &str, agent_uuid: &str) -> RunHandle
                     }
                 }
             }
-            if rows.len() >= FLUSH_BATCH || (!rows.is_empty() && last_flush.elapsed() >= FLUSH_EVERY) {
+            if rows.len() >= FLUSH_BATCH
+                || (!rows.is_empty() && last_flush.elapsed() >= FLUSH_EVERY)
+            {
                 write_batch(&pool, &run, &agent, &mut rows).await;
                 last_flush = Instant::now();
                 if seq.progress_dirty {
                     seq.progress_dirty = false;
-                    let _ = sqlx::query("UPDATE agent_runs SET progress = $1::jsonb WHERE uuid = $2")
-                        .bind(seq.progress().to_string())
-                        .bind(&run)
-                        .execute(&pool)
-                        .await;
+                    let _ =
+                        sqlx::query("UPDATE agent_runs SET progress = $1::jsonb WHERE uuid = $2")
+                            .bind(seq.progress().to_string())
+                            .bind(&run)
+                            .execute(&pool)
+                            .await;
                 }
             }
         }
@@ -372,7 +404,11 @@ pub fn follow(pool: PgPool, run_uuid: String, after: i64) -> mpsc::Receiver<Out>
                 // Ce qui précède le tampon mémoire (run repris après redémarrage) vient de la base.
                 if let Some(first) = past.first() {
                     if first.seq > last + 1 {
-                        for e in history(&pool, &run_uuid, last).await.into_iter().filter(|e| e.seq < first.seq) {
+                        for e in history(&pool, &run_uuid, last)
+                            .await
+                            .into_iter()
+                            .filter(|e| e.seq < first.seq)
+                        {
                             last = e.seq;
                             if tx.send(Out::Event(e)).await.is_err() {
                                 return;
@@ -412,7 +448,9 @@ pub fn follow(pool: PgPool, run_uuid: String, after: i64) -> mpsc::Receiver<Out>
                     return;
                 }
             }
-            let status = run_status(&pool, &run_uuid).await.unwrap_or_else(|| "failed".into());
+            let status = run_status(&pool, &run_uuid)
+                .await
+                .unwrap_or_else(|| "failed".into());
             if is_terminal(&status) && !is_live(&run_uuid) {
                 // Dernier rattrapage (écriture finale du sink).
                 for e in history(&pool, &run_uuid, last).await {
@@ -455,20 +493,57 @@ mod tests {
     fn deltas_of_a_window_are_merged_and_order_is_kept() {
         let mut s = Sequencer::starting_at(1);
         let t = Instant::now();
-        assert!(s.push(&AgentEvent::Delta { text: "Bon".into(), round: 1 }, t).is_empty());
-        assert!(s.push(&AgentEvent::Delta { text: "jour".into(), round: 1 }, t).is_empty());
+        assert!(s
+            .push(
+                &AgentEvent::Delta {
+                    text: "Bon".into(),
+                    round: 1
+                },
+                t
+            )
+            .is_empty());
+        assert!(s
+            .push(
+                &AgentEvent::Delta {
+                    text: "jour".into(),
+                    round: 1
+                },
+                t
+            )
+            .is_empty());
         assert!(!s.delta_due(t));
         assert!(s.delta_due(t + DELTA_WINDOW));
-        let out = s.push(&AgentEvent::Milestone { label: "Build".into(), status: MilestoneStatus::Running }, t);
+        let out = s.push(
+            &AgentEvent::Milestone {
+                label: "Build".into(),
+                status: MilestoneStatus::Running,
+            },
+            t,
+        );
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].seq, 1);
         assert_eq!(out[0].payload["text"], "Bonjour");
         assert_eq!(out[1].seq, 2);
         assert_eq!(out[1].ty, "milestone");
-        assert_eq!(s.progress(), json!([{"label": "Build", "status": "running"}]));
+        assert_eq!(
+            s.progress(),
+            json!([{"label": "Build", "status": "running"}])
+        );
         // Un autre tour de texte ferme le précédent.
-        s.push(&AgentEvent::Delta { text: "a".into(), round: 2 }, t);
-        let out = s.push(&AgentEvent::Delta { text: "b".into(), round: 3 }, t);
+        s.push(
+            &AgentEvent::Delta {
+                text: "a".into(),
+                round: 2,
+            },
+            t,
+        );
+        let out = s.push(
+            &AgentEvent::Delta {
+                text: "b".into(),
+                round: 3,
+            },
+            t,
+        );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].payload["round"], 2);
     }
@@ -512,7 +587,10 @@ mod tests {
     async fn collect(mut rx: mpsc::Receiver<Out>) -> (Vec<i64>, Option<String>) {
         let mut seqs = Vec::new();
         let mut done = None;
-        while let Some(o) = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.expect("flux bloqué") {
+        while let Some(o) = tokio::time::timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .expect("flux bloqué")
+        {
             match o {
                 Out::Event(e) => seqs.push(e.seq),
                 Out::Done(s) => {
@@ -531,16 +609,29 @@ mod tests {
         // Abonné présent dès le début (comme la réponse SSE de /agent/chat).
         let early = follow(pool.clone(), "run-1".into(), 0);
         for i in 0..15 {
-            h.tx.send(AgentEvent::Thinking { round: i, label: format!("t{i}"), detail: String::new() }).unwrap();
+            h.tx.send(AgentEvent::Thinking {
+                round: i,
+                label: format!("t{i}"),
+                detail: String::new(),
+            })
+            .unwrap();
         }
         tokio::time::sleep(Duration::from_millis(400)).await;
         // Abonné tardif qui reprend après seq=5 (reconnexion Last-Event-ID).
         let late = follow(pool.clone(), "run-1".into(), 5);
         for i in 15..30 {
-            h.tx.send(AgentEvent::Thinking { round: i, label: format!("t{i}"), detail: String::new() }).unwrap();
+            h.tx.send(AgentEvent::Thinking {
+                round: i,
+                label: format!("t{i}"),
+                detail: String::new(),
+            })
+            .unwrap();
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
-        sqlx::query("UPDATE agent_runs SET status = 'completed' WHERE uuid = 'run-1'").execute(&pool).await.unwrap();
+        sqlx::query("UPDATE agent_runs SET status = 'completed' WHERE uuid = 'run-1'")
+            .execute(&pool)
+            .await
+            .unwrap();
         drop(h);
         let (a, da) = collect(early).await;
         let (b, db) = collect(late).await;
@@ -550,7 +641,10 @@ mod tests {
         assert_eq!(db.as_deref(), Some("completed"));
         // Relecture complète et ordonnée depuis la base, une fois le run fini.
         let rows = history(&pool, "run-1", 0).await;
-        assert_eq!(rows.iter().map(|e| e.seq).collect::<Vec<_>>(), (1..=30).collect::<Vec<_>>());
+        assert_eq!(
+            rows.iter().map(|e| e.seq).collect::<Vec<_>>(),
+            (1..=30).collect::<Vec<_>>()
+        );
         assert_eq!(rows[29].payload["label"], "t29");
         let (c, dc) = collect(follow(pool.clone(), "run-1".into(), 28)).await;
         assert_eq!(c, vec![29, 30]);
@@ -566,7 +660,10 @@ mod tests {
         drop(h);
         tokio::time::sleep(Duration::from_millis(300)).await;
         let h = start(&pool, "run-1", "a").await;
-        h.tx.send(AgentEvent::Ack { text: "encore".into() }).unwrap();
+        h.tx.send(AgentEvent::Ack {
+            text: "encore".into(),
+        })
+        .unwrap();
         drop(h);
         tokio::time::sleep(Duration::from_millis(300)).await;
         let rows = history(&pool, "run-1", 0).await;
@@ -584,7 +681,12 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
         // Autre nœud : drapeau en base relu par le sink.
         let h = start(&pool, "run-1", "a").await;
-        sqlx::query("UPDATE agent_runs SET cancel_requested = TRUE WHERE uuid = 'run-1'").execute(&pool).await.unwrap();
-        tokio::time::timeout(Duration::from_secs(3), h.cancel.cancelled()).await.expect("annulation relue");
+        sqlx::query("UPDATE agent_runs SET cancel_requested = TRUE WHERE uuid = 'run-1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(3), h.cancel.cancelled())
+            .await
+            .expect("annulation relue");
     }
 }

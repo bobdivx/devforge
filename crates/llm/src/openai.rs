@@ -35,7 +35,11 @@ pub struct OpenAiCompatibleProvider {
 }
 
 impl OpenAiCompatibleProvider {
-    pub fn new(base_url: impl Into<String>, api_key: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             api_key: api_key.into(),
@@ -93,7 +97,11 @@ impl OpenAiCompatibleProvider {
             // Chat/agents uniquement : écarte image, vidéo, voix.
             ids.retain(|m| {
                 let l = m.to_lowercase();
-                !(l.contains("imagine") || l.contains("image") || l.contains("video") || l.contains("voice") || l.contains("tts"))
+                !(l.contains("imagine")
+                    || l.contains("image")
+                    || l.contains("video")
+                    || l.contains("voice")
+                    || l.contains("tts"))
             });
             return Ok(ids);
         }
@@ -128,7 +136,10 @@ impl OpenAiCompatibleProvider {
             .await
             .map_err(|e| err(format!("Impossible de joindre Ollama : {e}")))?;
         let status = res.status();
-        let body = res.text().await.map_err(|e| err(format!("ollama body: {e}")))?;
+        let body = res
+            .text()
+            .await
+            .map_err(|e| err(format!("ollama body: {e}")))?;
         if !status.is_success() {
             return Err(err(format!("Ollama /api/tags HTTP {status}: {body}")));
         }
@@ -225,7 +236,9 @@ impl OpenAiCompatibleProvider {
                 Err(e) => last_err = format!("{url}: {e}"),
             }
         }
-        Err(err(format!("Impossible de récupérer les modèles {provider} : {last_err}")))
+        Err(err(format!(
+            "Impossible de récupérer les modèles {provider} : {last_err}"
+        )))
     }
 
     fn openai_model_urls(base: &str) -> Vec<String> {
@@ -370,12 +383,25 @@ impl OpenAiCompatibleProvider {
 
     /// Modèles de raisonnement xAI : réponses plus longues à venir (agents en tâche de fond).
     fn timeout(&self) -> std::time::Duration {
-        std::time::Duration::from_secs(if self.base_url.contains("api.x.ai") { 240 } else { 90 })
+        std::time::Duration::from_secs(if self.base_url.contains("api.x.ai") {
+            240
+        } else {
+            90
+        })
     }
 
-    fn http_error(status: reqwest::StatusCode, retry_after: Option<f64>, text: &str) -> devforge_shared::DevForgeError {
-        let ra = retry_after.map(|s| format!(" (retry-after={s}s)")).unwrap_or_default();
-        err(format!("LLM {status}{ra}: {}", text.chars().take(800).collect::<String>()))
+    fn http_error(
+        status: reqwest::StatusCode,
+        retry_after: Option<f64>,
+        text: &str,
+    ) -> devforge_shared::DevForgeError {
+        let ra = retry_after
+            .map(|s| format!(" (retry-after={s}s)"))
+            .unwrap_or_default();
+        err(format!(
+            "LLM {status}{ra}: {}",
+            text.chars().take(800).collect::<String>()
+        ))
     }
 
     fn retry_after(res: &reqwest::Response) -> Option<f64> {
@@ -389,21 +415,48 @@ impl OpenAiCompatibleProvider {
     fn turn_from_completion(data: &serde_json::Value) -> AssistantTurn {
         let choice = data.pointer("/choices/0").cloned().unwrap_or(json!({}));
         let message = choice.get("message").cloned().unwrap_or(json!({}));
-        let content = message.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string();
-        let finish = choice.get("finish_reason").and_then(|f| f.as_str()).unwrap_or("stop").to_string();
+        let content = message
+            .get("content")
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
+        let finish = choice
+            .get("finish_reason")
+            .and_then(|f| f.as_str())
+            .unwrap_or("stop")
+            .to_string();
         let mut tool_calls = Vec::new();
         if let Some(arr) = message.get("tool_calls").and_then(|t| t.as_array()) {
             for (i, tc) in arr.iter().enumerate() {
-                let id = tc.get("id").and_then(|v| v.as_str()).map(str::to_string).unwrap_or_else(|| format!("call_{i}"));
-                let name = tc.pointer("/function/name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let args_raw = tc.pointer("/function/arguments").and_then(|v| v.as_str()).unwrap_or("{}");
+                let id = tc
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("call_{i}"));
+                let name = tc
+                    .pointer("/function/name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let args_raw = tc
+                    .pointer("/function/arguments")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("{}");
                 let arguments = serde_json::from_str(args_raw).unwrap_or_else(|_| json!({}));
                 if !name.is_empty() {
-                    tool_calls.push(ToolCallRequest { id, name, arguments });
+                    tool_calls.push(ToolCallRequest {
+                        id,
+                        name,
+                        arguments,
+                    });
                 }
             }
         }
-        AssistantTurn { content, tool_calls, finish_reason: finish }
+        AssistantTurn {
+            content,
+            tool_calls,
+            finish_reason: finish,
+        }
     }
 
     /// Fallback : certains LLM (ex: Ollama qwen2.5-coder) retournent les tool calls
@@ -456,12 +509,18 @@ impl LlmProvider for OpenAiCompatibleProvider {
         }
         let data: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| err(format!("LLM JSON: {e}")))?;
-        Ok(Self::with_text_tool_calls(Self::turn_from_completion(&data)))
+        Ok(Self::with_text_tool_calls(Self::turn_from_completion(
+            &data,
+        )))
     }
 
     /// `stream: true` (SSE). Le délai s'applique à chaque paquet (pas au total) : une longue
     /// réponse qui arrive régulièrement n'est jamais coupée.
-    async fn chat_stream(&self, req: ChatRequest, on_delta: &DeltaSink<'_>) -> Result<AssistantTurn> {
+    async fn chat_stream(
+        &self,
+        req: ChatRequest,
+        on_delta: &DeltaSink<'_>,
+    ) -> Result<AssistantTurn> {
         let timeout = self.timeout();
         let mut res = tokio::time::timeout(timeout, self.request(&req, true).send())
             .await
@@ -490,7 +549,10 @@ impl LlmProvider for OpenAiCompatibleProvider {
             .to_lowercase();
         if ctype.contains("application/json") {
             // `stream` ignoré : réponse complète.
-            let text = res.text().await.map_err(|e| err(format!("LLM body: {e}")))?;
+            let text = res
+                .text()
+                .await
+                .map_err(|e| err(format!("LLM body: {e}")))?;
             let data: serde_json::Value =
                 serde_json::from_str(&text).map_err(|e| err(format!("LLM JSON: {e}")))?;
             let turn = Self::with_text_tool_calls(Self::turn_from_completion(&data));
@@ -559,7 +621,7 @@ fn parse_tool_calls_from_text(content: &str) -> Option<Vec<ToolCallRequest>> {
 /// Retire les fences markdown (```json / ```JSON / ```) au début et à la fin du contenu
 fn strip_markdown_fences(content: &str) -> String {
     let trimmed = content.trim();
-    
+
     // Vérifier si ça commence par ``` (avec ou sans json/JSON)
     if let Some(rest) = trimmed.strip_prefix("```") {
         // Retirer le language tag optionnel (json, JSON, etc.)
@@ -569,16 +631,16 @@ fn strip_markdown_fences(content: &str) -> String {
         } else {
             after_opening
         };
-        
+
         // Retirer le ``` de fermeture à la fin
         if let Some(without_closing) = after_lang.trim_end().strip_suffix("```") {
             return without_closing.trim().to_string();
         }
-        
+
         // Pas de fence de fermeture, retourner tel quel après le tag d'ouverture
         return after_lang.trim().to_string();
     }
-    
+
     // Pas de fence markdown, retourner tel quel
     trimmed.to_string()
 }
@@ -664,7 +726,7 @@ fn try_parse_json_formats(trimmed: &str) -> Option<Vec<ToolCallRequest>> {
 /// Formats : `1. tool_name {...}` / `2) tool_name {...}` / `- tool_name {...}` / `tool_name {...}`
 fn try_parse_line_formats(content: &str) -> Option<Vec<ToolCallRequest>> {
     use regex::Regex;
-    
+
     // Pattern pour capturer une ligne complète : préfixe + nom + JSON
     // Le JSON doit commencer immédiatement après le nom (avec seulement des espaces)
     lazy_static::lazy_static! {
@@ -674,15 +736,15 @@ fn try_parse_line_formats(content: &str) -> Option<Vec<ToolCallRequest>> {
     }
 
     let mut calls = Vec::new();
-    
+
     for caps in LINE_PATTERN.captures_iter(content) {
         let full_match = caps.get(0).unwrap();
         let name = caps.get(1).unwrap().as_str();
         let json_start_offset = full_match.end() - 1; // -1 pour inclure le '{'
-        
+
         // Extraire le JSON depuis le '{' jusqu'à la fermeture
         let remaining = &content[json_start_offset..];
-        
+
         if let Some(json_str) = extract_json_object(remaining) {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
                 calls.push(ToolCallRequest {
@@ -693,7 +755,7 @@ fn try_parse_line_formats(content: &str) -> Option<Vec<ToolCallRequest>> {
             }
         }
     }
-    
+
     if calls.is_empty() {
         None
     } else {
@@ -708,17 +770,17 @@ fn extract_json_object(s: &str) -> Option<&str> {
     if chars.is_empty() || chars[0] != '{' {
         return None;
     }
-    
+
     let mut depth = 0;
     let mut in_string = false;
     let mut escape_next = false;
-    
+
     for (i, &ch) in chars.iter().enumerate() {
         if escape_next {
             escape_next = false;
             continue;
         }
-        
+
         match ch {
             '\\' if in_string => escape_next = true,
             '"' => in_string = !in_string,
@@ -733,7 +795,7 @@ fn extract_json_object(s: &str) -> Option<&str> {
             _ => {}
         }
     }
-    
+
     None
 }
 
@@ -753,11 +815,11 @@ fn strip_placeholder_values(mut value: serde_json::Value) -> serde_json::Value {
                     None
                 })
                 .collect();
-            
+
             for key in keys_to_remove {
                 map.remove(&key);
             }
-            
+
             // Récursion dans les valeurs restantes
             for v in map.values_mut() {
                 *v = strip_placeholder_values(v.clone());
@@ -791,9 +853,7 @@ impl OpenAiCompatibleProvider {
         if result.ok {
             Ok(result.message)
         } else {
-            Err(err(result
-                .error
-                .unwrap_or_else(|| "probe failed".into())))
+            Err(err(result.error.unwrap_or_else(|| "probe failed".into())))
         }
     }
 
@@ -825,9 +885,7 @@ impl OpenAiCompatibleProvider {
         }
 
         if provider == "ollama" || provider == "custom" {
-            if let Ok(models) =
-                Self::list_models_for_provider(provider, base_url, api_key).await
-            {
+            if let Ok(models) = Self::list_models_for_provider(provider, base_url, api_key).await {
                 if let Some(pick) = Self::pick_preferred_ollama_model(&models) {
                     tracing::info!(model = %pick, "Ollama auto → modèle détecté");
                     return pick;
@@ -837,9 +895,7 @@ impl OpenAiCompatibleProvider {
 
         // Try to list and pick a working model for specific providers
         if provider == "gemini" {
-            if let Ok(models) =
-                Self::list_models_for_provider(provider, base_url, api_key).await
-            {
+            if let Ok(models) = Self::list_models_for_provider(provider, base_url, api_key).await {
                 if let Some(pick) = Self::pick_preferred_gemini_model(&models) {
                     tracing::info!(model = %pick, "Gemini auto → modèle chat détecté");
                     return pick;
@@ -862,7 +918,6 @@ impl OpenAiCompatibleProvider {
             }
         }
     }
-
 
     /// Préfère un modèle léger (7b/8b/3b) s'il est listé, sinon le premier.
     fn pick_preferred_ollama_model(models: &[String]) -> Option<String> {
@@ -894,7 +949,7 @@ impl OpenAiCompatibleProvider {
             "interactions",
             "experimental",
         ];
-        
+
         let candidates: Vec<String> = models
             .iter()
             .filter(|m| {
@@ -932,7 +987,10 @@ impl OpenAiCompatibleProvider {
         }
 
         // Prefer flash over pro (faster, cheaper)
-        if let Some(m) = candidates.iter().find(|m| m.to_lowercase().contains("flash")) {
+        if let Some(m) = candidates
+            .iter()
+            .find(|m| m.to_lowercase().contains("flash"))
+        {
             return Some(m.clone());
         }
 
@@ -974,18 +1032,35 @@ mod stream_tests {
     }
 
     fn req() -> ChatRequest {
-        ChatRequest { messages: vec![ChatMessage::user("salut")], tools: vec![], temperature: 0.0 }
+        ChatRequest {
+            messages: vec![ChatMessage::user("salut")],
+            tools: vec![],
+            temperature: 0.0,
+        }
     }
 
     #[tokio::test]
     async fn streams_deltas_over_http() {
-        let base = serve("200 OK", "text/event-stream", include_str!("../tests/fixtures/openai_content.sse")).await;
+        let base = serve(
+            "200 OK",
+            "text/event-stream",
+            include_str!("../tests/fixtures/openai_content.sse"),
+        )
+        .await;
         let p = OpenAiCompatibleProvider::new(base, "k", "m");
         let seen = Arc::new(Mutex::new(Vec::<String>::new()));
         let s2 = seen.clone();
-        let turn = p.chat_stream(req(), &move |d: &str| s2.lock().unwrap().push(d.to_string())).await.unwrap();
+        let turn = p
+            .chat_stream(req(), &move |d: &str| {
+                s2.lock().unwrap().push(d.to_string())
+            })
+            .await
+            .unwrap();
         assert_eq!(turn.content, "Bonjour, c'est réglé — preview OK.");
-        assert!(seen.lock().unwrap().len() >= 3, "plusieurs morceaux attendus");
+        assert!(
+            seen.lock().unwrap().len() >= 3,
+            "plusieurs morceaux attendus"
+        );
     }
 
     #[tokio::test]
@@ -999,17 +1074,30 @@ mod stream_tests {
         let p = OpenAiCompatibleProvider::new(base, "k", "m");
         let seen = Arc::new(Mutex::new(Vec::<String>::new()));
         let s2 = seen.clone();
-        let turn = p.chat_stream(req(), &move |d: &str| s2.lock().unwrap().push(d.to_string())).await.unwrap();
+        let turn = p
+            .chat_stream(req(), &move |d: &str| {
+                s2.lock().unwrap().push(d.to_string())
+            })
+            .await
+            .unwrap();
         assert_eq!(turn.content, "complet");
         assert_eq!(*seen.lock().unwrap(), vec!["complet".to_string()]);
     }
 
     #[tokio::test]
     async fn http_error_keeps_status_for_retry_classification() {
-        let base = serve("429 Too Many Requests", "application/json", r#"{"error":"slow"}"#).await;
+        let base = serve(
+            "429 Too Many Requests",
+            "application/json",
+            r#"{"error":"slow"}"#,
+        )
+        .await;
         let p = OpenAiCompatibleProvider::new(base, "k", "m");
         let e = p.chat_stream(req(), &|_d: &str| {}).await.unwrap_err();
-        assert!(matches!(crate::classify(&e), crate::LlmErrorKind::RateLimited { .. }), "{e}");
+        assert!(
+            matches!(crate::classify(&e), crate::LlmErrorKind::RateLimited { .. }),
+            "{e}"
+        );
     }
 }
 
@@ -1165,23 +1253,23 @@ mod tests {
         let text = r#"1. create_github_repo {"owner": "bobdivx", "repo": "test-repo", "private": true}
 2. write_project_file {"project_uuid": "<project_uuid>", "path": "index.html", "content": "<html></html>", "mode": "local"}
 3. trigger_deploy {"project_uuid": "<project_uuid>"}"#;
-        
+
         let calls = parse_tool_calls_from_text(text);
         assert!(calls.is_some());
         let calls = calls.unwrap();
         assert_eq!(calls.len(), 3);
-        
+
         assert_eq!(calls[0].name, "create_github_repo");
         assert_eq!(calls[0].arguments["owner"], "bobdivx");
         assert_eq!(calls[0].arguments["repo"], "test-repo");
         assert_eq!(calls[0].arguments["private"], true);
-        
+
         assert_eq!(calls[1].name, "write_project_file");
         // Les placeholders doivent être supprimés
         assert!(calls[1].arguments.get("project_uuid").is_none());
         assert_eq!(calls[1].arguments["path"], "index.html");
         assert_eq!(calls[1].arguments["mode"], "local");
-        
+
         assert_eq!(calls[2].name, "trigger_deploy");
         assert!(calls[2].arguments.get("project_uuid").is_none());
     }
@@ -1190,7 +1278,7 @@ mod tests {
     fn test_parse_numbered_lines_with_parenthesis() {
         let text = r#"1) list_projects {}
 2) get_project {"project_uuid": "abc123"}"#;
-        
+
         let calls = parse_tool_calls_from_text(text);
         assert!(calls.is_some());
         let calls = calls.unwrap();
@@ -1204,7 +1292,7 @@ mod tests {
     fn test_parse_bulleted_format() {
         let text = r#"- create_github_repo {"owner": "test", "repo": "repo1", "private": false}
 - trigger_deploy {"project_uuid": "proj-123"}"#;
-        
+
         let calls = parse_tool_calls_from_text(text);
         assert!(calls.is_some());
         let calls = calls.unwrap();
@@ -1217,7 +1305,7 @@ mod tests {
     fn test_parse_plain_lines_format() {
         let text = r#"list_projects {}
 get_project {"project_uuid": "xyz"}"#;
-        
+
         let calls = parse_tool_calls_from_text(text);
         assert!(calls.is_some());
         let calls = calls.unwrap();
@@ -1231,7 +1319,7 @@ get_project {"project_uuid": "xyz"}"#;
         let text = r#"1. create_github_repo {"owner": "test", "repo": "repo1"}
 Some random text here that should be ignored
 2. trigger_deploy {"project_uuid": "proj-123"}"#;
-        
+
         let calls = parse_tool_calls_from_text(text);
         assert!(calls.is_some());
         let calls = calls.unwrap();
@@ -1251,9 +1339,9 @@ Some random text here that should be ignored
             },
             "array": ["<placeholder>", "real"]
         });
-        
+
         let result = strip_placeholder_values(input);
-        
+
         // Les placeholders doivent être supprimés
         assert!(result.get("project_uuid").is_none());
         assert_eq!(result["path"], "index.html");
@@ -1268,7 +1356,7 @@ Some random text here that should be ignored
         let text = r#"1. valid_tool {"key": "value"}
 2. invalid_tool {this is not json}
 3. another_valid_tool {"foo": "bar"}"#;
-        
+
         let calls = parse_tool_calls_from_text(text);
         assert!(calls.is_some());
         let calls = calls.unwrap();
@@ -1285,26 +1373,26 @@ Some random text here that should be ignored
 2. write_project_file {"project_uuid": "<project_uuid>", "path": "index.html", "content": "...", "mode": "local"}
 3. write_project_file {"project_uuid": "<project_uuid>", "path": "index.html", "content": "...", "mode": "github"}
 4. trigger_deploy {"project_uuid": "<project_uuid>"}"#;
-        
+
         let calls = parse_tool_calls_from_text(text);
         assert!(calls.is_some());
         let calls = calls.unwrap();
         assert_eq!(calls.len(), 4);
-        
+
         // Vérifie create_github_repo
         assert_eq!(calls[0].name, "create_github_repo");
         assert_eq!(calls[0].arguments["owner"], "bobdivx");
         assert_eq!(calls[0].arguments["repo"], "e2e-hello5-1789212839");
-        
+
         // Vérifie write_project_file local
         assert_eq!(calls[1].name, "write_project_file");
         assert!(calls[1].arguments.get("project_uuid").is_none()); // placeholder supprimé
         assert_eq!(calls[1].arguments["mode"], "local");
-        
+
         // Vérifie write_project_file github
         assert_eq!(calls[2].name, "write_project_file");
         assert_eq!(calls[2].arguments["mode"], "github");
-        
+
         // Vérifie trigger_deploy
         assert_eq!(calls[3].name, "trigger_deploy");
         assert!(calls[3].arguments.get("project_uuid").is_none()); // placeholder supprimé
@@ -1323,7 +1411,7 @@ Some random text here that should be ignored
   }
 }
 ```"#;
-        
+
         let calls = parse_tool_calls_from_text(text);
         assert!(calls.is_some());
         let calls = calls.unwrap();
@@ -1340,7 +1428,7 @@ Some random text here that should be ignored
         let text = r#"```JSON
 {"name": "list_projects", "arguments": {}}
 ```"#;
-        
+
         let calls = parse_tool_calls_from_text(text);
         assert!(calls.is_some());
         let calls = calls.unwrap();
@@ -1354,7 +1442,7 @@ Some random text here that should be ignored
         let text = r#"```
 {"name": "get_project", "arguments": {"project_uuid": "abc123"}}
 ```"#;
-        
+
         let calls = parse_tool_calls_from_text(text);
         assert!(calls.is_some());
         let calls = calls.unwrap();
@@ -1370,7 +1458,7 @@ Some random text here that should be ignored
 1. create_github_repo {"owner": "test", "repo": "repo1", "private": false}
 2. trigger_deploy {"project_uuid": "proj-123"}
 ```"#;
-        
+
         let calls = parse_tool_calls_from_text(text);
         assert!(calls.is_some());
         let calls = calls.unwrap();
@@ -1393,7 +1481,7 @@ Some random text here that should be ignored
 ```
 
 "#;
-        
+
         let calls = parse_tool_calls_from_text(text);
         assert!(calls.is_some());
         let calls = calls.unwrap();
@@ -1440,11 +1528,17 @@ mod multimodal_tests {
     fn user_images_become_image_url_parts() {
         let msgs = vec![
             ChatMessage::system("s"),
-            ChatMessage::user("regarde").with_images(vec![ImagePart { name: "a.png".into(), data_url: "data:image/png;base64,AA".into() }]),
+            ChatMessage::user("regarde").with_images(vec![ImagePart {
+                name: "a.png".into(),
+                data_url: "data:image/png;base64,AA".into(),
+            }]),
         ];
         let out = OpenAiCompatibleProvider::map_messages(&msgs);
         assert_eq!(out[0]["content"], "s");
         assert_eq!(out[1]["content"][0]["type"], "text");
-        assert_eq!(out[1]["content"][1]["image_url"]["url"], "data:image/png;base64,AA");
+        assert_eq!(
+            out[1]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,AA"
+        );
     }
 }

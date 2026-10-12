@@ -25,7 +25,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/agent/runs/{run_uuid}", get(get_run))
         .route("/api/v1/agent/runs/{run_uuid}/events", get(run_events_sse))
         .route("/api/v1/agent/runs/{run_uuid}/cancel", post(cancel_run))
-        .route("/api/v1/projects/{project_uuid}/agents/{agent_uuid}/active-run", get(active_run))
+        .route(
+            "/api/v1/projects/{project_uuid}/agents/{agent_uuid}/active-run",
+            get(active_run),
+        )
 }
 
 #[derive(sqlx::FromRow)]
@@ -58,19 +61,26 @@ async fn load_run(state: &AppState, run_uuid: &str) -> Option<RunInfo> {
 }
 
 /// Run visible seulement si son projet appartient à l'espace de l'utilisateur.
-async fn authorized_run(state: &AppState, headers: &HeaderMap, run_uuid: &str) -> Result<RunInfo, ApiError> {
-    let run = load_run(state, run_uuid).await.ok_or_else(|| ApiError::not_found("run"))?;
+async fn authorized_run(
+    state: &AppState,
+    headers: &HeaderMap,
+    run_uuid: &str,
+) -> Result<RunInfo, ApiError> {
+    let run = load_run(state, run_uuid)
+        .await
+        .ok_or_else(|| ApiError::not_found("run"))?;
     crate::routes::auth_project(state, headers, &run.project_uuid).await?;
     Ok(run)
 }
 
 async fn run_json(state: &AppState, r: &RunInfo) -> Value {
-    let agent_name: Option<String> = sqlx::query_scalar("SELECT name FROM project_agents WHERE uuid = $1")
-        .bind(&r.agent_uuid)
-        .fetch_optional(&state.pool)
-        .await
-        .ok()
-        .flatten();
+    let agent_name: Option<String> =
+        sqlx::query_scalar("SELECT name FROM project_agents WHERE uuid = $1")
+            .bind(&r.agent_uuid)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten();
     json!({
         "run_uuid": r.uuid,
         "project_uuid": r.project_uuid,
@@ -108,11 +118,18 @@ pub fn sse_from(rx: tokio::sync::mpsc::Receiver<Out>) -> axum::response::Respons
     let s = stream::unfold(rx, |mut rx| async move {
         match rx.recv().await {
             Some(Out::Event(e)) => Some((
-                Ok::<Event, Infallible>(Event::default().id(e.seq.to_string()).event("message").data(e.payload.to_string())),
+                Ok::<Event, Infallible>(
+                    Event::default()
+                        .id(e.seq.to_string())
+                        .event("message")
+                        .data(e.payload.to_string()),
+                ),
                 rx,
             )),
             Some(Out::Done(status)) => Some((
-                Ok(Event::default().event("done").data(json!({"status": status}).to_string())),
+                Ok(Event::default()
+                    .event("done")
+                    .data(json!({"status": status}).to_string())),
                 rx,
             )),
             None => None,
@@ -136,7 +153,11 @@ async fn run_events_sse(
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.trim().parse::<i64>().ok());
     let after = q.after.or(header_after).unwrap_or(0).max(0);
-    Ok(sse_from(run_events::follow(state.pool.clone(), run_uuid, after)))
+    Ok(sse_from(run_events::follow(
+        state.pool.clone(),
+        run_uuid,
+        after,
+    )))
 }
 
 async fn active_run(
@@ -194,11 +215,13 @@ async fn cancel_run(
             .map_err(ApiError::from)?;
         if res.rows_affected() == 1 {
             status = "cancelled".into();
-            let _ = sqlx::query("UPDATE project_agents SET status = 'idle', updated_at = $1 WHERE uuid = $2")
-                .bind(now_str())
-                .bind(&run.agent_uuid)
-                .execute(&state.pool)
-                .await;
+            let _ = sqlx::query(
+                "UPDATE project_agents SET status = 'idle', updated_at = $1 WHERE uuid = $2",
+            )
+            .bind(now_str())
+            .bind(&run.agent_uuid)
+            .execute(&state.pool)
+            .await;
             on_run_finished(&state, &run_uuid).await;
         }
     }
@@ -213,7 +236,12 @@ pub struct ServerLauncher(pub AppState);
 
 impl devforge_agent::WorkerLauncher for ServerLauncher {
     fn launch(&self, project_uuid: &str, agent_uuid: &str, run_uuid: &str) {
-        start_run_now(self.0.clone(), project_uuid.to_string(), agent_uuid.to_string(), run_uuid.to_string());
+        start_run_now(
+            self.0.clone(),
+            project_uuid.to_string(),
+            agent_uuid.to_string(),
+            run_uuid.to_string(),
+        );
     }
 }
 
@@ -240,7 +268,13 @@ pub fn start_run_now(state: AppState, project_uuid: String, agent_uuid: String, 
             Ok(true) => {}
             _ => return,
         }
-        let run = crate::agent_runs::RunRow { uuid: run_uuid.clone(), project_uuid, agent_uuid, message_uuid, content };
+        let run = crate::agent_runs::RunRow {
+            uuid: run_uuid.clone(),
+            project_uuid,
+            agent_uuid,
+            message_uuid,
+            content,
+        };
         if let Err(e) = crate::routes::execute_claimed_run(&state, &run).await {
             tracing::warn!(error = %e, run_uuid, "worker en échec");
         }
@@ -256,7 +290,11 @@ fn spawn_wake(state: AppState, project: String, agent: String, marker: String, b
 
 fn elapsed_ms(created_at: &str) -> Option<i64> {
     let t = chrono::DateTime::parse_from_rfc3339(created_at).ok()?;
-    Some((chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_milliseconds().max(0))
+    Some(
+        (chrono::Utc::now() - t.with_timezone(&chrono::Utc))
+            .num_milliseconds()
+            .max(0),
+    )
 }
 
 /// Fichiers écrits par le worker (pour la carte).
@@ -267,10 +305,18 @@ pub fn touched_files(tools_json: &str) -> Vec<String> {
         if c.get("name").and_then(|v| v.as_str()) != Some("write_project_file") {
             continue;
         }
-        if c.get("result").and_then(|r| r.get("ok")).and_then(|v| v.as_bool()) == Some(false) {
+        if c.get("result")
+            .and_then(|r| r.get("ok"))
+            .and_then(|v| v.as_bool())
+            == Some(false)
+        {
             continue;
         }
-        if let Some(p) = c.get("arguments").and_then(|a| a.get("path")).and_then(|v| v.as_str()) {
+        if let Some(p) = c
+            .get("arguments")
+            .and_then(|a| a.get("path"))
+            .and_then(|v| v.as_str())
+        {
             if !out.iter().any(|x| x == p) {
                 out.push(p.to_string());
             }
@@ -281,7 +327,16 @@ pub fn touched_files(tools_json: &str) -> Vec<String> {
 }
 
 /// Carte de résultat postée dans le fil parent.
-pub fn job_result_card(run_uuid: &str, worker_uuid: &str, worker_name: &str, title: &str, status: &str, summary: &str, files: &[String], elapsed_ms: Option<i64>) -> (String, Value) {
+pub fn job_result_card(
+    run_uuid: &str,
+    worker_uuid: &str,
+    worker_name: &str,
+    title: &str,
+    status: &str,
+    summary: &str,
+    files: &[String],
+    elapsed_ms: Option<i64>,
+) -> (String, Value) {
     let content = match status {
         "completed" => format!("Worker « {title} » terminé : {summary}"),
         "cancelled" => format!("Worker « {title} » arrêté à ta demande."),
@@ -310,7 +365,9 @@ pub fn job_result_card(run_uuid: &str, worker_uuid: &str, worker_name: &str, tit
 /// Fin d'un run : pour un worker, carte dans le fil parent, journal mémoire, réveil du parent en cas
 /// d'échec (jamais en cas de succès : pas de boucle), puis worker suivant de la file.
 pub async fn on_run_finished(state: &AppState, run_uuid: &str) {
-    let Some(run) = load_run(state, run_uuid).await else { return };
+    let Some(run) = load_run(state, run_uuid).await else {
+        return;
+    };
     if run.kind != "worker" {
         return;
     }
@@ -331,8 +388,14 @@ pub async fn on_run_finished(state: &AppState, run_uuid: &str) {
         .flatten()
         .flatten();
     let (summary, files) = match (&run.status[..], &last) {
-        ("failed", _) => (crate::agent_runs::summary_line(error.as_deref().unwrap_or("erreur inconnue")), Vec::new()),
-        (_, Some((content, tools))) => (crate::agent_runs::summary_line(content), touched_files(tools)),
+        ("failed", _) => (
+            crate::agent_runs::summary_line(error.as_deref().unwrap_or("erreur inconnue")),
+            Vec::new(),
+        ),
+        (_, Some((content, tools))) => (
+            crate::agent_runs::summary_line(content),
+            touched_files(tools),
+        ),
         _ => (String::new(), Vec::new()),
     };
     let worker_name: String = sqlx::query_scalar("SELECT name FROM project_agents WHERE uuid = $1")
@@ -353,7 +416,10 @@ pub async fn on_run_finished(state: &AppState, run_uuid: &str) {
     };
     let parent_agent = match parent_agent {
         Some(a) => Some(a),
-        None => crate::db::ensure_coordinator_agent(&state.pool, &run.project_uuid).await.ok().flatten(),
+        None => crate::db::ensure_coordinator_agent(&state.pool, &run.project_uuid)
+            .await
+            .ok()
+            .flatten(),
     };
     let _ = sqlx::query("UPDATE agent_runs SET summary = $1 WHERE uuid = $2")
         .bind(&summary)
@@ -361,7 +427,16 @@ pub async fn on_run_finished(state: &AppState, run_uuid: &str) {
         .execute(&state.pool)
         .await;
     if let Some(parent) = parent_agent.as_deref() {
-        let (content, card) = job_result_card(run_uuid, &run.agent_uuid, &worker_name, &title, &run.status, &summary, &files, elapsed_ms(&run.created_at));
+        let (content, card) = job_result_card(
+            run_uuid,
+            &run.agent_uuid,
+            &worker_name,
+            &title,
+            &run.status,
+            &summary,
+            &files,
+            elapsed_ms(&run.created_at),
+        );
         let _ = sqlx::query(
             r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
                VALUES ($1, $2, $3, 'assistant', $4, $5, 'system', $6)"#,
@@ -379,7 +454,13 @@ pub async fn on_run_finished(state: &AppState, run_uuid: &str) {
             let body = format!(
                 "Le worker « {title} » a échoué : {summary}\nRegarde son fil ({worker_name}) et propose la suite à l'utilisateur. Ne relance pas de worker automatiquement."
             );
-            spawn_wake(state.clone(), run.project_uuid.clone(), parent.to_string(), marker, body);
+            spawn_wake(
+                state.clone(),
+                run.project_uuid.clone(),
+                parent.to_string(),
+                marker,
+                body,
+            );
         }
     }
     let log = match &run.status[..] {
@@ -387,9 +468,15 @@ pub async fn on_run_finished(state: &AppState, run_uuid: &str) {
         "cancelled" => format!("Worker « {title} » : arrêté par l'utilisateur."),
         _ => format!("Worker « {title} » : échec — {summary}"),
     };
-    let kind = if run.status == "failed" { "incident" } else { "decision" };
+    let kind = if run.status == "failed" {
+        "incident"
+    } else {
+        "decision"
+    };
     crate::memory_routes::system_write(state, &run.project_uuid, kind, None, log, run_uuid).await;
-    if let Some((next, agent)) = crate::agent_runs::promote_queued(&state.pool, &run.project_uuid).await {
+    if let Some((next, agent)) =
+        crate::agent_runs::promote_queued(&state.pool, &run.project_uuid).await
+    {
         start_run_now(state.clone(), run.project_uuid.clone(), agent, next);
     }
 }
@@ -409,31 +496,62 @@ mod tests {
             sqlx::query("INSERT INTO project_agents (uuid, project_uuid, name, role, kind, status, created_at, updated_at) VALUES ($1,'p1',$1,$2,'required','idle','x','x')")
                 .bind(uuid).bind(role).execute(&pool).await.unwrap();
         }
-        let tool = devforge_agent::DelegateTaskTool { pool: Arc::new(pool.clone()) };
-        let call = |title: &str, caller: &str| {
-            json!({"project_uuid": "p1", "caller_agent_uuid": caller, "parent_run_uuid": "parent-run", "title": title, "instructions": "fais-le, build OK"})
+        let tool = devforge_agent::DelegateTaskTool {
+            pool: Arc::new(pool.clone()),
         };
+        let call = |title: &str, caller: &str| json!({"project_uuid": "p1", "caller_agent_uuid": caller, "parent_run_uuid": "parent-run", "title": title, "instructions": "fais-le, build OK"});
         let refused = tool.execute(call("x", "ops")).await.unwrap();
         assert_eq!(refused["ok"], false, "réservé au Coordinateur");
-        let a = tool.execute(call("Refonte de l'accueil", "coord")).await.unwrap();
+        let a = tool
+            .execute(call("Refonte de l'accueil", "coord"))
+            .await
+            .unwrap();
         let b = tool.execute(call("Page contact", "coord")).await.unwrap();
         let c = tool.execute(call("Page tarifs", "coord")).await.unwrap();
-        assert_eq!((a["status"].as_str(), b["status"].as_str(), c["status"].as_str()), (Some("started"), Some("started"), Some("queued")));
-        let dup = tool.execute(call("refonte de l’accueil !", "coord")).await.unwrap();
+        assert_eq!(
+            (
+                a["status"].as_str(),
+                b["status"].as_str(),
+                c["status"].as_str()
+            ),
+            (Some("started"), Some("started"), Some("queued"))
+        );
+        let dup = tool
+            .execute(call("refonte de l’accueil !", "coord"))
+            .await
+            .unwrap();
         assert_eq!(dup["status"], "already_running");
         assert_eq!(dup["run_uuid"], a["run_uuid"]);
         let (kind, parent, title): (String, Option<String>, Option<String>) =
             sqlx::query_as("SELECT kind, parent_run_uuid, title FROM agent_runs WHERE uuid = $1")
-                .bind(a["run_uuid"].as_str().unwrap()).fetch_one(&pool).await.unwrap();
-        assert_eq!((kind.as_str(), parent.as_deref(), title.as_deref()), ("worker", Some("parent-run"), Some("Refonte de l'accueil")));
+                .bind(a["run_uuid"].as_str().unwrap())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            (kind.as_str(), parent.as_deref(), title.as_deref()),
+            ("worker", Some("parent-run"), Some("Refonte de l'accueil"))
+        );
         // Rien ne se libère : pas de promotion.
-        assert!(crate::agent_runs::promote_queued(&pool, "p1").await.is_none());
+        assert!(crate::agent_runs::promote_queued(&pool, "p1")
+            .await
+            .is_none());
         sqlx::query("UPDATE agent_runs SET status = 'completed' WHERE uuid = $1")
-            .bind(a["run_uuid"].as_str().unwrap()).execute(&pool).await.unwrap();
-        let (next, worker) = crate::agent_runs::promote_queued(&pool, "p1").await.expect("worker suivant");
+            .bind(a["run_uuid"].as_str().unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (next, worker) = crate::agent_runs::promote_queued(&pool, "p1")
+            .await
+            .expect("worker suivant");
         assert_eq!(next, c["run_uuid"].as_str().unwrap());
         assert_eq!(worker, c["worker_uuid"].as_str().unwrap());
-        assert!(crate::agent_runs::promote_queued(&pool, "p1").await.is_none(), "2 actifs max");
+        assert!(
+            crate::agent_runs::promote_queued(&pool, "p1")
+                .await
+                .is_none(),
+            "2 actifs max"
+        );
     }
 
     #[test]
@@ -444,12 +562,25 @@ mod tests {
                         {"name":"run_workdir_command","arguments":{"command":"npm run build"},"result":{"ok":true}}]"#;
         let files = touched_files(tools);
         assert_eq!(files, vec!["src/pages/index.astro"]);
-        let (content, card) = job_result_card("r1", "w1", "worker-accueil", "Refonte", "completed", "Accueil refait, build OK.", &files, Some(61_000));
-        assert_eq!(content, "Worker « Refonte » terminé : Accueil refait, build OK.");
+        let (content, card) = job_result_card(
+            "r1",
+            "w1",
+            "worker-accueil",
+            "Refonte",
+            "completed",
+            "Accueil refait, build OK.",
+            &files,
+            Some(61_000),
+        );
+        assert_eq!(
+            content,
+            "Worker « Refonte » terminé : Accueil refait, build OK."
+        );
         assert_eq!(card[0]["name"], "job_result");
         assert_eq!(card[0]["result"]["status"], "completed");
         assert_eq!(card[0]["result"]["ok"], true);
-        let (failed, card) = job_result_card("r1", "w1", "w", "Refonte", "failed", "build KO", &[], None);
+        let (failed, card) =
+            job_result_card("r1", "w1", "w", "Refonte", "failed", "build KO", &[], None);
         assert!(failed.contains("en échec"));
         assert_eq!(card[0]["result"]["ok"], false);
     }

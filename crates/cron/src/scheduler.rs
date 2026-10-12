@@ -14,7 +14,8 @@ pub trait AgentRoutineRunner: Send + Sync {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = (String, String)> + Send + 'a>>;
 }
 
-static ROUTINE_RUNNER: std::sync::OnceLock<Arc<dyn AgentRoutineRunner>> = std::sync::OnceLock::new();
+static ROUTINE_RUNNER: std::sync::OnceLock<Arc<dyn AgentRoutineRunner>> =
+    std::sync::OnceLock::new();
 
 /// Installe l'exécuteur des routines d'agent (une fois, au boot).
 pub fn set_agent_routine_runner(runner: Arc<dyn AgentRoutineRunner>) {
@@ -75,11 +76,10 @@ impl CronScheduler {
 
     /// Exécute un cron par ID (pour run_now manuel).
     pub async fn run_cron_by_id(&self, cron_id: &str) -> devforge_shared::Result<()> {
-        let cron = self
-            .service
-            .get(cron_id)
-            .await?
-            .ok_or_else(|| devforge_shared::DevForgeError::Message("cron introuvable".into()))?;
+        let cron =
+            self.service.get(cron_id).await?.ok_or_else(|| {
+                devforge_shared::DevForgeError::Message("cron introuvable".into())
+            })?;
         self.run_cron(&cron).await
     }
 
@@ -98,18 +98,28 @@ impl CronScheduler {
         if cron.is_agent_routine() {
             // Un tour d'agent peut durer plusieurs minutes : en tâche de fond, prochain passage fixé tout de suite.
             let next = self.compute_next_run(cron);
-            self.service.update_cron_status(&cron.id, "running", next.as_deref()).await?;
+            self.service
+                .update_cron_status(&cron.id, "running", next.as_deref())
+                .await?;
             let service = self.service.clone();
             let cron = cron.clone();
             tokio::spawn(async move {
                 let (status, output) = match ROUTINE_RUNNER.get() {
                     Some(r) => r.run(&cron).await,
-                    None => ("failed".to_string(), "exécuteur de routines indisponible".to_string()),
+                    None => (
+                        "failed".to_string(),
+                        "exécuteur de routines indisponible".to_string(),
+                    ),
                 };
-                if let Err(e) = service.record_run_finish(&run_id, &status, Some(&output), None).await {
+                if let Err(e) = service
+                    .record_run_finish(&run_id, &status, Some(&output), None)
+                    .await
+                {
                     error!(error = %e, "fin de routine");
                 }
-                let _ = service.update_cron_status(&cron.id, &status, next.as_deref()).await;
+                let _ = service
+                    .update_cron_status(&cron.id, &status, next.as_deref())
+                    .await;
                 info!(cron_id = %cron.id, status = %status, "Routine d'agent terminée");
             });
             return Ok(());
@@ -165,14 +175,15 @@ impl CronScheduler {
         Ok(())
     }
 
-    async fn get_project_container_name(&self, project_uuid: &str) -> devforge_shared::Result<String> {
-        let row: Option<(String,)> = sqlx::query_as(
-            "SELECT slug FROM projects WHERE uuid = $1",
-        )
-        .bind(project_uuid)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+    async fn get_project_container_name(
+        &self,
+        project_uuid: &str,
+    ) -> devforge_shared::Result<String> {
+        let row: Option<(String,)> = sqlx::query_as("SELECT slug FROM projects WHERE uuid = $1")
+            .bind(project_uuid)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
         match row {
             Some((slug,)) => Ok(format!("df-{}", slug)),
@@ -181,17 +192,14 @@ impl CronScheduler {
     }
 
     async fn get_server_id(&self, project_uuid: &str) -> devforge_shared::Result<String> {
-        let row: Option<(Option<String>,)> = sqlx::query_as(
-            "SELECT server_id FROM projects WHERE uuid = $1",
-        )
-        .bind(project_uuid)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let row: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT server_id FROM projects WHERE uuid = $1")
+                .bind(project_uuid)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
-        Ok(row
-            .and_then(|(s,)| s)
-            .unwrap_or_else(|| "default".into()))
+        Ok(row.and_then(|(s,)| s).unwrap_or_else(|| "default".into()))
     }
 
     fn compute_next_run(&self, cron: &crate::models::ProjectCron) -> Option<String> {

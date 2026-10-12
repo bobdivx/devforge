@@ -62,13 +62,19 @@ mod tests {
         assert!(!claims_action("Je vais exécuter le plan."));
         assert!(!claims_action("Veux-tu que je déploie ?"));
         assert!(!claims_action("Prochaine étape : corriger le header."));
-        assert!(!claims_action("Le build échoue sur src/index.astro ligne 12."));
-        assert!(!claims_action("Pour mettre en ligne, valide la publication."));
+        assert!(!claims_action(
+            "Le build échoue sur src/index.astro ligne 12."
+        ));
+        assert!(!claims_action(
+            "Pour mettre en ligne, valide la publication."
+        ));
     }
 
     #[test]
     fn previous_turn_reference_is_not_a_fresh_claim() {
-        assert!(!unverified_claim("C'est déjà fait au tour précédent (fichiers index.astro, preview OK)."));
+        assert!(!unverified_claim(
+            "C'est déjà fait au tour précédent (fichiers index.astro, preview OK)."
+        ));
         assert!(unverified_claim("J'ai exécuté le plan."));
     }
 }

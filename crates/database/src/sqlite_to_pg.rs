@@ -527,12 +527,10 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query(
-            "CREATE TABLE owners (uuid TEXT NOT NULL UNIQUE, name TEXT NOT NULL)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        sqlx::query("CREATE TABLE owners (uuid TEXT NOT NULL UNIQUE, name TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
         sqlx::query("CREATE TABLE _devforge_db (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
             .execute(&pool)
             .await
@@ -560,7 +558,10 @@ mod tests {
     fn sql_literal_drops_nul_and_split_keeps_semicolons_inside_strings() {
         let plan_sql = "BEGIN;\nINSERT INTO t (v) VALUES ('a;b''c');\nCOMMIT;\n";
         let parts = split_statements(plan_sql);
-        assert_eq!(parts, vec!["BEGIN", "INSERT INTO t (v) VALUES ('a;b''c')", "COMMIT"]);
+        assert_eq!(
+            parts,
+            vec!["BEGIN", "INSERT INTO t (v) VALUES ('a;b''c')", "COMMIT"]
+        );
         let lit = sql_string("a\0b'c");
         assert!(!lit.contains('\0'));
         assert_eq!(lit, "'ab''c'");

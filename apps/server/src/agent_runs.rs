@@ -27,7 +27,11 @@ pub struct UserTurnExtras {
 
 impl Default for UserTurnExtras {
     fn default() -> Self {
-        Self { tool_calls_json: "[]".into(), attachments_json: "[]".into(), reply_to_uuid: None }
+        Self {
+            tool_calls_json: "[]".into(),
+            attachments_json: "[]".into(),
+            reply_to_uuid: None,
+        }
     }
 }
 
@@ -37,7 +41,14 @@ pub async fn record_user_turn(
     agent_uuid: &str,
     content: &str,
 ) -> Result<String, String> {
-    record_user_turn_with(pool, project_uuid, agent_uuid, content, &UserTurnExtras::default()).await
+    record_user_turn_with(
+        pool,
+        project_uuid,
+        agent_uuid,
+        content,
+        &UserTurnExtras::default(),
+    )
+    .await
 }
 
 pub async fn record_user_turn_with(
@@ -186,7 +197,17 @@ pub async fn save_assistant_and_finish(
     tools_json: &str,
     provider: &str,
 ) -> Result<(), sqlx::Error> {
-    save_assistant_and_finish_as(pool, run_uuid, project_uuid, agent_uuid, reply, tools_json, provider, "completed").await
+    save_assistant_and_finish_as(
+        pool,
+        run_uuid,
+        project_uuid,
+        agent_uuid,
+        reply,
+        tools_json,
+        provider,
+        "completed",
+    )
+    .await
 }
 
 /// Fin de tour avec un statut explicite (`completed` | `cancelled`, P4-05).
@@ -247,7 +268,11 @@ pub async fn fail_run(pool: &PgPool, run_uuid: &str, agent_uuid: &str, error: &s
 pub fn summary_line(reply: &str) -> String {
     let line = reply
         .lines()
-        .map(|l| l.trim().trim_start_matches(['#', '*', '-', '>', ' ']).trim())
+        .map(|l| {
+            l.trim()
+                .trim_start_matches(['#', '*', '-', '>', ' '])
+                .trim()
+        })
         .find(|l| !l.is_empty())
         .unwrap_or("");
     clip(line, 160)
@@ -263,12 +288,13 @@ pub async fn enqueue_with(
     title: Option<&str>,
 ) -> Result<String, String> {
     let uuid = enqueue(pool, project_uuid, agent_uuid, message_uuid).await?;
-    let _ = sqlx::query("UPDATE agent_runs SET kind = $1, title = COALESCE(title, $2) WHERE uuid = $3")
-        .bind(kind)
-        .bind(title.map(|t| clip(t, 80)))
-        .bind(&uuid)
-        .execute(pool)
-        .await;
+    let _ =
+        sqlx::query("UPDATE agent_runs SET kind = $1, title = COALESCE(title, $2) WHERE uuid = $3")
+            .bind(kind)
+            .bind(title.map(|t| clip(t, 80)))
+            .bind(&uuid)
+            .execute(pool)
+            .await;
     Ok(uuid)
 }
 
@@ -278,7 +304,14 @@ pub fn wake_title(marker: &str, content: &str) -> String {
     if !m.is_empty() {
         return clip(m, 80);
     }
-    clip(content.lines().find(|l| !l.trim().is_empty()).unwrap_or("Réveil").trim(), 80)
+    clip(
+        content
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("Réveil")
+            .trim(),
+        80,
+    )
 }
 
 /// Prochain worker en file d'attente du projet, passé en `pending` (P4-03).
@@ -360,7 +393,9 @@ pub fn deploy_repair_followup(user_message: &str, tools_json: &str) -> Option<St
     let calls: Vec<Value> = serde_json::from_str(tools_json).unwrap_or_default();
     // Publication verrouillée : l'agent attend la validation, pas de relance automatique.
     let awaiting_approval = calls.iter().any(|call| {
-        call.get("result").and_then(|r| r.get("code")).and_then(|v| v.as_str())
+        call.get("result")
+            .and_then(|r| r.get("code"))
+            .and_then(|v| v.as_str())
             == Some("publish_approval_required")
     });
     if awaiting_approval {

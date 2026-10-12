@@ -98,13 +98,12 @@ impl Tool for ReviewProjectSecurityTool {
             return Ok(json!({"ok": false, "error": "project_uuid requis"}));
         }
 
-        let project: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT uuid, workdir, production_url FROM projects WHERE uuid = $1",
-        )
-        .bind(project_uuid)
-        .fetch_optional(self.pool.as_ref())
-        .await
-        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let project: Option<(String, Option<String>, Option<String>)> =
+            sqlx::query_as("SELECT uuid, workdir, production_url FROM projects WHERE uuid = $1")
+                .bind(project_uuid)
+                .fetch_optional(self.pool.as_ref())
+                .await
+                .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
         let Some((uuid, workdir_opt, production_url)) = project else {
             return Ok(json!({
@@ -134,7 +133,11 @@ impl Tool for ReviewProjectSecurityTool {
         let mut headers_checked: Vec<String> = Vec::new();
         let mut header_notes: Vec<String> = Vec::new();
 
-        if let Some(url) = production_url.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(url) = production_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             push_header_check(&mut report, &mut headers_checked, &mut header_notes, url).await;
         }
         match preview_url(self.pool.as_ref(), &uuid).await {
@@ -277,7 +280,10 @@ fn collect(root: &Path, current: &Path, out: &mut Vec<PathBuf>, truncated: &mut 
         }
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
-        if SKIP_DIR_NAMES.iter().any(|d| name_str.eq_ignore_ascii_case(d)) {
+        if SKIP_DIR_NAMES
+            .iter()
+            .any(|d| name_str.eq_ignore_ascii_case(d))
+        {
             continue;
         }
         let path = entry.path();
@@ -357,9 +363,10 @@ fn scan_secrets(rel: &str, text: &str, rules: &[SecretRule], findings: &mut Vec<
             if is_known_example(m.as_str()) {
                 continue;
             }
-            if findings.iter().any(|f| {
-                f.rule == rule.rule && f.path == rel && f.line == Some(idx + 1)
-            }) {
+            if findings
+                .iter()
+                .any(|f| f.rule == rule.rule && f.path == rel && f.line == Some(idx + 1))
+            {
                 continue;
             }
             findings.push(Finding {
@@ -392,9 +399,7 @@ fn looks_like_placeholder(line: &str) -> bool {
 }
 
 fn is_known_example(value: &str) -> bool {
-    value.contains("EXAMPLE")
-        || value.contains("example")
-        || value == "AKIAIOSFODNN7EXAMPLE"
+    value.contains("EXAMPLE") || value.contains("example") || value == "AKIAIOSFODNN7EXAMPLE"
 }
 
 fn scan_static(rel: &str, text: &str, findings: &mut Vec<Finding>) {
@@ -506,14 +511,22 @@ fn scan_package_json(rel: &str, abs: &Path, text: &str, findings: &mut Vec<Findi
                 rule: "unpinned_or_remote_dep".into(),
                 path: rel.into(),
                 line: None,
-                message: format!("Dépendance « {name} » {detail}. Épingle une version de registre."),
+                message: format!(
+                    "Dépendance « {name} » {detail}. Épingle une version de registre."
+                ),
             });
         }
     }
     let has_lock = abs.parent().is_some_and(|dir| {
-        ["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb"]
-            .iter()
-            .any(|name| dir.join(name).is_file())
+        [
+            "package-lock.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "bun.lock",
+            "bun.lockb",
+        ]
+        .iter()
+        .any(|name| dir.join(name).is_file())
     });
     if !has_lock {
         findings.push(Finding {
@@ -522,7 +535,8 @@ fn scan_package_json(rel: &str, abs: &Path, text: &str, findings: &mut Vec<Findi
             rule: "missing_lockfile".into(),
             path: rel.into(),
             line: None,
-            message: "Aucun lockfile npm à côté de package.json. Épingle les versions installées.".into(),
+            message: "Aucun lockfile npm à côté de package.json. Épingle les versions installées."
+                .into(),
         });
     }
 }
@@ -559,13 +573,18 @@ fn scan_requirements(rel: &str, text: &str, findings: &mut Vec<Finding>) {
                 rule: "python_remote_dep".into(),
                 path: rel.into(),
                 line: Some(idx + 1),
-                message: "Dépendance Python distante. Épingle un commit ou une version de registre.".into(),
+                message:
+                    "Dépendance Python distante. Épingle un commit ou une version de registre."
+                        .into(),
             });
             continue;
         }
         let pinned = trimmed.contains("==") || trimmed.contains("~=") || trimmed.contains("@");
         if !pinned {
-            let name = trimmed.split(['>', '<', '!', ' ']).next().unwrap_or(trimmed);
+            let name = trimmed
+                .split(['>', '<', '!', ' '])
+                .next()
+                .unwrap_or(trimmed);
             findings.push(Finding {
                 severity: "low".into(),
                 category: "dependency".into(),
@@ -605,11 +624,7 @@ fn gitignore_covers_env(gitignore: &str) -> bool {
 }
 
 fn assess_security_headers(url: &str, headers: &[(String, String)]) -> Vec<Finding> {
-    let has = |name: &str| {
-        headers
-            .iter()
-            .any(|(k, _)| k.eq_ignore_ascii_case(name))
-    };
+    let has = |name: &str| headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name));
     let value_of = |name: &str| {
         headers
             .iter()
@@ -699,7 +714,9 @@ async fn fetch_headers(url: &str) -> std::result::Result<Vec<(String, String)>, 
         .user_agent("DevForge-Agent/2.0")
         .build()
         .map_err(|e| e.to_string())?;
-    let response = super::http::get_with_retry(&client, url).await.map_err(|e| e.to_string())?;
+    let response = super::http::get_with_retry(&client, url)
+        .await
+        .map_err(|e| e.to_string())?;
     let status = response.status();
     if status.is_redirection() {
         return Err("redirection non suivie — en-têtes non évalués".into());
@@ -714,7 +731,10 @@ async fn fetch_headers(url: &str) -> std::result::Result<Vec<(String, String)>, 
         .collect())
 }
 
-async fn preview_url(pool: &PgPool, project_uuid: &str) -> std::result::Result<Option<String>, String> {
+async fn preview_url(
+    pool: &PgPool,
+    project_uuid: &str,
+) -> std::result::Result<Option<String>, String> {
     let domain: Option<(String,)> =
         sqlx::query_as("SELECT wildcard_domain FROM instance_settings WHERE id = 1")
             .fetch_optional(pool)
@@ -772,10 +792,7 @@ mod tests {
 
     #[test]
     fn scan_redacts_secrets_and_flags_deps_and_sinks() {
-        let dir = std::env::temp_dir().join(format!(
-            "devforge-sec-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("devforge-sec-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("src")).unwrap();
         let token = "ghp_abcdefghijklmnopqrstuvwxyz123456";
@@ -808,10 +825,19 @@ mod tests {
             "la clé d'exemple AWS est ignorée"
         );
         assert!(report.findings.iter().any(|f| f.rule == "github_token"));
-        assert!(report.findings.iter().any(|f| f.rule == "env_file" && f.severity == "high"));
+        assert!(report
+            .findings
+            .iter()
+            .any(|f| f.rule == "env_file" && f.severity == "high"));
         assert!(report.findings.iter().any(|f| f.rule == "eval"));
-        assert!(report.findings.iter().any(|f| f.rule == "npm_install_script"));
-        assert!(report.findings.iter().any(|f| f.rule == "unpinned_or_remote_dep"));
+        assert!(report
+            .findings
+            .iter()
+            .any(|f| f.rule == "npm_install_script"));
+        assert!(report
+            .findings
+            .iter()
+            .any(|f| f.rule == "unpinned_or_remote_dep"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

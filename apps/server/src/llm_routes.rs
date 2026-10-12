@@ -893,17 +893,16 @@ async fn llm_list_models(
         } else {
             "SELECT api_key, base_url FROM llm_providers WHERE user_uuid = $1 AND enabled = 1 ORDER BY priority ASC LIMIT 1"
         };
-        let row: Option<(String, String)> =
-            sqlx::query_as(sql)
-                .bind(&user_uuid)
-                .fetch_optional(&state.pool)
-                .await
-                .map_err(|e| {
-                    (
-                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": e.to_string()})),
-                    )
-                })?;
+        let row: Option<(String, String)> = sqlx::query_as(sql)
+            .bind(&user_uuid)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|e| {
+                (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                )
+            })?;
         if let Some((stored_key, stored_base)) = row {
             if api_key.trim().is_empty() {
                 api_key = stored_key;

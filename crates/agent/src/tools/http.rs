@@ -11,7 +11,10 @@ fn transient(e: &reqwest::Error) -> bool {
 }
 
 /// GET avec un nouvel essai sur erreur réseau transitoire (outils HTTP sortants).
-pub(crate) async fn get_with_retry(client: &reqwest::Client, url: &str) -> reqwest::Result<reqwest::Response> {
+pub(crate) async fn get_with_retry(
+    client: &reqwest::Client,
+    url: &str,
+) -> reqwest::Result<reqwest::Response> {
     match client.get(url).send().await {
         Err(e) if transient(&e) => {
             tokio::time::sleep(Duration::from_millis(800)).await;
@@ -26,8 +29,16 @@ fn extract_title(body: &str) -> Option<String> {
     let start = lower.find("<title")?;
     let open_end = lower[start..].find('>')? + start + 1;
     let close = lower[open_end..].find("</title>")? + open_end;
-    let t = body.get(open_end..close)?.split_whitespace().collect::<Vec<_>>().join(" ");
-    if t.is_empty() { None } else { Some(t.chars().take(160).collect()) }
+    let t = body
+        .get(open_end..close)?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.chars().take(160).collect())
+    }
 }
 
 /// GET avec suivi des redirections (reqwest : 10 max), 1 nouvel essai sur erreur réseau transitoire.
@@ -35,7 +46,11 @@ pub async fn smoke_url(url: &str, expect_text: Option<&str>) -> Value {
     smoke_url_with(url, expect_text, Duration::from_secs(10)).await
 }
 
-pub(crate) async fn smoke_url_with(url: &str, expect_text: Option<&str>, timeout: Duration) -> Value {
+pub(crate) async fn smoke_url_with(
+    url: &str,
+    expect_text: Option<&str>,
+    timeout: Duration,
+) -> Value {
     let url = url.trim();
     if url.is_empty() || !(url.starts_with("http://") || url.starts_with("https://")) {
         return json!({"ok": false, "error": "URL invalide", "url": url});
@@ -133,8 +148,14 @@ pub fn post_deploy_verdict(smoke: &Value) -> Option<String> {
         Some(s) if s >= 500 => Some(format!("Déployé mais l'URL répond {s}")),
         Some(_) => None,
         None => {
-            let err = smoke.get("error").and_then(|v| v.as_str()).unwrap_or("injoignable");
-            Some(format!("Déployé mais l'URL est injoignable ({})", err.chars().take(120).collect::<String>()))
+            let err = smoke
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("injoignable");
+            Some(format!(
+                "Déployé mais l'URL est injoignable ({})",
+                err.chars().take(120).collect::<String>()
+            ))
         }
     }
 }
@@ -165,7 +186,12 @@ mod tests {
 
     #[tokio::test]
     async fn smoke_200_with_title_and_expect_text() {
-        let url = serve("200 OK", "<html><head><title> Mon  site </title></head><body>Bonjour</body></html>", Duration::ZERO).await;
+        let url = serve(
+            "200 OK",
+            "<html><head><title> Mon  site </title></head><body>Bonjour</body></html>",
+            Duration::ZERO,
+        )
+        .await;
         let r = smoke_url(&url, Some("Bonjour")).await;
         assert_eq!(r["ok"], true, "{r}");
         assert_eq!(r["status"], 200);
@@ -183,7 +209,10 @@ mod tests {
         let r = smoke_url(&url, None).await;
         assert_eq!(r["ok"], false);
         assert_eq!(r["status"], 502);
-        assert_eq!(post_deploy_verdict(&r).as_deref(), Some("Déployé mais l'URL répond 502"));
+        assert_eq!(
+            post_deploy_verdict(&r).as_deref(),
+            Some("Déployé mais l'URL répond 502")
+        );
     }
 
     #[tokio::test]

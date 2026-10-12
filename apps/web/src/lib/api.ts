@@ -2223,6 +2223,8 @@ export const api = {
       method: 'POST',
       body: '{}',
     }),
+  wakeLog: (projectUuid: string, limit = 30) =>
+    request<{ data: WakeLogEntry[] }>(`/projects/${projectUuid}/wake-log?limit=${limit}`),
   cronRuns: (projectUuid: string, cronId: string, limit = 50) =>
     request<{ data: CronRun[] }>(`/projects/${projectUuid}/crons/${cronId}/runs?limit=${limit}`),
 
@@ -2637,3 +2639,18 @@ export type AcmeSettings = {
   /** Repli (premier admin d’instance) si le réglage est vide. */
   admin_email?: string | null;
 };
+
+/** P1-10 : une ligne du journal des réveils (lancé / ignoré / échec). */
+export interface WakeLogEntry {
+  id: number;
+  source: string;
+  key: string;
+  label: string;
+  outcome: 'launched' | 'done' | 'skipped' | 'failed' | string;
+  cause: string;
+  state_hash: string;
+  run_uuid: string | null;
+  repeat: number;
+  created_at: string;
+  last_at: string;
+}

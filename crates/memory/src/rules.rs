@@ -21,7 +21,11 @@ pub const MAX_CONTENT: usize = 2000;
 
 /// `lower(trim(collapse_spaces(content)))`.
 pub fn normalize(content: &str) -> String {
-    content.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    content
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 pub fn valid_key(key: &str) -> bool {
@@ -41,7 +45,11 @@ pub fn validate(req: &WriteReq, known_secret_values: &[String]) -> Result<(), St
         return Err(format!("contenu trop long (max {MAX_CONTENT} caractères)"));
     }
     if !KINDS.contains(&req.kind.as_str()) {
-        return Err(format!("kind inconnu : {} (attendu : {})", req.kind, KINDS.join(", ")));
+        return Err(format!(
+            "kind inconnu : {} (attendu : {})",
+            req.kind,
+            KINDS.join(", ")
+        ));
     }
     if let Some(key) = &req.key {
         if !valid_key(key) {
@@ -104,7 +112,9 @@ pub enum KeyDecision {
 pub fn decide_key(existing: &Existing, req: &WriteReq, confidence: f32) -> KeyDecision {
     let norm = normalize(&req.content);
     if existing.content_norm == norm {
-        return KeyDecision::Refresh { confidence: existing.confidence.max(confidence) };
+        return KeyDecision::Refresh {
+            confidence: existing.confidence.max(confidence),
+        };
     }
     if existing.source == "user_said" && req.source == "observed" && confidence < 1.0 {
         return KeyDecision::Confirm {
@@ -129,7 +139,10 @@ pub fn confirmation_note(req: &WriteReq, note: String) -> WriteReq {
 fn trigrams(s: &str) -> HashSet<String> {
     // Même découpage que pg_trgm : mots alphanumériques, préfixés de 2 espaces, suffixés d'1.
     let mut out = HashSet::new();
-    for word in s.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()) {
+    for word in s
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+    {
         let padded: Vec<char> = format!("  {} ", word.to_lowercase()).chars().collect();
         for w in padded.windows(3) {
             out.insert(w.iter().collect());
@@ -236,7 +249,11 @@ pub fn profile_block(items: &[MemoryItem], now: DateTime<Utc>) -> ProfileBlock {
         lines.push(line);
     }
     if dropped > 0 {
-        tracing::warn!(dropped, budget = PROFILE_BUDGET, "mémoire : profil au-delà du budget, consolidation conseillée");
+        tracing::warn!(
+            dropped,
+            budget = PROFILE_BUDGET,
+            "mémoire : profil au-delà du budget, consolidation conseillée"
+        );
     }
     let mut notes: Vec<&MemoryItem> = items
         .iter()
@@ -246,7 +263,10 @@ pub fn profile_block(items: &[MemoryItem], now: DateTime<Utc>) -> ProfileBlock {
     notes.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     for n in notes.into_iter().take(MAX_INJECTED_NOTES) {
         let exp = n.expires_at.map(fmt_day).unwrap_or_default();
-        lines.push(format!("[notes] (expire {exp}) {}", one_line(&n.content, 200)));
+        lines.push(format!(
+            "[notes] (expire {exp}) {}",
+            one_line(&n.content, 200)
+        ));
     }
     let body = if lines.is_empty() {
         "(rien d'enregistré pour l'instant)".to_string()
@@ -266,7 +286,13 @@ pub fn recall_block(items: &[MemoryItem]) -> Option<String> {
     }
     let lines: Vec<String> = items
         .iter()
-        .map(|i| format!("- [{}] {}", fmt_date(i.created_at), one_line(&i.content, 280)))
+        .map(|i| {
+            format!(
+                "- [{}] {}",
+                fmt_date(i.created_at),
+                one_line(&i.content, 280)
+            )
+        })
         .collect();
     Some(format!(
         "Souvenirs possiblement utiles (datés, vérifie avant de t'y fier) :\n{}",
@@ -277,9 +303,9 @@ pub fn recall_block(items: &[MemoryItem]) -> Option<String> {
 /// Mots significatifs d'une requête (repli ILIKE et recherche en mémoire).
 pub fn query_terms(query: &str) -> Vec<String> {
     const STOP: &[&str] = &[
-        "les", "des", "une", "est", "que", "qui", "pour", "dans", "sur", "avec", "pas", "the", "and", "quel",
-        "quelle", "mon", "mes", "ton", "tes", "son", "ses", "aux", "par", "ce", "cette", "ces", "du", "de", "la",
-        "le", "un", "et", "ou", "à", "en",
+        "les", "des", "une", "est", "que", "qui", "pour", "dans", "sur", "avec", "pas", "the",
+        "and", "quel", "quelle", "mon", "mes", "ton", "tes", "son", "ses", "aux", "par", "ce",
+        "cette", "ces", "du", "de", "la", "le", "un", "et", "ou", "à", "en",
     ];
     normalize(query)
         .split(|c: char| !c.is_alphanumeric() && c != '.' && c != '_' && c != '-')
@@ -309,7 +335,11 @@ mod tests {
             created_by: "user".into(),
             created_at: now - ChronoDuration::minutes(mins_ago),
             updated_at: now - ChronoDuration::minutes(mins_ago),
-            expires_at: if tier == Tier::Note { Some(now + ChronoDuration::hours(10)) } else { None },
+            expires_at: if tier == Tier::Note {
+                Some(now + ChronoDuration::hours(10))
+            } else {
+                None
+            },
             superseded_by: None,
         }
     }
@@ -321,20 +351,55 @@ mod tests {
 
     #[test]
     fn similarity_matches_near_duplicates() {
-        assert!(similarity("préfère des réponses courtes", "préfère des réponses courtes.") > SIMILARITY);
+        assert!(
+            similarity(
+                "préfère des réponses courtes",
+                "préfère des réponses courtes."
+            ) > SIMILARITY
+        );
         assert!(similarity("préfère des réponses courtes", "déploie sur la branche dev") < 0.3);
     }
 
     #[test]
     fn profile_block_orders_user_project_agent_and_formats_dates() {
-        let mut infra = item(Scope::User, Tier::Profile, "infra", "Worker Demeter : http://10.1.0.88:8000", 5);
+        let mut infra = item(
+            Scope::User,
+            Tier::Profile,
+            "infra",
+            "Worker Demeter : http://10.1.0.88:8000",
+            5,
+        );
         infra.updated_at = "2026-10-10T08:00:00Z".parse().unwrap();
         let items = vec![
-            item(Scope::Agent("a".into()), Tier::Profile, "fact", "Fil dédié au lockfile", 1),
-            item(Scope::Project("p".into()), Tier::Profile, "decision", "Branche dev pour popcornn", 2),
+            item(
+                Scope::Agent("a".into()),
+                Tier::Profile,
+                "fact",
+                "Fil dédié au lockfile",
+                1,
+            ),
+            item(
+                Scope::Project("p".into()),
+                Tier::Profile,
+                "decision",
+                "Branche dev pour popcornn",
+                2,
+            ),
             infra,
-            item(Scope::User, Tier::Profile, "preference", "Réponses courtes", 30),
-            item(Scope::Agent("a".into()), Tier::Note, "context", "Lockfile poussé sur fix/lockfile", 3),
+            item(
+                Scope::User,
+                Tier::Profile,
+                "preference",
+                "Réponses courtes",
+                30,
+            ),
+            item(
+                Scope::Agent("a".into()),
+                Tier::Note,
+                "context",
+                "Lockfile poussé sur fix/lockfile",
+                3,
+            ),
         ];
         let b = profile_block(&items, Utc::now()).text;
         let pos = |s: &str| b.find(s).unwrap_or_else(|| panic!("{s} absent de {b}"));
@@ -350,13 +415,32 @@ mod tests {
     #[test]
     fn profile_block_respects_budget_and_pins_first() {
         let mut items: Vec<MemoryItem> = (0..30)
-            .map(|i| item(Scope::User, Tier::Profile, "fact", &format!("fait numéro {i} {}", "x".repeat(80)), i))
+            .map(|i| {
+                item(
+                    Scope::User,
+                    Tier::Profile,
+                    "fact",
+                    &format!("fait numéro {i} {}", "x".repeat(80)),
+                    i,
+                )
+            })
             .collect();
-        let mut pinned = item(Scope::Agent("a".into()), Tier::Profile, "fact", "ÉPINGLÉ", 999);
+        let mut pinned = item(
+            Scope::Agent("a".into()),
+            Tier::Profile,
+            "fact",
+            "ÉPINGLÉ",
+            999,
+        );
         pinned.pinned = true;
         items.push(pinned);
         let b = profile_block(&items, Utc::now());
-        let profile_part: String = b.text.lines().filter(|l| l.starts_with('[')).collect::<Vec<_>>().join("\n");
+        let profile_part: String = b
+            .text
+            .lines()
+            .filter(|l| l.starts_with('['))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(profile_part.chars().count() <= PROFILE_BUDGET);
         assert!(b.dropped > 0);
         assert!(b.text.lines().nth(1).unwrap().contains("ÉPINGLÉ"));
@@ -365,7 +449,15 @@ mod tests {
     #[test]
     fn expired_notes_are_not_injected_and_capped() {
         let mut items: Vec<MemoryItem> = (0..8)
-            .map(|i| item(Scope::Agent("a".into()), Tier::Note, "context", &format!("note {i}"), i))
+            .map(|i| {
+                item(
+                    Scope::Agent("a".into()),
+                    Tier::Note,
+                    "context",
+                    &format!("note {i}"),
+                    i,
+                )
+            })
             .collect();
         items[0].expires_at = Some(Utc::now() - ChronoDuration::minutes(1));
         let b = profile_block(&items, Utc::now()).text;
@@ -401,7 +493,13 @@ mod tests {
 
     #[test]
     fn validation_rejects_bad_input_and_secrets() {
-        let mut req = WriteReq::new("u", Scope::User, Tier::Log, "fact", "le token GitHub est ghp_xxx…");
+        let mut req = WriteReq::new(
+            "u",
+            Scope::User,
+            Tier::Log,
+            "fact",
+            "le token GitHub est ghp_xxx…",
+        );
         assert_eq!(validate(&req, &[]).unwrap_err(), secrets::REJECTED_MESSAGE);
         req.content = "ok".into();
         req.kind = "nope".into();
@@ -415,6 +513,9 @@ mod tests {
 
     #[test]
     fn query_terms_drop_stop_words() {
-        assert_eq!(query_terms("Quelle est l'adresse du worker Demeter ?"), vec!["adresse", "worker", "demeter"]);
+        assert_eq!(
+            query_terms("Quelle est l'adresse du worker Demeter ?"),
+            vec!["adresse", "worker", "demeter"]
+        );
     }
 }

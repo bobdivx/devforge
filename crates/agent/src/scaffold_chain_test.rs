@@ -1,6 +1,8 @@
 //! Chaîne locale : fichier écrit → base SQLite → déploiement (URL) → smoke HTTP.
 //! Le déploiement réel Docker n'est pas lancé ici : le store renvoie l'URL du fichier servi.
 
+use crate::tools::{HttpSmokeTool, TriggerDeployTool, WriteProjectFileTool};
+use crate::ProjectStore;
 use async_trait::async_trait;
 use devforge_database::provision_sqlite_file;
 use devforge_github::{GitHubFacade, StubGitHubClient};
@@ -11,8 +13,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use crate::tools::{HttpSmokeTool, TriggerDeployTool, WriteProjectFileTool};
-use crate::ProjectStore;
 
 struct UrlStore {
     url: String,
@@ -86,12 +86,10 @@ async fn scaffold_write_sqlite_deploy_and_smoke() {
     std::fs::create_dir_all(&workdir).unwrap();
 
     let pool = devforge_database::ephemeral_pg().await;
-    sqlx::query(
-        "CREATE TABLE projects (uuid TEXT PRIMARY KEY, workdir TEXT, git_repository TEXT)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
+    sqlx::query("CREATE TABLE projects (uuid TEXT PRIMARY KEY, workdir TEXT, git_repository TEXT)")
+        .execute(&pool)
+        .await
+        .unwrap();
     sqlx::query("INSERT INTO projects (uuid, workdir, git_repository) VALUES ($1, $2, '')")
         .bind(&project_uuid)
         .bind(workdir.display().to_string())
@@ -140,10 +138,7 @@ async fn scaffold_write_sqlite_deploy_and_smoke() {
     assert_eq!(deployed["status"], json!("success"), "{deployed}");
     let live = deployed["url"].as_str().unwrap();
 
-    let smoke = HttpSmokeTool
-        .execute(json!({ "url": live }))
-        .await
-        .unwrap();
+    let smoke = HttpSmokeTool.execute(json!({ "url": live })).await.unwrap();
     assert_eq!(smoke["ok"], json!(true), "{smoke}");
     assert_eq!(smoke["status"], json!(200));
     assert!(smoke["excerpt"].as_str().unwrap_or("").contains("devforge"));

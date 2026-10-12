@@ -1151,7 +1151,14 @@ pub fn is_valid_acme_email(email: &str) -> bool {
     let tld = d.rsplit('.').next().unwrap_or("");
     !(tld.len() < 2
         || [
-            "local", "localhost", "internal", "lan", "home", "test", "example", "invalid",
+            "local",
+            "localhost",
+            "internal",
+            "lan",
+            "home",
+            "test",
+            "example",
+            "invalid",
             "localdomain",
         ]
         .contains(&tld)
@@ -1209,7 +1216,10 @@ pub fn traefik_args(network: &str, acme_email: Option<&str>) -> Vec<String> {
         "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=http".into(),
     ];
     if let Some(e) = acme_email.filter(|e| is_valid_acme_email(e)) {
-        a.push(format!("--certificatesresolvers.letsencrypt.acme.email={}", e.trim()));
+        a.push(format!(
+            "--certificatesresolvers.letsencrypt.acme.email={}",
+            e.trim()
+        ));
     }
     a.push("--certificatesresolvers.letsencrypt.acme.storage=/traefik/acme.json".into());
     a.push("--ping=true".into());
@@ -1436,14 +1446,32 @@ mod tests {
         assert!(!is_valid_acme_email("nobody"));
         assert!(!is_valid_acme_email("a@b"));
         assert!(!is_valid_acme_email("x@y.com; rm -rf /"));
-        let cmd = traefik_run_command("devforge-traefik", "devforge", "/DATA/x/proxy", "traefik:v3.6", Some("bobdivx@gmail.com"), true);
+        let cmd = traefik_run_command(
+            "devforge-traefik",
+            "devforge",
+            "/DATA/x/proxy",
+            "traefik:v3.6",
+            Some("bobdivx@gmail.com"),
+            true,
+        );
         assert!(cmd.contains("acme.email=bobdivx@gmail.com"), "{cmd}");
         assert!(cmd.contains("-p 80:80"), "{cmd}");
         assert!(!cmd.contains("devforge.local"), "{cmd}");
         assert!(cmd.contains("entrypoints.http.http.middlewares=devforge-retry@docker"));
         assert!(cmd.contains("devforge-retry.retry.attempts=3"));
-        assert!(cmd.contains("-v '/DATA/x/proxy':/traefik") || cmd.contains("-v /DATA/x/proxy:/traefik"), "{cmd}");
-        let none = traefik_run_command("devforge-traefik", "devforge", "/p", "traefik:v3.6", Some("admin@devforge.local"), false);
+        assert!(
+            cmd.contains("-v '/DATA/x/proxy':/traefik")
+                || cmd.contains("-v /DATA/x/proxy:/traefik"),
+            "{cmd}"
+        );
+        let none = traefik_run_command(
+            "devforge-traefik",
+            "devforge",
+            "/p",
+            "traefik:v3.6",
+            Some("admin@devforge.local"),
+            false,
+        );
         assert!(!none.contains("acme.email"), "{none}");
         assert!(!none.contains("-p 80:80"), "{none}");
         assert!(none.contains("devforge.proxy.host_ports=false"), "{none}");
@@ -1453,7 +1481,11 @@ mod tests {
             traefik_config_hash("traefik:v3.6", "devforge", None)
         );
         let r = traefik_safe_replace_command("docker run -d x", "devforge-traefik");
-        assert!(r.contains("docker rename 'devforge-traefik' 'devforge-traefik-prev'") || r.contains("docker rename devforge-traefik devforge-traefik-prev"), "{r}");
+        assert!(
+            r.contains("docker rename 'devforge-traefik' 'devforge-traefik-prev'")
+                || r.contains("docker rename devforge-traefik devforge-traefik-prev"),
+            "{r}"
+        );
     }
 
     #[test]
@@ -1516,7 +1548,8 @@ mod tests {
 
     #[test]
     fn nitro_package_is_not_a_static_site() {
-        let pkg = r#"{"dependencies":{"vite":"^8","nitro":"3.0.0","@tanstack/react-start":"1.0.0"}}"#;
+        let pkg =
+            r#"{"dependencies":{"vite":"^8","nitro":"3.0.0","@tanstack/react-start":"1.0.0"}}"#;
         assert!(package_json_is_nitro_server(pkg));
         assert!(package_json_is_nitro_server(
             r#"{"devDependencies":{"@tanstack/start":"1.0.0"}}"#

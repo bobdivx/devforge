@@ -124,7 +124,11 @@ impl Tool for ListDeploymentsTool {
         })
     }
     async fn execute(&self, arguments: Value) -> Result<Value> {
-        let project_uuid = arguments.get("project_uuid").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let project_uuid = arguments
+            .get("project_uuid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
         if project_uuid.is_empty() {
             return Ok(json!({"ok": false, "error": "project_uuid requis"}));
         }
@@ -154,7 +158,11 @@ impl Tool for CancelDeploymentTool {
         })
     }
     async fn execute(&self, arguments: Value) -> Result<Value> {
-        let uuid = arguments.get("deployment_uuid").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let uuid = arguments
+            .get("deployment_uuid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
         if uuid.is_empty() {
             return Ok(json!({"ok": false, "error": "deployment_uuid requis"}));
         }

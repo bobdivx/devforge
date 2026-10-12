@@ -1,20 +1,19 @@
 mod catalog;
 mod http_client;
-mod turso;
 mod oauth;
 #[cfg(test)]
 mod smoke_test;
+mod turso;
 
 pub use catalog::{
     catalog, catalog_as_json, find_preset, CatalogField, CatalogPreset, SetupSection,
 };
 pub use http_client::HttpMcpRemoteClient;
-pub use turso::{create_db_token, libsql_url, list_databases, TursoDatabase};
 pub use oauth::{
-    build_authorization_url, code_challenge, discover_oauth, exchange_code,
-    generate_code_verifier, generate_state, refresh_access_token, OAuthDiscoveryDocument,
-    TokenResponse,
+    build_authorization_url, code_challenge, discover_oauth, exchange_code, generate_code_verifier,
+    generate_state, refresh_access_token, OAuthDiscoveryDocument, TokenResponse,
 };
+pub use turso::{create_db_token, libsql_url, list_databases, TursoDatabase};
 
 use async_trait::async_trait;
 use devforge_shared::{DevForgeError, Result, ToolDefinition};
@@ -77,7 +76,7 @@ impl McpServerConfig {
                 (k.clone(), hint)
             })
             .collect();
-        
+
         // Masquer Authorization header (contient souvent Bearer tokens)
         let masked_headers: HashMap<String, String> = self
             .headers
@@ -90,7 +89,7 @@ impl McpServerConfig {
                 }
             })
             .collect();
-        
+
         json!({
             "id": self.id,
             "name": self.name,
@@ -273,17 +272,14 @@ impl McpClientRegistry {
         }
         // Résolution souple : catalog_id ou nom (ex. « github », « GitHub MCP »)
         let needle = key.to_ascii_lowercase();
-        self.list()
-            .await
-            .into_iter()
-            .find(|s| {
-                s.catalog_id
-                    .as_deref()
-                    .map(|c| c.eq_ignore_ascii_case(&needle))
-                    .unwrap_or(false)
-                    || s.name.eq_ignore_ascii_case(&needle)
-                    || s.name.to_ascii_lowercase().contains(&needle)
-            })
+        self.list().await.into_iter().find(|s| {
+            s.catalog_id
+                .as_deref()
+                .map(|c| c.eq_ignore_ascii_case(&needle))
+                .unwrap_or(false)
+                || s.name.eq_ignore_ascii_case(&needle)
+                || s.name.to_ascii_lowercase().contains(&needle)
+        })
     }
 
     pub async fn list_remote_tools(&self, server_id: &str) -> Result<Vec<RemoteTool>> {

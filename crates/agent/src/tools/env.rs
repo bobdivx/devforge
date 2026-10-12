@@ -24,7 +24,11 @@ impl Tool for ListEnvVarsTool {
         })
     }
     async fn execute(&self, arguments: Value) -> Result<Value> {
-        let uuid = arguments.get("project_uuid").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let uuid = arguments
+            .get("project_uuid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
         if uuid.is_empty() {
             return Ok(json!({"ok": false, "error": "project_uuid requis"}));
         }
@@ -60,14 +64,25 @@ impl Tool for UpsertEnvVarsTool {
         })
     }
     async fn execute(&self, arguments: Value) -> Result<Value> {
-        let uuid = arguments.get("project_uuid").and_then(|v| v.as_str()).unwrap_or("").trim();
-        let key = arguments.get("key").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let uuid = arguments
+            .get("project_uuid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let key = arguments
+            .get("key")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
         let value = arguments
             .get("value")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let secret = arguments.get("secret").and_then(|v| v.as_bool()).unwrap_or(true);
+        let secret = arguments
+            .get("secret")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
         if uuid.is_empty() || key.is_empty() {
             return Ok(json!({"ok": false, "error": "project_uuid et key requis"}));
         }

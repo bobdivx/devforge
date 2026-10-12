@@ -3,8 +3,8 @@
 
 use crate::rules::{self, Existing, KeyDecision};
 use crate::{
-    ForgetTarget, ListReq, MemoryError, MemoryItem, MemoryStats, Result, Scope, SearchReq, Tier, WriteOutcome,
-    WriteReq,
+    ForgetTarget, ListReq, MemoryError, MemoryItem, MemoryStats, Result, Scope, SearchReq, Tier,
+    WriteOutcome, WriteReq,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -18,10 +18,19 @@ pub const MAX_LIST: usize = 50;
 pub trait MemoryStore: Send + Sync {
     async fn write(&self, req: WriteReq) -> Result<WriteOutcome>;
     async fn search(&self, user_uuid: &str, q: &SearchReq) -> Result<Vec<MemoryItem>>;
-    async fn forget(&self, user_uuid: &str, target: ForgetTarget, reason: Option<String>) -> Result<usize>;
+    async fn forget(
+        &self,
+        user_uuid: &str,
+        target: ForgetTarget,
+        reason: Option<String>,
+    ) -> Result<usize>;
     /// Profil (portées user → project → agent) + notes vivantes de l'agent courant.
-    async fn profile(&self, user_uuid: &str, project_uuid: Option<&str>, agent_uuid: Option<&str>)
-        -> Result<Vec<MemoryItem>>;
+    async fn profile(
+        &self,
+        user_uuid: &str,
+        project_uuid: Option<&str>,
+        agent_uuid: Option<&str>,
+    ) -> Result<Vec<MemoryItem>>;
     async fn purge_expired(&self) -> Result<u64>;
 
     // --- UI « Réglages → Mémoire » (P3-07) ---
@@ -97,12 +106,23 @@ impl InMemoryStore {
 
     /// Accès direct (tests) : toutes les lignes, supprimées comprises.
     pub fn all(&self) -> Vec<(MemoryItem, bool)> {
-        self.rows.lock().unwrap().iter().map(|r| (r.item.clone(), r.deleted)).collect()
+        self.rows
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|r| (r.item.clone(), r.deleted))
+            .collect()
     }
 
     /// Fait vieillir une entrée (tests d'expiration).
     pub fn set_expires_at(&self, uuid: &str, at: DateTime<Utc>) {
-        if let Some(r) = self.rows.lock().unwrap().iter_mut().find(|r| r.item.uuid == uuid) {
+        if let Some(r) = self
+            .rows
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|r| r.item.uuid == uuid)
+        {
             r.item.expires_at = Some(at);
         }
     }
@@ -111,7 +131,12 @@ impl InMemoryStore {
         row.user_uuid == user && &row.item.scope == scope
     }
 
-    fn insert_row(rows: &mut Vec<Row>, req: &WriteReq, confidence: f32, now: DateTime<Utc>) -> String {
+    fn insert_row(
+        rows: &mut Vec<Row>,
+        req: &WriteReq,
+        confidence: f32,
+        now: DateTime<Utc>,
+    ) -> String {
         let uuid = uuid::Uuid::new_v4().to_string();
         let project_uuid = match &req.scope {
             Scope::Project(p) => Some(p.clone()),
@@ -152,7 +177,13 @@ impl InMemoryStore {
                 })
                 .map(|(i, _)| i)
                 .collect();
-            notes.sort_by(|a, b| rows[*b].item.updated_at.cmp(&rows[*a].item.updated_at).then(b.cmp(a)));
+            notes.sort_by(|a, b| {
+                rows[*b]
+                    .item
+                    .updated_at
+                    .cmp(&rows[*a].item.updated_at)
+                    .then(b.cmp(a))
+            });
             for i in notes.into_iter().skip(rules::MAX_LIVE_NOTES) {
                 rows[i].deleted = true;
             }
@@ -202,7 +233,10 @@ impl InMemoryStore {
                         let note_req = rules::confirmation_note(&req, note);
                         let c = rules::effective_confidence(&note_req);
                         let note = Self::insert_row(&mut rows, &note_req, c, now);
-                        WriteOutcome::NeedsConfirmation { existing: ex.uuid, note }
+                        WriteOutcome::NeedsConfirmation {
+                            existing: ex.uuid,
+                            note,
+                        }
                     }
                 };
             }
@@ -252,22 +286,39 @@ impl MemoryStore for InMemoryStore {
             .filter(|r| q.since.map(|s| r.item.created_at >= s).unwrap_or(true))
             .map(|r| {
                 let hay = format!("{} {}", r.item.key.as_deref().unwrap_or(""), r.content_norm);
-                (terms.iter().filter(|t| hay.contains(t.as_str())).count(), r.item.clone())
+                (
+                    terms.iter().filter(|t| hay.contains(t.as_str())).count(),
+                    r.item.clone(),
+                )
             })
             .filter(|(score, _)| terms.is_empty() || *score >= min)
             .collect();
         hits.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.updated_at.cmp(&a.1.updated_at)));
-        Ok(hits.into_iter().take(clamp_limit(q.limit, MAX_SEARCH)).map(|(_, i)| i).collect())
+        Ok(hits
+            .into_iter()
+            .take(clamp_limit(q.limit, MAX_SEARCH))
+            .map(|(_, i)| i)
+            .collect())
     }
 
-    async fn forget(&self, user_uuid: &str, target: ForgetTarget, _reason: Option<String>) -> Result<usize> {
+    async fn forget(
+        &self,
+        user_uuid: &str,
+        target: ForgetTarget,
+        _reason: Option<String>,
+    ) -> Result<usize> {
         let mut rows = self.rows.lock().unwrap();
         let mut n = 0;
-        for r in rows.iter_mut().filter(|r| r.user_uuid == user_uuid && !r.deleted) {
+        for r in rows
+            .iter_mut()
+            .filter(|r| r.user_uuid == user_uuid && !r.deleted)
+        {
             let hit = match &target {
                 ForgetTarget::Uuid(u) => &r.item.uuid == u,
                 ForgetTarget::Key { scope, key } => {
-                    &r.item.scope == scope && r.item.key.as_deref() == Some(key) && r.item.superseded_by.is_none()
+                    &r.item.scope == scope
+                        && r.item.key.as_deref() == Some(key)
+                        && r.item.superseded_by.is_none()
                 }
             };
             if hit {
@@ -293,7 +344,9 @@ impl MemoryStore for InMemoryStore {
                 (Tier::Profile, Scope::User) => true,
                 (Tier::Profile, Scope::Project(p)) => Some(p.as_str()) == project_uuid,
                 (Tier::Profile, Scope::Agent(a)) => Some(a.as_str()) == agent_uuid,
-                (Tier::Note, Scope::Agent(a)) => Some(a.as_str()) == agent_uuid && live_now(&r.item, now),
+                (Tier::Note, Scope::Agent(a)) => {
+                    Some(a.as_str()) == agent_uuid && live_now(&r.item, now)
+                }
                 _ => false,
             })
             .map(|r| r.item.clone())
@@ -304,7 +357,10 @@ impl MemoryStore for InMemoryStore {
         let now = Utc::now();
         let mut rows = self.rows.lock().unwrap();
         let mut n = 0;
-        for r in rows.iter_mut().filter(|r| !r.deleted && !live_now(&r.item, now)) {
+        for r in rows
+            .iter_mut()
+            .filter(|r| !r.deleted && !live_now(&r.item, now))
+        {
             r.deleted = true;
             n += 1;
         }
@@ -313,20 +369,46 @@ impl MemoryStore for InMemoryStore {
 
     async fn list(&self, user_uuid: &str, req: &ListReq) -> Result<Vec<MemoryItem>> {
         let now = Utc::now();
-        let q = req.query.as_deref().map(rules::normalize).filter(|s| !s.is_empty());
+        let q = req
+            .query
+            .as_deref()
+            .map(rules::normalize)
+            .filter(|s| !s.is_empty());
         let rows = self.rows.lock().unwrap();
         let mut out: Vec<MemoryItem> = rows
             .iter()
             .filter(|r| r.user_uuid == user_uuid && !r.deleted && live_now(&r.item, now))
             .filter(|r| req.include_superseded || r.item.superseded_by.is_none())
-            .filter(|r| req.scope.as_deref().map(|s| r.item.scope.name() == s).unwrap_or(true))
+            .filter(|r| {
+                req.scope
+                    .as_deref()
+                    .map(|s| r.item.scope.name() == s)
+                    .unwrap_or(true)
+            })
             .filter(|r| req.tier.map(|t| r.item.tier == t).unwrap_or(true))
-            .filter(|r| req.project_uuid.as_deref().map(|p| r.item.project_uuid.as_deref() == Some(p)).unwrap_or(true))
-            .filter(|r| q.as_deref().map(|q| r.content_norm.contains(q)).unwrap_or(true))
+            .filter(|r| {
+                req.project_uuid
+                    .as_deref()
+                    .map(|p| r.item.project_uuid.as_deref() == Some(p))
+                    .unwrap_or(true)
+            })
+            .filter(|r| {
+                q.as_deref()
+                    .map(|q| r.content_norm.contains(q))
+                    .unwrap_or(true)
+            })
             .map(|r| r.item.clone())
             .collect();
-        out.sort_by(|a, b| b.pinned.cmp(&a.pinned).then(b.updated_at.cmp(&a.updated_at)));
-        Ok(out.into_iter().skip(req.offset).take(clamp_limit(req.limit, MAX_LIST)).collect())
+        out.sort_by(|a, b| {
+            b.pinned
+                .cmp(&a.pinned)
+                .then(b.updated_at.cmp(&a.updated_at))
+        });
+        Ok(out
+            .into_iter()
+            .skip(req.offset)
+            .take(clamp_limit(req.limit, MAX_LIST))
+            .collect())
     }
 
     async fn get(&self, user_uuid: &str, uuid: &str) -> Result<Option<MemoryItem>> {
@@ -342,10 +424,9 @@ impl MemoryStore for InMemoryStore {
         let mut out = Vec::new();
         let mut cur = uuid.to_string();
         for _ in 0..20 {
-            match rows
-                .iter()
-                .find(|r| r.user_uuid == user_uuid && r.item.superseded_by.as_deref() == Some(cur.as_str()))
-            {
+            match rows.iter().find(|r| {
+                r.user_uuid == user_uuid && r.item.superseded_by.as_deref() == Some(cur.as_str())
+            }) {
                 Some(r) => {
                     cur = r.item.uuid.clone();
                     out.push(r.item.clone());
@@ -357,7 +438,10 @@ impl MemoryStore for InMemoryStore {
     }
 
     async fn correct(&self, user_uuid: &str, uuid: &str, content: &str) -> Result<WriteOutcome> {
-        let old = self.get(user_uuid, uuid).await?.ok_or(MemoryError::NotFound)?;
+        let old = self
+            .get(user_uuid, uuid)
+            .await?
+            .ok_or(MemoryError::NotFound)?;
         let req = correction_req(user_uuid, &old, content);
         if let Err(e) = rules::validate(&req, &self.secret_values) {
             return Ok(WriteOutcome::Rejected(e));
@@ -380,7 +464,10 @@ impl MemoryStore for InMemoryStore {
 
     async fn set_pinned(&self, user_uuid: &str, uuid: &str, pinned: bool) -> Result<bool> {
         let mut rows = self.rows.lock().unwrap();
-        match rows.iter_mut().find(|r| r.user_uuid == user_uuid && !r.deleted && r.item.uuid == uuid) {
+        match rows
+            .iter_mut()
+            .find(|r| r.user_uuid == user_uuid && !r.deleted && r.item.uuid == uuid)
+        {
             Some(r) => {
                 r.item.pinned = pinned;
                 Ok(true)
@@ -432,7 +519,10 @@ fn q_min_match(q: &SearchReq, terms: usize) -> usize {
 /// Migration idempotente (P3-01). `pg_trgm` est facultatif (droits) : sans lui, la dédup sans
 /// clé se fait par égalité normalisée.
 pub async fn migrate(pool: &PgPool) -> std::result::Result<(), sqlx::Error> {
-    if let Err(e) = sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_trgm").execute(pool).await {
+    if let Err(e) = sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+        .execute(pool)
+        .await
+    {
         tracing::info!(error = %e, "pg_trgm indisponible : dédup mémoire par égalité normalisée");
     }
     sqlx::query(
@@ -516,7 +606,11 @@ struct PgRow {
 impl PgRow {
     fn into_item(self) -> Option<MemoryItem> {
         Some(MemoryItem {
-            scope: Scope::from_parts(&self.scope, self.project_uuid.as_deref(), self.agent_uuid.as_deref())?,
+            scope: Scope::from_parts(
+                &self.scope,
+                self.project_uuid.as_deref(),
+                self.agent_uuid.as_deref(),
+            )?,
             tier: Tier::parse(&self.tier)?,
             uuid: self.uuid,
             project_uuid: self.project_uuid,
@@ -544,7 +638,10 @@ fn scope_cols(req: &WriteReq) -> (Option<String>, Option<String>) {
     match &req.scope {
         Scope::User => (None, None),
         Scope::Project(p) => (Some(p.clone()), None),
-        Scope::Agent(a) => (req.project_uuid.clone().filter(|p| !p.is_empty()), Some(a.clone())),
+        Scope::Agent(a) => (
+            req.project_uuid.clone().filter(|p| !p.is_empty()),
+            Some(a.clone()),
+        ),
     }
 }
 
@@ -555,7 +652,10 @@ pub struct PgMemoryStore {
 
 impl PgMemoryStore {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool, trgm: tokio::sync::OnceCell::new() }
+        Self {
+            pool,
+            trgm: tokio::sync::OnceCell::new(),
+        }
     }
 
     /// Force l'absence de pg_trgm (tests du repli).
@@ -569,18 +669,26 @@ impl PgMemoryStore {
         *self
             .trgm
             .get_or_init(|| async {
-                sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm')")
-                    .fetch_one(&self.pool)
-                    .await
-                    .unwrap_or(false)
+                sqlx::query_scalar::<_, bool>(
+                    "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm')",
+                )
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(false)
             })
             .await
     }
 
     /// Valeurs exactes des variables d'env marquées secrètes du projet concerné.
     async fn secret_values(&self, req: &WriteReq) -> Vec<String> {
-        let project = req.scope.project_id().map(str::to_string).or_else(|| req.project_uuid.clone());
-        let Some(project) = project.filter(|p| !p.is_empty()) else { return vec![] };
+        let project = req
+            .scope
+            .project_id()
+            .map(str::to_string)
+            .or_else(|| req.project_uuid.clone());
+        let Some(project) = project.filter(|p| !p.is_empty()) else {
+            return vec![];
+        };
         sqlx::query_scalar::<_, String>(
             "SELECT value FROM project_env_vars WHERE project_uuid = $1 AND secret <> 0",
         )
@@ -661,7 +769,12 @@ impl PgMemoryStore {
             .fetch_optional(&mut *tx)
             .await?;
             if let Some((uuid, content_norm, source, conf)) = ex {
-                let existing = Existing { uuid: uuid.clone(), content_norm, source, confidence: conf };
+                let existing = Existing {
+                    uuid: uuid.clone(),
+                    content_norm,
+                    source,
+                    confidence: conf,
+                };
                 let out = match rules::decide_key(&existing, req, confidence) {
                     KeyDecision::Refresh { confidence } => {
                         sqlx::query(
@@ -692,7 +805,10 @@ impl PgMemoryStore {
                         let c = rules::effective_confidence(&note_req);
                         let new = uuid::Uuid::new_v4().to_string();
                         Self::insert(&mut tx, &new, &note_req, c, now).await?;
-                        WriteOutcome::NeedsConfirmation { existing: uuid, note: new }
+                        WriteOutcome::NeedsConfirmation {
+                            existing: uuid,
+                            note: new,
+                        }
                     }
                 };
                 tx.commit().await?;
@@ -741,8 +857,14 @@ impl PgMemoryStore {
 fn scope_filter_params(scopes: &[Scope]) -> (bool, bool, Vec<String>, Vec<String>) {
     let all = scopes.is_empty();
     let user = scopes.iter().any(|s| matches!(s, Scope::User));
-    let projects = scopes.iter().filter_map(|s| s.project_id().map(str::to_string)).collect();
-    let agents = scopes.iter().filter_map(|s| s.agent_id().map(str::to_string)).collect();
+    let projects = scopes
+        .iter()
+        .filter_map(|s| s.project_id().map(str::to_string))
+        .collect();
+    let agents = scopes
+        .iter()
+        .filter_map(|s| s.agent_id().map(str::to_string))
+        .collect();
     (all, user, projects, agents)
 }
 
@@ -763,7 +885,9 @@ impl MemoryStore for PgMemoryStore {
         }
         match self.write_inner(&req).await {
             // Course sur l'index unique (même clé écrite en parallèle) : on rejoue une fois.
-            Err(MemoryError::Db(e)) if e.contains("uq_mem_live_key") => self.write_inner(&req).await,
+            Err(MemoryError::Db(e)) if e.contains("uq_mem_live_key") => {
+                self.write_inner(&req).await
+            }
             other => other,
         }
     }
@@ -805,7 +929,14 @@ impl MemoryStore for PgMemoryStore {
         }
         let patterns: Vec<String> = terms
             .iter()
-            .map(|t| format!("%{}%", t.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")))
+            .map(|t| {
+                format!(
+                    "%{}%",
+                    t.replace('\\', "\\\\")
+                        .replace('%', "\\%")
+                        .replace('_', "\\_")
+                )
+            })
             .collect();
         let min = q_min_match(q, terms.len()) as i64;
         let sql = format!(
@@ -834,7 +965,12 @@ impl MemoryStore for PgMemoryStore {
         Ok(items(rows))
     }
 
-    async fn forget(&self, user_uuid: &str, target: ForgetTarget, reason: Option<String>) -> Result<usize> {
+    async fn forget(
+        &self,
+        user_uuid: &str,
+        target: ForgetTarget,
+        reason: Option<String>,
+    ) -> Result<usize> {
         let res = match &target {
             ForgetTarget::Uuid(u) => {
                 sqlx::query(
@@ -861,7 +997,12 @@ impl MemoryStore for PgMemoryStore {
             }
         };
         let n = res.rows_affected() as usize;
-        tracing::info!(user_uuid, forgotten = n, reason = reason.as_deref().unwrap_or(""), "mémoire : oubli");
+        tracing::info!(
+            user_uuid,
+            forgotten = n,
+            reason = reason.as_deref().unwrap_or(""),
+            "mémoire : oubli"
+        );
         Ok(n)
     }
 
@@ -897,8 +1038,19 @@ impl MemoryStore for PgMemoryStore {
     }
 
     async fn list(&self, user_uuid: &str, req: &ListReq) -> Result<Vec<MemoryItem>> {
-        let q = req.query.as_deref().map(rules::normalize).filter(|s| !s.is_empty());
-        let pattern = q.map(|q| format!("%{}%", q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")));
+        let q = req
+            .query
+            .as_deref()
+            .map(rules::normalize)
+            .filter(|s| !s.is_empty());
+        let pattern = q.map(|q| {
+            format!(
+                "%{}%",
+                q.replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_")
+            )
+        });
         let sql = format!(
             r#"SELECT {COLS} FROM agent_memories
                WHERE user_uuid = $1 AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > now())
@@ -925,7 +1077,11 @@ impl MemoryStore for PgMemoryStore {
 
     async fn get(&self, user_uuid: &str, uuid: &str) -> Result<Option<MemoryItem>> {
         let sql = format!("SELECT {COLS} FROM agent_memories WHERE user_uuid = $1 AND uuid = $2 AND deleted_at IS NULL");
-        let row: Option<PgRow> = sqlx::query_as(&sql).bind(user_uuid).bind(uuid).fetch_optional(&self.pool).await?;
+        let row: Option<PgRow> = sqlx::query_as(&sql)
+            .bind(user_uuid)
+            .bind(uuid)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(row.and_then(PgRow::into_item))
     }
 
@@ -939,12 +1095,19 @@ impl MemoryStore for PgMemoryStore {
                )
                SELECT {COLS} FROM chain ORDER BY depth"#
         );
-        let rows: Vec<PgRow> = sqlx::query_as(&sql).bind(user_uuid).bind(uuid).fetch_all(&self.pool).await?;
+        let rows: Vec<PgRow> = sqlx::query_as(&sql)
+            .bind(user_uuid)
+            .bind(uuid)
+            .fetch_all(&self.pool)
+            .await?;
         Ok(items(rows))
     }
 
     async fn correct(&self, user_uuid: &str, uuid: &str, content: &str) -> Result<WriteOutcome> {
-        let old = self.get(user_uuid, uuid).await?.ok_or(MemoryError::NotFound)?;
+        let old = self
+            .get(user_uuid, uuid)
+            .await?
+            .ok_or(MemoryError::NotFound)?;
         let req = correction_req(user_uuid, &old, content);
         let known = self.secret_values(&req).await;
         if let Err(e) = rules::validate(&req, &known) {
@@ -1005,6 +1168,12 @@ impl MemoryStore for PgMemoryStore {
         )
         .fetch_one(&self.pool)
         .await?;
-        Ok(MemoryStats { profile: row.0, log: row.1, note: row.2, superseded: row.3, deleted: row.4 })
+        Ok(MemoryStats {
+            profile: row.0,
+            log: row.1,
+            note: row.2,
+            superseded: row.3,
+            deleted: row.4,
+        })
     }
 }

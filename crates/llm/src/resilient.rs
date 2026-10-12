@@ -40,7 +40,10 @@ pub struct RetryPolicy {
 
 impl Default for RetryPolicy {
     fn default() -> Self {
-        Self { base: Duration::from_millis(600), max_delay: Duration::from_secs(8) }
+        Self {
+            base: Duration::from_millis(600),
+            max_delay: Duration::from_secs(8),
+        }
     }
 }
 
@@ -48,7 +51,9 @@ impl RetryPolicy {
     /// `min(retry_after | base·2^n, max)` avec ±20 % de gigue.
     pub fn delay(&self, kind: &LlmErrorKind, attempt: u32) -> Duration {
         let raw = match kind {
-            LlmErrorKind::RateLimited { retry_after: Some(d) } => *d,
+            LlmErrorKind::RateLimited {
+                retry_after: Some(d),
+            } => *d,
             _ => self.base.saturating_mul(1u32 << attempt.min(8)),
         };
         let capped = raw.min(self.max_delay);
@@ -67,7 +72,11 @@ fn for_entry(entry: &ChainEntry, req: &ChatRequest) -> ChatRequest {
             if m.images.is_empty() {
                 continue;
             }
-            let names: Vec<String> = m.images.drain(..).map(|i| format!("[image jointe : {}]", i.name)).collect();
+            let names: Vec<String> = m
+                .images
+                .drain(..)
+                .map(|i| format!("[image jointe : {}]", i.name))
+                .collect();
             m.content = format!("{}\n{}", m.content, names.join("\n"));
         }
     }
@@ -81,7 +90,10 @@ pub struct ResilientLlmProvider {
 
 impl ResilientLlmProvider {
     pub fn new(chain: Vec<ChainEntry>) -> Self {
-        Self { chain, policy: RetryPolicy::default() }
+        Self {
+            chain,
+            policy: RetryPolicy::default(),
+        }
     }
 
     pub fn with_policy(mut self, policy: RetryPolicy) -> Self {
@@ -94,7 +106,11 @@ impl ResilientLlmProvider {
     }
 
     /// Un fournisseur, avec ses nouveaux essais.
-    async fn chat_with_retries(&self, entry: &ChainEntry, req: &ChatRequest) -> Result<AssistantTurn> {
+    async fn chat_with_retries(
+        &self,
+        entry: &ChainEntry,
+        req: &ChatRequest,
+    ) -> Result<AssistantTurn> {
         let mut attempt: u32 = 0;
         loop {
             match entry.provider.chat(for_entry(entry, req)).await {
@@ -131,7 +147,11 @@ impl ResilientLlmProvider {
     ) -> Result<AssistantTurn> {
         let mut attempt: u32 = 0;
         loop {
-            match entry.provider.chat_stream(for_entry(entry, req), sink).await {
+            match entry
+                .provider
+                .chat_stream(for_entry(entry, req), sink)
+                .await
+            {
                 Ok(turn) => return Ok(turn),
                 Err(e) => {
                     let kind = classify(&e);
@@ -171,7 +191,9 @@ impl LlmProvider for ResilientLlmProvider {
     }
 
     fn supports_vision(&self) -> bool {
-        self.chain.first().is_some_and(|e| e.provider.supports_vision())
+        self.chain
+            .first()
+            .is_some_and(|e| e.provider.supports_vision())
     }
 
     async fn chat(&self, req: ChatRequest) -> Result<AssistantTurn> {
@@ -212,7 +234,11 @@ impl LlmProvider for ResilientLlmProvider {
         Err(all_failed(&errors))
     }
 
-    async fn chat_stream(&self, req: ChatRequest, on_delta: &DeltaSink<'_>) -> Result<AssistantTurn> {
+    async fn chat_stream(
+        &self,
+        req: ChatRequest,
+        on_delta: &DeltaSink<'_>,
+    ) -> Result<AssistantTurn> {
         if self.chain.is_empty() {
             return Err(err("aucun provider LLM dans la chaîne"));
         }
@@ -257,7 +283,11 @@ impl LlmProvider for ResilientLlmProvider {
 fn all_failed(errors: &[String]) -> devforge_shared::DevForgeError {
     err(format!(
         "tous les providers ont échoué — {}",
-        if errors.is_empty() { "chaîne vide".into() } else { errors.join(" | ") }
+        if errors.is_empty() {
+            "chaîne vide".into()
+        } else {
+            errors.join(" | ")
+        }
     ))
 }
 
@@ -275,7 +305,10 @@ mod tests {
 
     impl Scripted {
         fn new(items: Vec<std::result::Result<&'static str, &'static str>>) -> Arc<Self> {
-            Arc::new(Self { script: Mutex::new(items.into()), calls: Mutex::new(0) })
+            Arc::new(Self {
+                script: Mutex::new(items.into()),
+                calls: Mutex::new(0),
+            })
         }
         fn calls(&self) -> u32 {
             *self.calls.lock().unwrap()
@@ -290,7 +323,11 @@ mod tests {
         async fn chat(&self, _req: ChatRequest) -> Result<AssistantTurn> {
             *self.calls.lock().unwrap() += 1;
             match self.script.lock().unwrap().pop_front() {
-                Some(Ok(c)) => Ok(AssistantTurn { content: c.into(), tool_calls: vec![], finish_reason: "stop".into() }),
+                Some(Ok(c)) => Ok(AssistantTurn {
+                    content: c.into(),
+                    tool_calls: vec![],
+                    finish_reason: "stop".into(),
+                }),
                 Some(Err(m)) => Err(err(m)),
                 None => Err(err("LLM 500 Internal Server Error: fin du script")),
             }
@@ -312,13 +349,21 @@ mod tests {
         async fn chat(&self, _req: ChatRequest) -> Result<AssistantTurn> {
             Err(err("non utilisé"))
         }
-        async fn chat_stream(&self, _req: ChatRequest, on_delta: &DeltaSink<'_>) -> Result<AssistantTurn> {
+        async fn chat_stream(
+            &self,
+            _req: ChatRequest,
+            on_delta: &DeltaSink<'_>,
+        ) -> Result<AssistantTurn> {
             *self.calls.lock().unwrap() += 1;
             for p in &self.parts {
                 on_delta(p);
             }
             match self.end {
-                Ok(()) => Ok(AssistantTurn { content: self.parts.concat(), tool_calls: vec![], finish_reason: "stop".into() }),
+                Ok(()) => Ok(AssistantTurn {
+                    content: self.parts.concat(),
+                    tool_calls: vec![],
+                    finish_reason: "stop".into(),
+                }),
                 Err(m) => Err(err(m)),
             }
         }
@@ -332,11 +377,25 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn stream_error_before_first_delta_falls_back_without_duplicates() {
-        let a = Arc::new(Streamer { parts: vec![], end: Err("LLM 401 Unauthorized: x"), calls: Mutex::new(0) });
-        let b = Arc::new(Streamer { parts: vec!["Bon", "jour"], end: Ok(()), calls: Mutex::new(0) });
+        let a = Arc::new(Streamer {
+            parts: vec![],
+            end: Err("LLM 401 Unauthorized: x"),
+            calls: Mutex::new(0),
+        });
+        let b = Arc::new(Streamer {
+            parts: vec!["Bon", "jour"],
+            end: Ok(()),
+            calls: Mutex::new(0),
+        });
         let p = ResilientLlmProvider::new(vec![
-            ChainEntry { label: "a".into(), provider: a.clone() },
-            ChainEntry { label: "b".into(), provider: b.clone() },
+            ChainEntry {
+                label: "a".into(),
+                provider: a.clone(),
+            },
+            ChainEntry {
+                label: "b".into(),
+                provider: b.clone(),
+            },
         ]);
         let (seen, sink) = collect();
         let turn = p.chat_stream(req(), &sink).await.unwrap();
@@ -346,16 +405,38 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn stream_error_after_first_delta_is_returned_no_retry_no_fallback() {
-        let a = Arc::new(Streamer { parts: vec!["Début"], end: Err("LLM 503 Service Unavailable: x"), calls: Mutex::new(0) });
-        let b = Arc::new(Streamer { parts: vec!["secours"], end: Ok(()), calls: Mutex::new(0) });
+        let a = Arc::new(Streamer {
+            parts: vec!["Début"],
+            end: Err("LLM 503 Service Unavailable: x"),
+            calls: Mutex::new(0),
+        });
+        let b = Arc::new(Streamer {
+            parts: vec!["secours"],
+            end: Ok(()),
+            calls: Mutex::new(0),
+        });
         let p = ResilientLlmProvider::new(vec![
-            ChainEntry { label: "a".into(), provider: a.clone() },
-            ChainEntry { label: "b".into(), provider: b.clone() },
+            ChainEntry {
+                label: "a".into(),
+                provider: a.clone(),
+            },
+            ChainEntry {
+                label: "b".into(),
+                provider: b.clone(),
+            },
         ]);
         let (seen, sink) = collect();
         assert!(p.chat_stream(req(), &sink).await.is_err());
-        assert_eq!(*a.calls.lock().unwrap(), 1, "pas de nouvel essai après un morceau");
-        assert_eq!(*b.calls.lock().unwrap(), 0, "pas de bascule après un morceau");
+        assert_eq!(
+            *a.calls.lock().unwrap(),
+            1,
+            "pas de nouvel essai après un morceau"
+        );
+        assert_eq!(
+            *b.calls.lock().unwrap(),
+            0,
+            "pas de bascule après un morceau"
+        );
         assert_eq!(seen.lock().unwrap().concat(), "Début");
     }
 
@@ -369,13 +450,23 @@ mod tests {
     }
 
     fn req() -> ChatRequest {
-        ChatRequest { messages: vec![], tools: vec![], temperature: 0.0 }
+        ChatRequest {
+            messages: vec![],
+            tools: vec![],
+            temperature: 0.0,
+        }
     }
 
     fn chain(a: Arc<Scripted>, b: Arc<Scripted>) -> ResilientLlmProvider {
         ResilientLlmProvider::new(vec![
-            ChainEntry { label: "a".into(), provider: a },
-            ChainEntry { label: "b".into(), provider: b },
+            ChainEntry {
+                label: "a".into(),
+                provider: a,
+            },
+            ChainEntry {
+                label: "b".into(),
+                provider: b,
+            },
         ])
     }
 
@@ -390,7 +481,10 @@ mod tests {
         assert_eq!(b.calls(), 0);
         // base 600 ms ± 20 %
         let waited = started.elapsed();
-        assert!(waited >= Duration::from_millis(480) && waited <= Duration::from_millis(720), "{waited:?}");
+        assert!(
+            waited >= Duration::from_millis(480) && waited <= Duration::from_millis(720),
+            "{waited:?}"
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -420,7 +514,10 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn retry_after_is_honoured_and_capped() {
-        let a = Scripted::new(vec![Err("LLM 429 Too Many Requests (retry-after=30s): x"), Ok("ok")]);
+        let a = Scripted::new(vec![
+            Err("LLM 429 Too Many Requests (retry-after=30s): x"),
+            Ok("ok"),
+        ]);
         let b = Scripted::new(vec![]);
         let started = tokio::time::Instant::now();
         chain(a, b).chat(req()).await.unwrap();

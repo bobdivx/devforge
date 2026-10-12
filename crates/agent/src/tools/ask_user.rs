@@ -11,7 +11,10 @@ const STYLES: &[&str] = &["primary", "secondary", "danger"];
 pub struct AskUserTool;
 
 fn valid_id(id: &str) -> bool {
-    (1..=32).contains(&id.len()) && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+    (1..=32).contains(&id.len())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
 }
 
 fn clip(s: &str, max: usize) -> String {
@@ -27,13 +30,24 @@ fn clip(s: &str, max: usize) -> String {
 
 /// Valide et normalise la question. Erreur = message pour le modèle (il peut se corriger).
 pub fn normalize(args: &Value) -> std::result::Result<Value, String> {
-    let question = args.get("question").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let question = args
+        .get("question")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
     if question.is_empty() {
         return Err("question requise".into());
     }
-    let options = args.get("options").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let options = args
+        .get("options")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     if !(2..=5).contains(&options.len()) {
-        return Err(format!("options : 2 à 5 attendues, {} reçue(s)", options.len()));
+        return Err(format!(
+            "options : 2 à 5 attendues, {} reçue(s)",
+            options.len()
+        ));
     }
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -42,20 +56,44 @@ pub fn normalize(args: &Value) -> std::result::Result<Value, String> {
         if label.is_empty() {
             return Err(format!("option {} : label requis", i + 1));
         }
-        let raw_id = o.get("id").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-        let id = if valid_id(&raw_id) { raw_id } else { format!("opt{}", i + 1) };
+        let raw_id = o
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let id = if valid_id(&raw_id) {
+            raw_id
+        } else {
+            format!("opt{}", i + 1)
+        };
         if !seen.insert(id.clone()) {
             return Err(format!("option {} : id « {id} » en double", i + 1));
         }
-        let action = o.get("action").and_then(|v| v.as_str()).filter(|a| ACTIONS.contains(a)).unwrap_or("reply");
-        let style = o.get("style").and_then(|v| v.as_str()).filter(|s| STYLES.contains(s)).unwrap_or("secondary");
+        let action = o
+            .get("action")
+            .and_then(|v| v.as_str())
+            .filter(|a| ACTIONS.contains(a))
+            .unwrap_or("reply");
+        let style = o
+            .get("style")
+            .and_then(|v| v.as_str())
+            .filter(|s| STYLES.contains(s))
+            .unwrap_or("secondary");
         let mut opt = json!({"id": id, "label": clip(label, 60), "action": action, "style": style});
-        if let Some(d) = o.get("description").and_then(|v| v.as_str()).filter(|d| !d.trim().is_empty()) {
+        if let Some(d) = o
+            .get("description")
+            .and_then(|v| v.as_str())
+            .filter(|d| !d.trim().is_empty())
+        {
             opt["description"] = json!(clip(d, 140));
         }
         out.push(opt);
     }
-    let allow_free_text = args.get("allow_free_text").and_then(|v| v.as_bool()).unwrap_or(true);
+    let allow_free_text = args
+        .get("allow_free_text")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
     Ok(json!({
         "ok": true,
         "awaiting_answer": true,
@@ -121,13 +159,18 @@ mod tests {
     use super::*;
 
     fn opts(n: usize) -> Vec<Value> {
-        (0..n).map(|i| json!({"id": format!("o{i}"), "label": format!("Option {i}")})).collect()
+        (0..n)
+            .map(|i| json!({"id": format!("o{i}"), "label": format!("Option {i}")}))
+            .collect()
     }
 
     #[test]
     fn two_to_five_options() {
         for n in [0, 1, 6] {
-            assert!(normalize(&json!({"question": "Q ?", "options": opts(n)})).is_err(), "{n} options acceptées");
+            assert!(
+                normalize(&json!({"question": "Q ?", "options": opts(n)})).is_err(),
+                "{n} options acceptées"
+            );
         }
         for n in 2..=5 {
             let v = normalize(&json!({"question": "Q ?", "options": opts(n)})).unwrap();
@@ -160,7 +203,13 @@ mod tests {
 
     #[test]
     fn answer_text_for_model() {
-        assert_eq!(answer_text("Publier ?", "Oui", None), "Réponse à ta question « Publier ? » : Oui");
-        assert_eq!(answer_text("Publier ?", "Oui", Some("plutôt demain")), "Réponse à ta question « Publier ? » : plutôt demain");
+        assert_eq!(
+            answer_text("Publier ?", "Oui", None),
+            "Réponse à ta question « Publier ? » : Oui"
+        );
+        assert_eq!(
+            answer_text("Publier ?", "Oui", Some("plutôt demain")),
+            "Réponse à ta question « Publier ? » : plutôt demain"
+        );
     }
 }

@@ -28,7 +28,6 @@ impl EnvVar {
     }
 }
 
-
 /// Variables montées dans le process de preview atelier.
 /// Les secrets de prod restent hors du process, sauf opt-in `preview_allowed`.
 pub fn env_for_preview(vars: &[EnvVar]) -> Vec<(String, String)> {
@@ -40,7 +39,10 @@ pub fn env_for_preview(vars: &[EnvVar]) -> Vec<(String, String)> {
 
 /// `true` si une valeur de secret prod se retrouve dans l'env monté en preview.
 pub fn preview_leaks_production_secret(mounted: &[(String, String)], vars: &[EnvVar]) -> bool {
-    let mounted_map: HashMap<&str, &str> = mounted.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    let mounted_map: HashMap<&str, &str> = mounted
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
     vars.iter().any(|v| {
         v.secret && !v.preview_allowed && mounted_map.get(v.key.as_str()) == Some(&v.value.as_str())
     })
@@ -385,14 +387,17 @@ EMPTY=
     fn docker_env_line_no_outer_quotes() {
         let line = format_docker_env_line("KEY", "value");
         assert_eq!(line, "KEY=value\n");
-        assert!(!line.contains('"'), "Docker env-file must not wrap value in quotes");
+        assert!(
+            !line.contains('"'),
+            "Docker env-file must not wrap value in quotes"
+        );
     }
 
     #[test]
     fn docker_env_line_escapes_special_chars() {
         let line = format_docker_env_line("URL", "libsql://host\nline2");
         assert_eq!(line, "URL=libsql://host\\nline2\n");
-        
+
         let line = format_docker_env_line("PATH", "C:\\Users\\test");
         assert_eq!(line, "PATH=C:\\\\Users\\\\test\n");
     }
@@ -400,14 +405,17 @@ EMPTY=
     #[test]
     fn docker_env_round_trip_no_literal_quotes() {
         let input = vec![
-            ("TURSO_DATABASE_URL".to_string(), "libsql://turso.io/db".to_string()),
+            (
+                "TURSO_DATABASE_URL".to_string(),
+                "libsql://turso.io/db".to_string(),
+            ),
             ("API_KEY".to_string(), "secret-key-123".to_string()),
         ];
         let serialized = serialize_docker_env_file(&input);
-        
+
         assert!(!serialized.contains("=\""), "Must not contain =\"");
         assert!(!serialized.contains("\""), "Must not contain any quotes");
-        
+
         assert!(serialized.contains("TURSO_DATABASE_URL=libsql://turso.io/db\n"));
         assert!(serialized.contains("API_KEY=secret-key-123\n"));
     }
@@ -416,7 +424,10 @@ EMPTY=
     fn docker_env_preserves_embedded_quotes() {
         let line = format_docker_env_line("JSON", r#"{"key":"value"}"#);
         assert_eq!(line, "JSON={\"key\":\"value\"}\n");
-        assert!(!line.starts_with("JSON=\""), "Must not wrap in outer quotes");
+        assert!(
+            !line.starts_with("JSON=\""),
+            "Must not wrap in outer quotes"
+        );
     }
 
     #[test]
@@ -466,7 +477,9 @@ EMPTY=
         assert_eq!(stats.unchanged, 1);
         assert_eq!(stats.imported, 1);
         assert_eq!(to_write.len(), 2);
-        assert!(to_write.iter().any(|v| v.key == "SCW_BUCKET" && v.value == "starbasefr"));
+        assert!(to_write
+            .iter()
+            .any(|v| v.key == "SCW_BUCKET" && v.value == "starbasefr"));
         assert!(to_write.iter().any(|v| v.key == "NEW_KEY"));
     }
 
@@ -513,7 +526,9 @@ EMPTY=
             },
         ];
         let mounted = env_for_preview(&vars);
-        assert!(mounted.iter().any(|(k, v)| k == "PUBLIC_URL" && v == "https://preview.local"));
+        assert!(mounted
+            .iter()
+            .any(|(k, v)| k == "PUBLIC_URL" && v == "https://preview.local"));
         assert!(mounted.iter().any(|(k, _)| k == "PREVIEW_TOKEN"));
         assert!(!mounted.iter().any(|(k, _)| k == "DATABASE_URL"));
         assert!(!preview_leaks_production_secret(&mounted, &vars));

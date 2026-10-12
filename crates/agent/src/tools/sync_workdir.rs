@@ -104,13 +104,12 @@ impl Tool for SyncWorkdirToGitHubTool {
         }
 
         // Récupérer le projet
-        let project: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT uuid, workdir, git_repository FROM projects WHERE uuid = $1",
-        )
-        .bind(project_uuid)
-        .fetch_optional(self.pool.as_ref())
-        .await
-        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let project: Option<(String, Option<String>, Option<String>)> =
+            sqlx::query_as("SELECT uuid, workdir, git_repository FROM projects WHERE uuid = $1")
+                .bind(project_uuid)
+                .fetch_optional(self.pool.as_ref())
+                .await
+                .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
         let Some((uuid, workdir_opt, git_repo_opt)) = project else {
             return Ok(json!({
@@ -119,14 +118,8 @@ impl Tool for SyncWorkdirToGitHubTool {
             }));
         };
 
-        let workdir = workdir_opt
-            .as_deref()
-            .unwrap_or("")
-            .trim();
-        let git_repo = git_repo_opt
-            .as_deref()
-            .unwrap_or("")
-            .trim();
+        let workdir = workdir_opt.as_deref().unwrap_or("").trim();
+        let git_repo = git_repo_opt.as_deref().unwrap_or("").trim();
 
         if workdir.is_empty() {
             return Ok(json!({
@@ -227,12 +220,28 @@ impl Tool for SyncWorkdirToGitHubTool {
             let written = match std::str::from_utf8(&content) {
                 Ok(text) => {
                     self.github
-                        .write_file(&owner, &repo, &rel_path, text, commit_message, Some(branch), sha_opt)
+                        .write_file(
+                            &owner,
+                            &repo,
+                            &rel_path,
+                            text,
+                            commit_message,
+                            Some(branch),
+                            sha_opt,
+                        )
                         .await
                 }
                 Err(_) => {
                     self.github
-                        .write_file_bytes(&owner, &repo, &rel_path, &content, commit_message, Some(branch), sha_opt)
+                        .write_file_bytes(
+                            &owner,
+                            &repo,
+                            &rel_path,
+                            &content,
+                            commit_message,
+                            Some(branch),
+                            sha_opt,
+                        )
                         .await
                 }
             };
@@ -297,9 +306,8 @@ fn scan_dir_recursive(
     })?;
 
     for entry in entries {
-        let entry = entry.map_err(|e| {
-            devforge_shared::DevForgeError::Message(format!("Erreur entry : {e}"))
-        })?;
+        let entry = entry
+            .map_err(|e| devforge_shared::DevForgeError::Message(format!("Erreur entry : {e}")))?;
         let path = entry.path();
         let file_name = entry.file_name();
         let name = file_name.to_string_lossy();

@@ -80,7 +80,11 @@ impl PgInstance {
         })
     }
 
-    pub fn with_replication(mut self, host_port: u16, replication_password: &str) -> Result<Self, String> {
+    pub fn with_replication(
+        mut self,
+        host_port: u16,
+        replication_password: &str,
+    ) -> Result<Self, String> {
         if host_port != 0 && !(1024..=65535).contains(&host_port) {
             return Err("port postgres invalide".into());
         }
@@ -471,7 +475,9 @@ mod tests {
         assert!(drop_shell(&inst).unwrap().contains("docker volume rm"));
         let published = ensure_published_shell(&inst).unwrap();
         assert!(published.contains("{{json .HostConfig.PortBindings}}"));
-        assert!(standby_shell(&inst, "10.1.0.8").unwrap().contains("pg_basebackup"));
+        assert!(standby_shell(&inst, "10.1.0.8")
+            .unwrap()
+            .contains("pg_basebackup"));
         assert!(standby_shell(&inst, "bad host").is_err());
     }
 

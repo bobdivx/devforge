@@ -109,13 +109,12 @@ impl Tool for PublishToGitHubTool {
         }
 
         // Vérifier que le projet existe
-        let project: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT uuid, workdir, git_repository FROM projects WHERE uuid = $1",
-        )
-        .bind(project_uuid)
-        .fetch_optional(self.pool.as_ref())
-        .await
-        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        let project: Option<(String, Option<String>, Option<String>)> =
+            sqlx::query_as("SELECT uuid, workdir, git_repository FROM projects WHERE uuid = $1")
+                .bind(project_uuid)
+                .fetch_optional(self.pool.as_ref())
+                .await
+                .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
         let Some((uuid, workdir_opt, existing_repo)) = project else {
             return Ok(json!({
@@ -133,10 +132,7 @@ impl Tool for PublishToGitHubTool {
             }));
         }
 
-        let workdir = workdir_opt
-            .as_deref()
-            .unwrap_or("")
-            .trim();
+        let workdir = workdir_opt.as_deref().unwrap_or("").trim();
 
         if workdir.is_empty() {
             return Ok(json!({
@@ -215,14 +211,12 @@ impl Tool for PublishToGitHubTool {
 
         // Attacher le dépôt au projet
         let git_url = format!("{html_url}.git");
-        sqlx::query(
-            "UPDATE projects SET git_repository = $1, git_branch = 'main' WHERE uuid = $2",
-        )
-        .bind(&git_url)
-        .bind(&uuid)
-        .execute(self.pool.as_ref())
-        .await
-        .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+        sqlx::query("UPDATE projects SET git_repository = $1, git_branch = 'main' WHERE uuid = $2")
+            .bind(&git_url)
+            .bind(&uuid)
+            .execute(self.pool.as_ref())
+            .await
+            .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
 
         // ÉTAPE 2 : Pousser les fichiers locaux vers GitHub
         let files = match scan_workdir(workdir_path) {
@@ -242,7 +236,15 @@ impl Tool for PublishToGitHubTool {
         for (rel_path, content) in files {
             match self
                 .github
-                .write_file(&owner, repo_name, &rel_path, &content, "feat: initial commit", Some("main"), None)
+                .write_file(
+                    &owner,
+                    repo_name,
+                    &rel_path,
+                    &content,
+                    "feat: initial commit",
+                    Some("main"),
+                    None,
+                )
                 .await
             {
                 Ok(_) => synced += 1,
@@ -294,9 +296,8 @@ fn scan_dir_recursive(
     })?;
 
     for entry in entries {
-        let entry = entry.map_err(|e| {
-            devforge_shared::DevForgeError::Message(format!("Erreur entry : {e}"))
-        })?;
+        let entry = entry
+            .map_err(|e| devforge_shared::DevForgeError::Message(format!("Erreur entry : {e}")))?;
         let path = entry.path();
         let file_name = entry.file_name();
         let name = file_name.to_string_lossy();

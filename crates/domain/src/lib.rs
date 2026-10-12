@@ -1,14 +1,14 @@
-mod porkbun;
 mod cloudflare;
+mod porkbun;
 
+pub use cloudflare::{
+    connect as cloudflare_connect, connect_for_fqdn as cloudflare_connect_for_fqdn, infer_zone,
+    parse_porkbun_token, ping as cloudflare_ping, CloudflareClient,
+};
 pub use porkbun::{
     delete_record, lookup as porkbun_lookup, normalize_keys as normalize_porkbun_keys,
     ping as porkbun_ping, split_host, upsert_record, verify_zone as porkbun_verify_zone,
     PorkbunCreds,
-};
-pub use cloudflare::{
-    connect as cloudflare_connect, connect_for_fqdn as cloudflare_connect_for_fqdn, infer_zone,
-    parse_porkbun_token, ping as cloudflare_ping, CloudflareClient,
 };
 
 use async_trait::async_trait;
@@ -170,9 +170,7 @@ impl DomainFacade {
             if acme_enabled {
                 if let Some(exec) = &self.executor {
                     let cmd = certbot_command(&record.fqdn, &self.acme_email);
-                    let res = exec
-                        .exec(&self.apply_server_id, "", &cmd, 300)
-                        .await?;
+                    let res = exec.exec(&self.apply_server_id, "", &cmd, 300).await?;
                     let status = if res.ok { "tls_active" } else { "tls_failed" };
                     self.store
                         .update_status(project_uuid, &record.id, status)

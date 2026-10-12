@@ -4,8 +4,8 @@ pub mod events;
 pub mod guard;
 pub mod roles;
 pub mod sdd;
-pub mod truncate;
 mod tools;
+pub mod truncate;
 
 use async_trait::async_trait;
 use devforge_deploy::DeployFacade;
@@ -21,20 +21,22 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tools::{
-    CreateGitHubFixTool, CreateGitHubRepoTool, CreateProjectAgentTool, GetDeploymentLogsTool, GetProjectTool,
-    GitHubListPrsTool, GitHubWorkflowRunsTool, HttpSmokeTool, ListAgentMessagesTool,
-    ListAgentToolFailuresTool, ListEnvVarsTool, ListProjectAgentsTool, ListProjectFilesTool,
-    ListProjectsTool, LocalPreviewStatusTool, McpCallTool, McpListRemoteToolsTool,
-    McpListServersTool, MemoryForgetTool, MemorySearchTool, MemoryWriteTool, ProposePlanTool, PublishToGitHubTool, ReadGitHubFileTool,
-    ReadProjectFileTool, ReviewProjectSecurityTool, RunApplicationTestsTool, RunWorkdirCommandTool,
-    SddLoopTool, StartLocalPreviewTool,
-    StopLocalPreviewTool, SyncWorkdirToGitHubTool, TriggerDeployTool, ListDeploymentsTool, CancelDeploymentTool, UpsertEnvVarsTool,
-    WriteProjectFileTool,
+    CancelDeploymentTool, CreateGitHubFixTool, CreateGitHubRepoTool, CreateProjectAgentTool,
+    GetDeploymentLogsTool, GetProjectTool, GitHubListPrsTool, GitHubWorkflowRunsTool,
+    HttpSmokeTool, ListAgentMessagesTool, ListAgentToolFailuresTool, ListDeploymentsTool,
+    ListEnvVarsTool, ListProjectAgentsTool, ListProjectFilesTool, ListProjectsTool,
+    LocalPreviewStatusTool, McpCallTool, McpListRemoteToolsTool, McpListServersTool,
+    MemoryForgetTool, MemorySearchTool, MemoryWriteTool, ProposePlanTool, PublishToGitHubTool,
+    ReadGitHubFileTool, ReadProjectFileTool, ReviewProjectSecurityTool, RunApplicationTestsTool,
+    RunWorkdirCommandTool, SddLoopTool, StartLocalPreviewTool, StopLocalPreviewTool,
+    SyncWorkdirToGitHubTool, TriggerDeployTool, UpsertEnvVarsTool, WriteProjectFileTool,
 };
 
-pub use tools::{ask_user_answer_text, ASK_USER,
-    memory_item_json, post_deploy_verdict, set_worker_launcher, smoke_url, DelegateTaskTool, WorkerLauncher, MAX_ACTIVE_WORKERS};
 pub use tokio_util::sync::CancellationToken;
+pub use tools::{
+    ask_user_answer_text, memory_item_json, post_deploy_verdict, set_worker_launcher, smoke_url,
+    DelegateTaskTool, WorkerLauncher, ASK_USER, MAX_ACTIVE_WORKERS,
+};
 pub mod memory_ctx;
 
 pub struct ToolRegistry {
@@ -56,9 +58,15 @@ impl ToolRegistry {
 
     /// Branche la mémoire : outils `memory_*` + injection dans le prompt.
     pub fn set_memory(&mut self, store: Arc<dyn devforge_memory::MemoryStore>) {
-        self.register(Arc::new(MemorySearchTool { store: store.clone() }));
-        self.register(Arc::new(MemoryWriteTool { store: store.clone() }));
-        self.register(Arc::new(MemoryForgetTool { store: store.clone() }));
+        self.register(Arc::new(MemorySearchTool {
+            store: store.clone(),
+        }));
+        self.register(Arc::new(MemoryWriteTool {
+            store: store.clone(),
+        }));
+        self.register(Arc::new(MemoryForgetTool {
+            store: store.clone(),
+        }));
         self.memory = Some(store);
     }
 
@@ -192,12 +200,8 @@ pub fn build_core_registry(
         mcp,
         pool: pool.clone(),
     }));
-    registry.register(Arc::new(ReadProjectFileTool {
-        pool: pool.clone(),
-    }));
-    registry.register(Arc::new(ListProjectFilesTool {
-        pool: pool.clone(),
-    }));
+    registry.register(Arc::new(ReadProjectFileTool { pool: pool.clone() }));
+    registry.register(Arc::new(ListProjectFilesTool { pool: pool.clone() }));
     registry.register(Arc::new(ProposePlanTool));
     registry.register(Arc::new(tools::AskUserTool));
     registry.register(Arc::new(SyncWorkdirToGitHubTool {
@@ -209,24 +213,12 @@ pub fn build_core_registry(
         deploy,
         pool: pool.clone(),
     }));
-    registry.register(Arc::new(StartLocalPreviewTool {
-        pool: pool.clone(),
-    }));
-    registry.register(Arc::new(StopLocalPreviewTool {
-        pool: pool.clone(),
-    }));
-    registry.register(Arc::new(LocalPreviewStatusTool {
-        pool: pool.clone(),
-    }));
-    registry.register(Arc::new(RunWorkdirCommandTool {
-        pool: pool.clone(),
-    }));
-    registry.register(Arc::new(ListProjectAgentsTool {
-        pool: pool.clone(),
-    }));
-    registry.register(Arc::new(ListAgentMessagesTool {
-        pool: pool.clone(),
-    }));
+    registry.register(Arc::new(StartLocalPreviewTool { pool: pool.clone() }));
+    registry.register(Arc::new(StopLocalPreviewTool { pool: pool.clone() }));
+    registry.register(Arc::new(LocalPreviewStatusTool { pool: pool.clone() }));
+    registry.register(Arc::new(RunWorkdirCommandTool { pool: pool.clone() }));
+    registry.register(Arc::new(ListProjectAgentsTool { pool: pool.clone() }));
+    registry.register(Arc::new(ListAgentMessagesTool { pool: pool.clone() }));
     registry.register(Arc::new(ListAgentToolFailuresTool { pool: pool.clone() }));
     registry.register(Arc::new(CreateProjectAgentTool { pool: pool.clone() }));
     registry.register(Arc::new(tools::DelegateTaskTool { pool: pool.clone() }));
@@ -235,7 +227,9 @@ pub fn build_core_registry(
     registry.register(Arc::new(tools::DeleteRoutineTool { pool: pool.clone() }));
     registry.register(Arc::new(ReviewProjectSecurityTool { pool: pool.clone() }));
     registry.set_publish_gate(Arc::new(guard::PgPublishGate { pool: pool.clone() }));
-    registry.set_memory(Arc::new(devforge_memory::PgMemoryStore::new((*pool).clone())));
+    registry.set_memory(Arc::new(devforge_memory::PgMemoryStore::new(
+        (*pool).clone(),
+    )));
     registry.register(Arc::new(SddLoopTool { pool }));
     registry
 }
@@ -269,7 +263,10 @@ pub use events::MilestoneStatus;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
     /// Début du run : id du run et id du message brouillon côté front.
-    RunStarted { run_uuid: String, message_uuid: String },
+    RunStarted {
+        run_uuid: String,
+        message_uuid: String,
+    },
     /// Accusé de réception immédiat (règles, pas de LLM) ; jamais persisté.
     Ack { text: String },
     Thinking {
@@ -341,14 +338,23 @@ fn is_cancelled(c: &Option<CancellationToken>) -> bool {
 }
 
 /// Réponse d'un run arrêté par l'utilisateur (P4-05).
-pub fn cancelled_reply(records: Vec<ToolCallRecord>, last_step: &str, provider: String) -> AgentReply {
+pub fn cancelled_reply(
+    records: Vec<ToolCallRecord>,
+    last_step: &str,
+    provider: String,
+) -> AgentReply {
     let reply = if last_step.is_empty() {
         "Arrêté à ta demande, avant toute action.".to_string()
     } else {
         format!("Arrêté à ta demande après « {last_step} ».")
     };
     let executed_plan = executed_plan(&records);
-    AgentReply { reply, tool_calls: records, provider, executed_plan }
+    AgentReply {
+        reply,
+        tool_calls: records,
+        provider,
+        executed_plan,
+    }
 }
 
 fn emit(progress: &Option<AgentProgressTx>, event: AgentEvent) {
@@ -382,6 +388,9 @@ pub struct AgentChatContext {
     pub cancel: Option<CancellationToken>,
     /// Images jointes au message (P5-02) : multimodal si le modèle voit, sinon « [image jointe : …] ».
     pub images: Vec<devforge_llm::ImagePart>,
+    /// Run déclenché sans personne devant l'écran (réveil, cron, routine) — P1-10 : toute
+    /// action distante s'arrête à une demande de validation, même avec un accord récent.
+    pub unattended: bool,
 }
 
 pub struct AgentRunner {
@@ -400,7 +409,11 @@ impl AgentRunner {
         }
     }
 
-    pub fn with_llm(registry: Arc<ToolRegistry>, llm: Arc<dyn LlmProvider>, mode: impl Into<String>) -> Self {
+    pub fn with_llm(
+        registry: Arc<ToolRegistry>,
+        llm: Arc<dyn LlmProvider>,
+        mode: impl Into<String>,
+    ) -> Self {
         Self {
             registry,
             llm: tokio::sync::RwLock::new((llm, mode.into())),
@@ -485,12 +498,15 @@ impl AgentRunner {
             }
             let call_id = format!("forced-{tool}");
             let started = std::time::Instant::now();
-            emit(&progress, AgentEvent::ToolStart {
-                id: call_id.clone(),
-                name: tool.to_string(),
-                arguments: args.clone(),
-                label: events::tool_label(tool, &args),
-            });
+            emit(
+                &progress,
+                AgentEvent::ToolStart {
+                    id: call_id.clone(),
+                    name: tool.to_string(),
+                    arguments: args.clone(),
+                    label: events::tool_label(tool, &args),
+                },
+            );
             let result = if let Some(blocked) = refuse_bare_spec_approval(tool, &args, message) {
                 blocked
             } else if let Some(blocked) = refuse_spec_publish(tool, message) {
@@ -502,18 +518,26 @@ impl AgentRunner {
             };
             let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
             let elapsed_ms = started.elapsed().as_millis() as u64;
-            emit(&progress, AgentEvent::ToolDone {
-                id: call_id.clone(),
-                name: tool.to_string(),
-                ok,
-                arguments: args.clone(),
-                result: events::for_ui(tool, &args, &result),
-                elapsed_ms,
-                summary: events::tool_summary(tool, &args, ok, &result, elapsed_ms),
-            });
+            emit(
+                &progress,
+                AgentEvent::ToolDone {
+                    id: call_id.clone(),
+                    name: tool.to_string(),
+                    ok,
+                    arguments: args.clone(),
+                    result: events::for_ui(tool, &args, &result),
+                    elapsed_ms,
+                    summary: events::tool_summary(tool, &args, ok, &result, elapsed_ms),
+                },
+            );
             return Ok(AgentReply {
                 reply: summarize(tool, &result),
-                tool_calls: vec![ToolCallRecord { id: call_id, name: tool.to_string(), arguments: args, result }],
+                tool_calls: vec![ToolCallRecord {
+                    id: call_id,
+                    name: tool.to_string(),
+                    arguments: args,
+                    result,
+                }],
                 provider,
                 executed_plan: false,
             });
@@ -529,9 +553,17 @@ impl AgentRunner {
         llm_override: Option<(Arc<dyn LlmProvider>, String)>,
     ) -> Result<AgentReply> {
         let mut milestones = events::MilestoneTracker::default();
-        let out = self.run_loop_inner(message, ctx, &progress, llm_override, &mut milestones).await;
+        let out = self
+            .run_loop_inner(message, ctx, &progress, llm_override, &mut milestones)
+            .await;
         for (label, status) in milestones.finish() {
-            emit(&progress, AgentEvent::Milestone { label: label.into(), status });
+            emit(
+                &progress,
+                AgentEvent::Milestone {
+                    label: label.into(),
+                    status,
+                },
+            );
         }
         out
     }
@@ -609,7 +641,12 @@ impl AgentRunner {
                 }
                 if let Some(nudge) = detect_repeated_failures(&records) {
                     let executed_plan = executed_plan(&records);
-                    return Ok(AgentReply { reply: nudge, tool_calls: records, provider, executed_plan });
+                    return Ok(AgentReply {
+                        reply: nudge,
+                        tool_calls: records,
+                        provider,
+                        executed_plan,
+                    });
                 }
             }
             emit(
@@ -637,14 +674,21 @@ impl AgentRunner {
                         let tx_retry = tx.clone();
                         // Nouvel essai LLM (P1-09) : libellé de l'étape en cours.
                         let notify: devforge_llm::RetryNotifier = Arc::new(move |label: String| {
-                            let _ = tx_retry.send(AgentEvent::Thinking { round: round_no, label, detail: String::new() });
+                            let _ = tx_retry.send(AgentEvent::Thinking {
+                                round: round_no,
+                                label,
+                                detail: String::new(),
+                            });
                         });
                         let tx_delta = tx.clone();
                         let streamed_ref = &streamed;
                         // P2-02 : chaque morceau de texte part tout de suite vers le front.
                         let sink = move |d: &str| {
                             streamed_ref.store(true, std::sync::atomic::Ordering::SeqCst);
-                            let _ = tx_delta.send(AgentEvent::Delta { text: d.to_string(), round: round_no });
+                            let _ = tx_delta.send(AgentEvent::Delta {
+                                text: d.to_string(),
+                                round: round_no,
+                            });
                         };
                         devforge_llm::with_retry_notifier(notify, llm.chat_stream(req, &sink)).await
                     }
@@ -677,7 +721,11 @@ impl AgentRunner {
                     progress,
                     AgentEvent::Thinking {
                         round: round_no,
-                        label: if detail.chars().count() > 120 { format!("{label}…") } else { label },
+                        label: if detail.chars().count() > 120 {
+                            format!("{label}…")
+                        } else {
+                            label
+                        },
                         // Déjà streamé : le front a le texte (DeltaReset), pas de doublon.
                         detail: if streamed { String::new() } else { detail },
                     },
@@ -718,7 +766,10 @@ impl AgentRunner {
                     executed_plan,
                 });
             }
-            messages.push(ChatMessage::assistant_tools(turn.content.clone(), turn.tool_calls.clone()));
+            messages.push(ChatMessage::assistant_tools(
+                turn.content.clone(),
+                turn.tool_calls.clone(),
+            ));
             for call in turn.tool_calls {
                 let mut args = call.arguments.clone();
                 inject_tool_defaults(&call.name, &mut args, &ctx);
@@ -730,8 +781,11 @@ impl AgentRunner {
                 }
                 let refusal = if delegated.is_some() && call.name != "delegate_task" {
                     delegated_refusals += 1;
-                    Some(json!({"ok": false, "code": "delegated", "error": tools::DELEGATED_REFUSAL}))
-                } else if let Some(blocked) = refuse_bare_spec_approval(&call.name, &args, message) {
+                    Some(
+                        json!({"ok": false, "code": "delegated", "error": tools::DELEGATED_REFUSAL}),
+                    )
+                } else if let Some(blocked) = refuse_bare_spec_approval(&call.name, &args, message)
+                {
                     Some(blocked)
                 } else if let Some(blocked) = refuse_spec_publish(&call.name, message) {
                     Some(blocked)
@@ -739,7 +793,9 @@ impl AgentRunner {
                     && !roles::role_allows(&role, kind.as_deref(), &call.name, security_review)
                 {
                     Some(roles::role_refusal(&role, &call.name))
-                } else if let Some(blocked) = self.remote_write_refusal(&call.name, &args, &ctx).await {
+                } else if let Some(blocked) =
+                    self.remote_write_refusal(&call.name, &args, &ctx).await
+                {
                     Some(blocked)
                 } else if guard::is_github_push(&call.name, &args) && pushes >= max_pushes {
                     // Plafond de pushes par run : on s'arrête et on demande à l'utilisateur.
@@ -752,12 +808,15 @@ impl AgentRunner {
                     .and_then(|r| r.get("kind"))
                     .and_then(|k| k.as_str())
                     == Some(guard::PUSH_LIMIT_KIND);
-                emit(&progress, AgentEvent::ToolStart {
-                    id: call.id.clone(),
-                    name: call.name.clone(),
-                    arguments: args.clone(),
-                    label: events::tool_label(&call.name, &args),
-                });
+                emit(
+                    &progress,
+                    AgentEvent::ToolStart {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        arguments: args.clone(),
+                        label: events::tool_label(&call.name, &args),
+                    },
+                );
                 let started = std::time::Instant::now();
                 let executed = refusal.is_none();
                 if executed {
@@ -768,7 +827,13 @@ impl AgentRunner {
                     Some(blocked) => blocked,
                     None => {
                         for (label, status) in milestones.on_tool_start(&call.name, &args) {
-                            emit(&progress, AgentEvent::Milestone { label: label.into(), status });
+                            emit(
+                                &progress,
+                                AgentEvent::Milestone {
+                                    label: label.into(),
+                                    status,
+                                },
+                            );
                         }
                         if guard::is_github_push(&call.name, &args) {
                             pushes += 1;
@@ -789,7 +854,12 @@ impl AgentRunner {
                         match res {
                             Ok(v) => v,
                             Err(e) => match e {
-                                devforge_shared::DevForgeError::NeedsUserAction { kind, message_fr, settings_href, resume_hint } => {
+                                devforge_shared::DevForgeError::NeedsUserAction {
+                                    kind,
+                                    message_fr,
+                                    settings_href,
+                                    resume_hint,
+                                } => {
                                     json!({"ok": false, "needs_user_action": true, "kind": kind, "message_fr": message_fr, "settings_href": settings_href, "resume_hint": resume_hint})
                                 }
                                 _ => json!({ "ok": false, "error": e.to_string() }),
@@ -799,31 +869,54 @@ impl AgentRunner {
                 };
                 let elapsed_ms = started.elapsed().as_millis() as u64;
                 let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
-                emit(&progress, AgentEvent::ToolDone {
-                    id: call.id.clone(),
-                    name: call.name.clone(),
-                    ok,
-                    arguments: args.clone(),
-                    result: events::for_ui(&call.name, &args, &result),
-                    elapsed_ms,
-                    summary: events::tool_summary(&call.name, &args, ok, &result, elapsed_ms),
-                });
+                emit(
+                    &progress,
+                    AgentEvent::ToolDone {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        ok,
+                        arguments: args.clone(),
+                        result: events::for_ui(&call.name, &args, &result),
+                        elapsed_ms,
+                        summary: events::tool_summary(&call.name, &args, ok, &result, elapsed_ms),
+                    },
+                );
                 if executed {
                     for (label, status) in milestones.on_tool_done(&call.name, &args, ok, &result) {
-                        emit(&progress, AgentEvent::Milestone { label: label.into(), status });
+                        emit(
+                            &progress,
+                            AgentEvent::Milestone {
+                                label: label.into(),
+                                status,
+                            },
+                        );
                     }
                 }
                 if interrupted {
-                    records.push(ToolCallRecord { id: call.id.clone(), name: call.name.clone(), arguments: args, result });
+                    records.push(ToolCallRecord {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        arguments: args,
+                        result,
+                    });
                     return Ok(cancelled_reply(records, &last_step, provider));
                 }
                 if call.name == "delegate_task" && ok && delegated.is_none() {
-                    let title = result.get("title").and_then(|v| v.as_str()).unwrap_or("la tâche").to_string();
+                    let title = result
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("la tâche")
+                        .to_string();
                     delegated = Some(title);
                 }
                 if delegated_refusals >= 2 {
                     let title = delegated.clone().unwrap_or_default();
-                    records.push(ToolCallRecord { id: call.id.clone(), name: call.name.clone(), arguments: args, result });
+                    records.push(ToolCallRecord {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        arguments: args,
+                        result,
+                    });
                     let executed_plan = executed_plan(&records);
                     return Ok(AgentReply {
                         reply: format!("J'ai lancé un worker : « {title} ». Je te mets le résultat ici dès qu'il a fini."),
@@ -834,10 +927,24 @@ impl AgentRunner {
                 }
                 // P5-04 : question posée → fin du tour, la carte de question attend la réponse.
                 if call.name == tools::ASK_USER && ok {
-                    let question = result.get("question").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    records.push(ToolCallRecord { id: call.id.clone(), name: call.name.clone(), arguments: args, result });
+                    let question = result
+                        .get("question")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    records.push(ToolCallRecord {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        arguments: args,
+                        result,
+                    });
                     let executed_plan = executed_plan(&records);
-                    return Ok(AgentReply { reply: question, tool_calls: records, provider, executed_plan });
+                    return Ok(AgentReply {
+                        reply: question,
+                        tool_calls: records,
+                        provider,
+                        executed_plan,
+                    });
                 }
                 if push_limited {
                     let reply = result
@@ -845,25 +952,58 @@ impl AgentRunner {
                         .and_then(|v| v.as_str())
                         .unwrap_or("Plafond de pushes atteint.")
                         .to_string();
-                    records.push(ToolCallRecord { id: call.id.clone(), name: call.name.clone(), arguments: args, result });
+                    records.push(ToolCallRecord {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        arguments: args,
+                        result,
+                    });
                     let executed_plan = executed_plan(&records);
-                    return Ok(AgentReply { reply, tool_calls: records, provider, executed_plan });
+                    return Ok(AgentReply {
+                        reply,
+                        tool_calls: records,
+                        provider,
+                        executed_plan,
+                    });
                 }
                 if call.name == "propose_plan" {
                     if let Some(plan) = result.get("plan") {
-                        emit(&progress, AgentEvent::Plan {
-                            title: plan.get("title").and_then(|v| v.as_str()).unwrap_or("Plan").to_string(),
-                            summary: plan.get("summary").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                            steps: plan.get("steps").and_then(|v| v.as_array()).map(|arr| {
-                                arr.iter().filter_map(|s| s.as_str().map(|s| s.to_string())).collect()
-                            }).unwrap_or_default(),
-                        });
+                        emit(
+                            &progress,
+                            AgentEvent::Plan {
+                                title: plan
+                                    .get("title")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("Plan")
+                                    .to_string(),
+                                summary: plan
+                                    .get("summary")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                                steps: plan
+                                    .get("steps")
+                                    .and_then(|v| v.as_array())
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|s| s.as_str().map(|s| s.to_string()))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
+                            },
+                        );
                     }
                 }
                 // P1-04 : le modèle reçoit une version bornée ; `records` garde le résultat complet.
                 let content = truncate::for_model(&call.name, &args, &result, budget);
-                let deployed = ok && matches!(call.name.as_str(), "trigger_deploy" | "publish_to_github");
-                records.push(ToolCallRecord { id: call.id.clone(), name: call.name.clone(), arguments: args, result });
+                let deployed =
+                    ok && matches!(call.name.as_str(), "trigger_deploy" | "publish_to_github");
+                records.push(ToolCallRecord {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    arguments: args,
+                    result,
+                });
                 messages.push(ChatMessage::tool_result(&call.id, &call.name, content));
                 // P1-08 : pas de « c'est en ligne » sans vérification.
                 if deployed && !post_deploy_nudged {
@@ -885,7 +1025,12 @@ impl AgentRunner {
     }
 
     /// P1-01 : action distante sans accord humain récent → refus sans effet de bord.
-    async fn remote_write_refusal(&self, tool: &str, args: &Value, ctx: &AgentChatContext) -> Option<Value> {
+    async fn remote_write_refusal(
+        &self,
+        tool: &str,
+        args: &Value,
+        ctx: &AgentChatContext,
+    ) -> Option<Value> {
         if !guard::is_remote_write(tool, args) {
             return None;
         }
@@ -896,6 +1041,9 @@ impl AgentRunner {
             .map(str::to_string)
             .or_else(|| ctx.project_uuid.clone())
             .unwrap_or_default();
+        if ctx.unattended {
+            return Some(guard::remote_write_blocked_unattended(tool, args));
+        }
         if self.registry.publish_allowed(&project_uuid).await {
             None
         } else {
@@ -912,7 +1060,10 @@ fn user_turn(message: &str, images: &[devforge_llm::ImagePart], vision: bool) ->
     if vision {
         return ChatMessage::user(message).with_images(images.to_vec());
     }
-    let names: Vec<String> = images.iter().map(|i| format!("[image jointe : {}]", i.name)).collect();
+    let names: Vec<String> = images
+        .iter()
+        .map(|i| format!("[image jointe : {}]", i.name))
+        .collect();
     ChatMessage::user(format!("{message}\n{}", names.join("\n")))
 }
 
@@ -928,12 +1079,20 @@ pub fn executed_plan(records: &[ToolCallRecord]) -> bool {
 }
 
 fn detect_duplicate_calls(records: &[ToolCallRecord]) -> Option<String> {
-    if records.len() < 2 { return None; }
-    let recent = if records.len() >= 3 { &records[records.len() - 3..] } else { &records[records.len() - 2..] };
+    if records.len() < 2 {
+        return None;
+    }
+    let recent = if records.len() >= 3 {
+        &records[records.len() - 3..]
+    } else {
+        &records[records.len() - 2..]
+    };
     let mut call_counts: HashMap<(String, String), usize> = HashMap::new();
     for record in recent {
         let normalized = normalize_tool_call(&record.name, &record.arguments);
-        *call_counts.entry((record.name.clone(), normalized)).or_insert(0) += 1;
+        *call_counts
+            .entry((record.name.clone(), normalized))
+            .or_insert(0) += 1;
     }
     for ((tool_name, _normalized), count) in &call_counts {
         if *count >= 2 {
@@ -947,24 +1106,43 @@ fn detect_duplicate_calls(records: &[ToolCallRecord]) -> Option<String> {
 }
 
 fn detect_repeated_failures(records: &[ToolCallRecord]) -> Option<String> {
-    if records.len() < 2 { return None; }
-    let recent = if records.len() >= 4 { &records[records.len() - 4..] } else { records };
-    let unknown_count = recent.iter().filter(|r| {
-        r.result.get("error").and_then(|e| e.as_str()).map(|s| s.contains("Unknown tool") || s.contains("tool introuvable")).unwrap_or(false)
-    }).count();
+    if records.len() < 2 {
+        return None;
+    }
+    let recent = if records.len() >= 4 {
+        &records[records.len() - 4..]
+    } else {
+        records
+    };
+    let unknown_count = recent
+        .iter()
+        .filter(|r| {
+            r.result
+                .get("error")
+                .and_then(|e| e.as_str())
+                .map(|s| s.contains("Unknown tool") || s.contains("tool introuvable"))
+                .unwrap_or(false)
+        })
+        .count();
     if unknown_count >= 2 {
         return Some("❌ ERREUR CRITIQUE : Tu as appelé des tools INEXISTANTS plusieurs fois. TOOLS VALIDES pour scaffold : create_github_repo, write_project_file (mode='local'), sync_workdir_to_github, trigger_deploy, get_project, get_deployment_logs. TOOLS INEXISTANTS : github_create_repo, push_files. Le workflow s'arrête ici.".into());
     }
     let mut error_patterns: HashMap<(String, String, String), usize> = HashMap::new();
     for record in recent {
         if let Some(error) = record.result.get("error").and_then(|e| e.as_str()) {
-            let key = (record.name.clone(), normalize_tool_call(&record.name, &record.arguments), error.chars().take(100).collect());
+            let key = (
+                record.name.clone(),
+                normalize_tool_call(&record.name, &record.arguments),
+                error.chars().take(100).collect(),
+            );
             *error_patterns.entry(key).or_insert(0) += 1;
         }
     }
     for ((tool_name, _args, error_prefix), count) in &error_patterns {
         if *count >= 2 {
-            if tool_name == "get_deployment_logs" && (error_prefix.contains("introuvable") || error_prefix.contains("not found")) {
+            if tool_name == "get_deployment_logs"
+                && (error_prefix.contains("introuvable") || error_prefix.contains("not found"))
+            {
                 return Some("❌ ERREUR CRITIQUE : Tu appelles get_deployment_logs avec un deployment_uuid INVALIDE de manière répétée. WORKFLOW CORRECT : 1. create_github_repo 2. write_project_file ou sync_workdir_to_github 3. trigger_deploy 4. ENSUITE get_deployment_logs avec le vrai UUID.".into());
             }
             return Some(format!("❌ ERREUR CRITIQUE : Le tool '{}' échoue de manière répétée avec la même erreur. Erreur : {} Le workflow s'arrête ici.", tool_name, error_prefix.chars().take(200).collect::<String>()));
@@ -1011,7 +1189,11 @@ fn refuse_bare_spec_approval(tool: &str, args: &Value, user_message: &str) -> Op
     if tool != "sdd_loop" {
         return None;
     }
-    let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let action = args
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
     if action != "approve" || !is_execute_nudge(user_message) {
         return None;
     }
@@ -1022,7 +1204,9 @@ fn refuse_bare_spec_approval(tool: &str, args: &Value, user_message: &str) -> Op
 }
 
 fn inject_tool_defaults(tool: &str, args: &mut Value, ctx: &AgentChatContext) {
-    let Some(obj) = args.as_object_mut() else { return; };
+    let Some(obj) = args.as_object_mut() else {
+        return;
+    };
     if tool.starts_with("memory_") {
         // Identité imposée par le serveur : jamais celle fournie par le modèle.
         for k in tools::MEMORY_IDENTITY_ARGS {
@@ -1045,7 +1229,10 @@ fn inject_tool_defaults(tool: &str, args: &mut Value, ctx: &AgentChatContext) {
         for k in tools::ROUTINE_IDENTITY_ARGS {
             obj.remove(*k);
         }
-        for (k, v) in [("project_uuid", &ctx.project_uuid), ("caller_agent_uuid", &ctx.agent_uuid)] {
+        for (k, v) in [
+            ("project_uuid", &ctx.project_uuid),
+            ("caller_agent_uuid", &ctx.agent_uuid),
+        ] {
             if let Some(v) = v.as_deref().filter(|v| !v.is_empty()) {
                 obj.insert(k.into(), json!(v));
             }
@@ -1057,7 +1244,11 @@ fn inject_tool_defaults(tool: &str, args: &mut Value, ctx: &AgentChatContext) {
         for k in ["project_uuid", "caller_agent_uuid", "parent_run_uuid"] {
             obj.remove(k);
         }
-        for (k, v) in [("project_uuid", &ctx.project_uuid), ("caller_agent_uuid", &ctx.agent_uuid), ("parent_run_uuid", &ctx.run_uuid)] {
+        for (k, v) in [
+            ("project_uuid", &ctx.project_uuid),
+            ("caller_agent_uuid", &ctx.agent_uuid),
+            ("parent_run_uuid", &ctx.run_uuid),
+        ] {
             if let Some(v) = v.as_deref().filter(|v| !v.is_empty()) {
                 obj.insert(k.into(), json!(v));
             }
@@ -1065,7 +1256,11 @@ fn inject_tool_defaults(tool: &str, args: &mut Value, ctx: &AgentChatContext) {
         return;
     }
     if let Some(uuid) = &ctx.project_uuid {
-        let provided = obj.get("project_uuid").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let provided = obj
+            .get("project_uuid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
         if provided.is_empty() || provided != uuid {
             obj.insert("project_uuid".into(), json!(uuid));
         }
@@ -1081,19 +1276,31 @@ fn inject_tool_defaults(tool: &str, args: &mut Value, ctx: &AgentChatContext) {
         }
     }
     if let Some(owner) = &ctx.git_owner {
-        let empty = obj.get("owner").and_then(|v| v.as_str()).unwrap_or("").is_empty();
+        let empty = obj
+            .get("owner")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .is_empty();
         if !obj.contains_key("owner") || empty {
             obj.insert("owner".into(), json!(owner));
         }
     }
     if let Some(repo) = &ctx.git_repo {
-        let empty = obj.get("repo").and_then(|v| v.as_str()).unwrap_or("").is_empty();
+        let empty = obj
+            .get("repo")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .is_empty();
         if !obj.contains_key("repo") || empty {
             obj.insert("repo".into(), json!(repo));
         }
     }
     if let Some(branch) = &ctx.git_branch {
-        let empty = obj.get("branch").and_then(|v| v.as_str()).unwrap_or("").is_empty();
+        let empty = obj
+            .get("branch")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .is_empty();
         if !obj.contains_key("branch") || empty {
             obj.insert("branch".into(), json!(branch));
         }
@@ -1101,11 +1308,28 @@ fn inject_tool_defaults(tool: &str, args: &mut Value, ctx: &AgentChatContext) {
 }
 
 fn normalize_user_text(msg: &str) -> String {
-    msg.trim().to_lowercase().trim_end_matches(['.', '!', '?', '…']).trim().to_string()
+    msg.trim()
+        .to_lowercase()
+        .trim_end_matches(['.', '!', '?', '…'])
+        .trim()
+        .to_string()
 }
 
 fn is_execute_nudge(msg: &str) -> bool {
-    matches!(normalize_user_text(msg).as_str(), "go" | "oui" | "ok" | "yes" | "vas-y" | "vas y" | "fais-le" | "fais le" | "continue" | "lance" | "go go" | "ok go")
+    matches!(
+        normalize_user_text(msg).as_str(),
+        "go" | "oui"
+            | "ok"
+            | "yes"
+            | "vas-y"
+            | "vas y"
+            | "fais-le"
+            | "fais le"
+            | "continue"
+            | "lance"
+            | "go go"
+            | "ok go"
+    )
 }
 
 fn is_security_review_request(msg: &str) -> bool {
@@ -1182,7 +1406,9 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
         read_only_rules()
     };
     let has_template_applied = ctx.history.iter().any(|(hist_role, content)| {
-        hist_role == "user" && ((content.contains("Template") && content.contains("déjà appliqué")) || (content.contains("template") && content.contains("already applied")))
+        hist_role == "user"
+            && ((content.contains("Template") && content.contains("déjà appliqué"))
+                || (content.contains("template") && content.contains("already applied")))
     });
     let sdd = sdd_overlay(role, latest);
     let role_focus = match role {
@@ -1211,10 +1437,14 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
         "\nL'utilisateur a confirmé (go/oui). N'analyse PAS à nouveau. N'ouvre PAS de PR. Si le plan précédent est déjà exécuté (fichiers écrits, preview OK), dis-le en citant le tour précédent ; sinon exécute-le EN LOCAL tout de suite (fichiers + start_local_preview).\n"
     } else if publish_ok && can_write {
         "\nL'utilisateur a demandé une PR / publication. Ouvre-la à partir des fichiers locaux déjà écrits. Si l'outil répond publish_approval_required, arrête-toi : l'interface affiche le bouton « Valider la publication ».\n"
-    } else { "" };
+    } else {
+        ""
+    };
     let scoped = if ctx.project_brief.is_some() || ctx.project_uuid.is_some() {
         "\nLe projet courant est déjà dans le contexte — ne demande pas l'UUID. Agis."
-    } else { "" };
+    } else {
+        ""
+    };
     let mcp_guidance = mcp_guidance(role, kind, security_review);
     format!("Tu es {name} ({role}) sur DevForge. {role_focus}{nudge}{scoped}{mcp_guidance}\n\n{AUTONOMY}\n\n{STYLE}\nRéponds en français. N'invente pas de résultats. Le panneau Preview du workspace est l'endroit où l'utilisateur voit tes changements.")
 }
@@ -1222,22 +1452,44 @@ fn system_prompt(ctx: &AgentChatContext, latest: &str) -> String {
 /// Rappel des outils disponibles — seulement ceux du rôle (P1-05).
 fn mcp_guidance(role: &str, kind: Option<&str>, security_review: bool) -> String {
     const LOCAL: &[&str] = &[
-        "propose_plan", "sdd_loop", "list_project_files", "read_project_file", "write_project_file", "run_workdir_command",
-        "start_local_preview", "local_preview_status", "list_project_agents", "list_agent_messages", "list_agent_tool_failures",
-        "create_project_agent", "review_project_security",
+        "propose_plan",
+        "sdd_loop",
+        "list_project_files",
+        "read_project_file",
+        "write_project_file",
+        "run_workdir_command",
+        "start_local_preview",
+        "local_preview_status",
+        "list_project_agents",
+        "list_agent_messages",
+        "list_agent_tool_failures",
+        "create_project_agent",
+        "review_project_security",
     ];
     let local: Vec<String> = LOCAL
         .iter()
-        .filter(|t| roles::role_allows(role, kind, t, security_review || **t == "review_project_security"))
+        .filter(|t| {
+            roles::role_allows(
+                role,
+                kind,
+                t,
+                security_review || **t == "review_project_security",
+            )
+        })
         .map(|t| match *t {
             "write_project_file" => "write_project_file (mode=local)".to_string(),
-            "review_project_security" => "review_project_security (revue statique, seulement si demandée)".to_string(),
+            "review_project_security" => {
+                "review_project_security (revue statique, seulement si demandée)".to_string()
+            }
             other => other.to_string(),
         })
         .collect();
     let mut out = String::new();
     if !local.is_empty() {
-        out.push_str(&format!("\n\nTOOLS LOCAUX (prioritaires, PAS du MCP) : {}.", local.join(", ")));
+        out.push_str(&format!(
+            "\n\nTOOLS LOCAUX (prioritaires, PAS du MCP) : {}.",
+            local.join(", ")
+        ));
     }
     out.push_str("\nIl n’existe PAS de serveur MCP « devforge-workdir » / « workdir » / « atelier » — n’invente pas ce nom, ne bloque PAS en attendant un MCP manquant, et ne demande JAMAIS à l’utilisateur de le configurer.");
     if roles::role_allows(role, kind, "run_workdir_command", false) {
@@ -1250,7 +1502,10 @@ fn mcp_guidance(role: &str, kind: Option<&str>, security_review: bool) -> String
 }
 
 pub fn parse_github_repo(git_url: &str) -> Option<(String, String)> {
-    let s = git_url.trim().trim_end_matches('/').trim_end_matches(".git");
+    let s = git_url
+        .trim()
+        .trim_end_matches('/')
+        .trim_end_matches(".git");
     if let Some(rest) = s.strip_prefix("git@github.com:") {
         let mut parts = rest.splitn(2, '/');
         let owner = parts.next()?.trim();
@@ -1259,7 +1514,11 @@ pub fn parse_github_repo(git_url: &str) -> Option<(String, String)> {
             return Some((owner.into(), repo.into()));
         }
     }
-    for prefix in ["https://github.com/", "http://github.com/", "https://www.github.com/"] {
+    for prefix in [
+        "https://github.com/",
+        "http://github.com/",
+        "https://www.github.com/",
+    ] {
         if let Some(rest) = s.strip_prefix(prefix) {
             let mut parts = rest.splitn(2, '/');
             let owner = parts.next()?.trim();
@@ -1289,7 +1548,9 @@ mod approval_gate {
         assert!(refuse_bare_spec_approval("sdd_loop", &args, "go").is_some());
         assert!(refuse_bare_spec_approval("sdd_loop", &args, "OK").is_some());
         assert!(refuse_bare_spec_approval("sdd_loop", &args, "j'approuve la spec").is_none());
-        assert!(refuse_bare_spec_approval("sdd_loop", &json!({"action": "specify"}), "oui").is_none());
+        assert!(
+            refuse_bare_spec_approval("sdd_loop", &json!({"action": "specify"}), "oui").is_none()
+        );
         assert!(refuse_bare_spec_approval("create_project_agent", &args, "oui").is_none());
     }
 
@@ -1309,7 +1570,11 @@ fn summarize(tool: &str, result: &Value) -> String {
     if result.get("ok").and_then(|v| v.as_bool()) == Some(true) {
         format!("✓ {tool} OK.\n{pretty}")
     } else {
-        let err = result.get("error").or_else(|| result.get("reason")).and_then(|v| v.as_str()).unwrap_or("échec");
+        let err = result
+            .get("error")
+            .or_else(|| result.get("reason"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("échec");
         format!("✗ {tool} : {err}\n{pretty}")
     }
 }
@@ -1349,7 +1614,8 @@ mod event_serde_tests {
         assert_eq!(v["id"], "call_42");
         // Ancien format sans `id` : toujours accepté (id vide).
         let legacy: AgentEvent =
-            serde_json::from_value(json!({ "type": "tool_start", "name": "x", "arguments": {} })).unwrap();
+            serde_json::from_value(json!({ "type": "tool_start", "name": "x", "arguments": {} }))
+                .unwrap();
         match legacy {
             AgentEvent::ToolStart { id, .. } => assert!(id.is_empty()),
             other => panic!("unexpected {other:?}"),
@@ -1358,7 +1624,12 @@ mod event_serde_tests {
 
     #[test]
     fn tool_call_record_id_is_optional() {
-        let rec = ToolCallRecord { id: String::new(), name: "x".into(), arguments: json!({}), result: json!({}) };
+        let rec = ToolCallRecord {
+            id: String::new(),
+            name: "x".into(),
+            arguments: json!({}),
+            result: json!({}),
+        };
         let v = serde_json::to_value(&rec).unwrap();
         assert!(v.get("id").is_none());
         let rec: ToolCallRecord =

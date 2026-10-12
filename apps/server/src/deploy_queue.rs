@@ -117,9 +117,7 @@ pub async fn supersede_in_progress(
     keep_uuid: &str,
 ) -> Vec<String> {
     let now = now_str();
-    let note = format!(
-        "\n[devforge] Déploiement annulé : remplacé par {keep_uuid}\n"
-    );
+    let note = format!("\n[devforge] Déploiement annulé : remplacé par {keep_uuid}\n");
     let rows: Vec<(String,)> = sqlx::query_as(
         r#"UPDATE deployments
            SET status = 'cancelled',
@@ -389,11 +387,7 @@ pub async fn finalize_if_active(
 
 /// Déploiements actifs sans tâche vivante depuis plus de `older_than` → `failed`.
 /// Évite les lignes bloquées en « running » à vie (future droppé, crash de tâche).
-pub async fn reap_orphans(
-    queue: &DeployQueue,
-    pool: &PgPool,
-    older_than: chrono::Duration,
-) -> u64 {
+pub async fn reap_orphans(queue: &DeployQueue, pool: &PgPool, older_than: chrono::Duration) -> u64 {
     let cutoff = (chrono::Utc::now() - older_than).to_rfc3339();
     let rows: Vec<(String, i64)> = sqlx::query_as(
         r#"SELECT uuid, project_id FROM deployments
@@ -927,11 +921,17 @@ mod tests {
 
         let queue = DeployQueue::new();
         let _rx = queue.register_cancel("dep-run").await;
-        assert!(cancel_one_deployment(&queue, &pool, "dep-run").await.unwrap());
+        assert!(cancel_one_deployment(&queue, &pool, "dep-run")
+            .await
+            .unwrap());
         assert!(queue.is_cancelled("dep-run").await);
         // Already terminal → false
-        assert!(!cancel_one_deployment(&queue, &pool, "dep-ok").await.unwrap());
-        assert!(!cancel_one_deployment(&queue, &pool, "dep-run").await.unwrap());
+        assert!(!cancel_one_deployment(&queue, &pool, "dep-ok")
+            .await
+            .unwrap());
+        assert!(!cancel_one_deployment(&queue, &pool, "dep-run")
+            .await
+            .unwrap());
 
         let st: (String,) = sqlx::query_as("SELECT status FROM deployments WHERE uuid = 'dep-run'")
             .fetch_one(&pool)

@@ -143,12 +143,7 @@ impl BackupFacade {
         let size = 1_024_000 + (id.bytes().map(|b| b as u64).sum::<u64>() % 500_000);
         match self
             .storage
-            .put(
-                &bucket,
-                &key,
-                Some(size),
-                Some("application/gzip"),
-            )
+            .put(&bucket, &key, Some(size), Some("application/gzip"))
             .await
         {
             Ok(_) => {
@@ -358,16 +353,12 @@ impl InstanceBackupService {
     pub async fn list_remote(&self, override_cfg: Option<S3Config>) -> Result<Value> {
         let (bucket, prefix) = if let Some(cfg) = override_cfg {
             if !cfg.is_ready() {
-                return Err(DevForgeError::Message(
-                    "Identifiants S3 incomplets".into(),
-                ));
+                return Err(DevForgeError::Message("Identifiants S3 incomplets".into()));
             }
             // Temporarily use a dedicated store for listing.
             let tmp = StorageFacade::memory();
             tmp.configure(cfg.clone()).await?;
-            let objects = tmp
-                .list_objects(&cfg.bucket, Some(Self::PREFIX))
-                .await?;
+            let objects = tmp.list_objects(&cfg.bucket, Some(Self::PREFIX)).await?;
             return Ok(json!({
                 "ok": true,
                 "bucket": cfg.bucket,
@@ -384,10 +375,7 @@ impl InstanceBackupService {
             (cfg.bucket.clone(), Self::PREFIX.to_string())
         };
 
-        let objects = self
-            .storage
-            .list_objects(&bucket, Some(&prefix))
-            .await?;
+        let objects = self.storage.list_objects(&bucket, Some(&prefix)).await?;
         Ok(json!({
             "ok": true,
             "bucket": bucket,
@@ -424,12 +412,13 @@ impl InstanceBackupService {
 
             let metadata = tokio::fs::metadata(&path).await.ok();
             let size_bytes = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-            
+
             let created_at = metadata
                 .and_then(|m| m.modified().ok())
                 .and_then(|t| {
                     let duration = t.duration_since(std::time::UNIX_EPOCH).ok()?;
-                    let datetime = chrono::DateTime::<Utc>::from_timestamp(duration.as_secs() as i64, 0)?;
+                    let datetime =
+                        chrono::DateTime::<Utc>::from_timestamp(duration.as_secs() as i64, 0)?;
                     Some(datetime.to_rfc3339())
                 })
                 .unwrap_or_else(|| Utc::now().to_rfc3339());
@@ -492,13 +481,19 @@ impl InstanceBackupService {
                             let to_delete: Vec<String> = objects
                                 .iter()
                                 .skip(retention_count)
-                                .filter_map(|obj| obj.get("key").and_then(|k| k.as_str()).map(|s| s.to_string()))
+                                .filter_map(|obj| {
+                                    obj.get("key")
+                                        .and_then(|k| k.as_str())
+                                        .map(|s| s.to_string())
+                                })
                                 .collect();
 
                             for key in to_delete {
                                 match self.storage.delete(&cfg.bucket, &key).await {
                                     Ok(_) => deleted_s3 += 1,
-                                    Err(e) => tracing::warn!(key = %key, error = %e, "échec suppression S3"),
+                                    Err(e) => {
+                                        tracing::warn!(key = %key, error = %e, "échec suppression S3")
+                                    }
                                 }
                             }
                         }
@@ -519,7 +514,11 @@ impl InstanceBackupService {
     }
 
     /// Download object and stage as pending restore (applied on next boot).
-    pub async fn restore(&self, storage_key: &str, override_cfg: Option<S3Config>) -> Result<Value> {
+    pub async fn restore(
+        &self,
+        storage_key: &str,
+        override_cfg: Option<S3Config>,
+    ) -> Result<Value> {
         // Detect if storage_key is a local file path or an S3 key
         let is_local = storage_key.starts_with('/') || Path::new(storage_key).exists();
 
@@ -532,16 +531,14 @@ impl InstanceBackupService {
                     storage_key
                 )));
             }
-            tokio::fs::read(local_path)
-                .await
-                .map_err(|e| DevForgeError::Message(format!("Lecture backup local échouée : {e}")))?
+            tokio::fs::read(local_path).await.map_err(|e| {
+                DevForgeError::Message(format!("Lecture backup local échouée : {e}"))
+            })?
         } else {
             // S3 backup: download from S3
             if let Some(cfg) = override_cfg {
                 if !cfg.is_ready() {
-                    return Err(DevForgeError::Message(
-                        "Identifiants S3 incomplets".into(),
-                    ));
+                    return Err(DevForgeError::Message("Identifiants S3 incomplets".into()));
                 }
                 let tmp = StorageFacade::memory();
                 tmp.configure(cfg.clone()).await?;
@@ -663,9 +660,7 @@ fn snapshot_mime(ext: &str) -> &'static str {
 
 /// Parse `sqlite:path?opts` → filesystem path.
 pub fn sqlite_path_from_url(database_url: &str) -> PathBuf {
-    let rest = database_url
-        .strip_prefix("sqlite:")
-        .unwrap_or(database_url);
+    let rest = database_url.strip_prefix("sqlite:").unwrap_or(database_url);
     let path = rest.split('?').next().unwrap_or(rest);
     let path = path.trim_start_matches("//");
     PathBuf::from(path)

@@ -132,9 +132,9 @@ impl Tool for CreateGitHubFixTool {
 
         // Vérifier que le serveur MCP GitHub est disponible
         let servers = self.mcp.clients.list().await;
-        let github_server = servers
-            .iter()
-            .find(|s| s.id.to_lowercase().contains("github") || s.name.to_lowercase().contains("github"));
+        let github_server = servers.iter().find(|s| {
+            s.id.to_lowercase().contains("github") || s.name.to_lowercase().contains("github")
+        });
 
         let Some(server) = github_server else {
             return Ok(json!({
@@ -348,9 +348,9 @@ impl Tool for ReadGitHubFileTool {
         }
 
         let servers = self.mcp.clients.list().await;
-        let github_server = servers
-            .iter()
-            .find(|s| s.id.to_lowercase().contains("github") || s.name.to_lowercase().contains("github"));
+        let github_server = servers.iter().find(|s| {
+            s.id.to_lowercase().contains("github") || s.name.to_lowercase().contains("github")
+        });
 
         let Some(server) = github_server else {
             return Ok(json!({
