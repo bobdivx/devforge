@@ -2,7 +2,7 @@
  * Nettoyage défensif d'un SVG produit par mermaid (déjà en `securityLevel: 'strict'`) :
  * pas de script, pas de gestionnaire `on*`, pas de lien hors ancre/http(s).
  */
-const BLOCKED = new Set(['script', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form', 'input', 'textarea', 'button']);
+const BLOCKED = new Set(['script', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form', 'input', 'textarea', 'button', 'foreignobject', 'use', 'animate', 'set', 'image', 'math']);
 const SAFE_LINK = /^(#|https?:\/\/)/i;
 
 export function sanitizeSvg(svg: string): string {
