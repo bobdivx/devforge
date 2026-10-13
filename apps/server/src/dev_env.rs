@@ -541,7 +541,7 @@ pub(crate) async fn run_dev_deploy(
             .await
             .ok()
             .flatten()
-            .map(|(t,)| t)
+            .map(|(t,)| crate::secret_box::open_compat(&t))
             .filter(|t| !t.trim().is_empty());
 
     // Mêmes variables que la prod (jamais loguées).

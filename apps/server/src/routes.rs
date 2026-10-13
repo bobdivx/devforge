@@ -1470,7 +1470,7 @@ pub(crate) async fn run_real_deploy(
             .await
             .ok()
             .flatten()
-            .map(|(t,)| t)
+            .map(|(t,)| crate::secret_box::open_compat(&t))
             .filter(|t| !t.trim().is_empty());
 
     match crate::project_oidc::sync_project_oidc_client(&state.pool, project, true).await {

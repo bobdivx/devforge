@@ -1017,7 +1017,98 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
     // Mémoire durable des agents (P3-01) : table, index, pg_trgm facultatif.
     devforge_memory::migrate(pool).await?;
 
+    // GitHub App (P0) : schéma + scellement des PAT existants.
+    migrate_github_app(pool).await?;
+
     Ok(())
+}
+
+/// GitHub App (P0-03/P0-04) : tables dédiées, colonnes projet, PAT scellés au repos.
+pub async fn migrate_github_app(pool: &PgPool) -> Result<(), sqlx::Error> {
+    for sql in [
+        r#"CREATE TABLE IF NOT EXISTS github_app (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            app_id BIGINT NOT NULL, slug TEXT NOT NULL, client_id TEXT NOT NULL,
+            client_secret_enc TEXT NOT NULL, webhook_secret_enc TEXT NOT NULL,
+            private_key_enc TEXT NOT NULL, html_url TEXT NOT NULL,
+            owner_login TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())"#,
+        r#"CREATE TABLE IF NOT EXISTS github_installations (
+            installation_id BIGINT PRIMARY KEY, account_login TEXT NOT NULL,
+            account_type TEXT NOT NULL, repository_selection TEXT NOT NULL,
+            permissions JSONB NOT NULL DEFAULT '{}', suspended_at TIMESTAMPTZ,
+            created_by_user_uuid TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now())"#,
+        r#"CREATE TABLE IF NOT EXISTS github_installation_repos (
+            installation_id BIGINT NOT NULL REFERENCES github_installations ON DELETE CASCADE,
+            repo_id BIGINT NOT NULL, full_name TEXT NOT NULL, private BOOLEAN NOT NULL,
+            default_branch TEXT, PRIMARY KEY (installation_id, repo_id))"#,
+        r#"CREATE TABLE IF NOT EXISTS github_webhook_deliveries (
+            delivery_id TEXT PRIMARY KEY, event TEXT NOT NULL,
+            received_at TIMESTAMPTZ NOT NULL DEFAULT now(), status TEXT NOT NULL)"#,
+        r#"CREATE TABLE IF NOT EXISTS github_manifest_states (
+            state TEXT PRIMARY KEY, user_uuid TEXT NOT NULL,
+            expires_at TIMESTAMPTZ NOT NULL)"#,
+        r#"CREATE TABLE IF NOT EXISTS pr_previews (
+            project_uuid TEXT NOT NULL, pr_number INTEGER NOT NULL, head_sha TEXT NOT NULL,
+            url TEXT, deployment_uuid TEXT, comment_id BIGINT, check_run_id BIGINT,
+            status TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (project_uuid, pr_number))"#,
+    ] {
+        sqlx::query(sql).execute(pool).await?;
+    }
+    // Échec toléré : colonne déjà présente.
+    for (col, def) in [
+        ("github_installation_id", "BIGINT"),
+        ("github_repo_id", "BIGINT"),
+        ("pr_previews_enabled", "BOOLEAN NOT NULL DEFAULT true"),
+        ("legacy_webhook_id", "BIGINT"),
+    ] {
+        let sql = format!("ALTER TABLE projects ADD COLUMN {col} {def}");
+        let _ = sqlx::query(&sql).execute(pool).await;
+    }
+    seal_plain_github_tokens(pool).await;
+    Ok(())
+}
+
+/// Scelle (`v1:`) les PAT encore en clair. Sans coffre disponible, rien n'est modifié.
+async fn seal_plain_github_tokens(pool: &PgPool) {
+    if crate::secret_box::global().is_err() {
+        return;
+    }
+    let users: Vec<(String, String)> = sqlx::query_as(
+        "SELECT user_uuid, github_token FROM user_settings WHERE github_token <> '' AND github_token NOT LIKE 'v1:%'",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+    for (uuid, tok) in users {
+        let sealed = crate::secret_box::seal_compat(&tok);
+        let _ = sqlx::query(
+            "UPDATE user_settings SET github_token = $1 WHERE user_uuid = $2 AND github_token = $3",
+        )
+        .bind(&sealed)
+        .bind(&uuid)
+        .bind(&tok)
+        .execute(pool)
+        .await;
+    }
+    let inst: Option<(String,)> = sqlx::query_as(
+        "SELECT github_token FROM instance_settings WHERE id = 1 AND github_token <> '' AND github_token NOT LIKE 'v1:%'",
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    if let Some((tok,)) = inst {
+        let sealed = crate::secret_box::seal_compat(&tok);
+        let _ = sqlx::query(
+            "UPDATE instance_settings SET github_token = $1 WHERE id = 1 AND github_token = $2",
+        )
+        .bind(&sealed)
+        .bind(&tok)
+        .execute(pool)
+        .await;
+    }
 }
 
 /// Remove leftover demo fixtures from earlier greenfield seeds.

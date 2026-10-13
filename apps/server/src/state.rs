@@ -637,6 +637,7 @@ impl AppState {
             crate::control_pg::import_legacy_sqlite(&pool, &db_path).await?;
         }
 
+        crate::secret_box::init();
         crate::db::migrate(&pool).await?;
 
         let cluster_store: Arc<dyn ClusterStore> =
@@ -808,7 +809,7 @@ impl AppState {
         let t = token.trim().to_string();
         let now = now_str();
         sqlx::query("UPDATE instance_settings SET github_token = $1, updated_at = $2 WHERE id = 1")
-            .bind(&t)
+            .bind(crate::secret_box::seal_compat(&t))
             .bind(&now)
             .execute(&self.pool)
             .await?;
@@ -1277,7 +1278,8 @@ async fn resolve_github_client(
             .await
             .ok()
             .flatten();
-    if let Some((token,)) = row {
+    if let Some((stored,)) = row {
+        let token = crate::secret_box::open_compat(&stored);
         if !token.trim().is_empty() {
             let (c, m) = client_from_token(&token);
             return (c, m, Some(token));

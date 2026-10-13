@@ -15,7 +15,9 @@ pub async fn github_token(pool: &PgPool, user_uuid: &str) -> String {
             .await
             .ok()
             .flatten();
-    row.map(|(t,)| t).unwrap_or_default()
+    // Rétro-compat : valeur sans préfixe `v1:` = PAT historique en clair.
+    row.map(|(t,)| crate::secret_box::open_compat(&t))
+        .unwrap_or_default()
 }
 
 pub async fn set_github_token(
@@ -33,7 +35,7 @@ pub async fn set_github_token(
         "#,
     )
     .bind(user_uuid)
-    .bind(token)
+    .bind(crate::secret_box::seal_compat(token))
     .bind(&now)
     .execute(pool)
     .await?;
