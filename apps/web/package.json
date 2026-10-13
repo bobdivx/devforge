@@ -1,7 +1,7 @@
 {
   "name": "apps-web",
   "type": "module",
-  "version": "2.0.234",
+  "version": "2.0.235",
   "engines": {
     "node": ">=22.12.0"
   },
