@@ -1,0 +1,1 @@
+## 2025-05-24 - Accessibility improvements in Toast component\n**Learning:** The Toast component used an icon-only button without an ARIA label. Added an aria-label with the translation 'Fermer', matching other close buttons in the app.\n**Action:** When adding close buttons, ensure they have proper aria-labels in French ('Fermer') to match the app's language.

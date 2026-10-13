@@ -82,6 +82,7 @@ export function ToastProvider({ children }: { children: ComponentChildren }) {
               <button
                 type="button"
                 class="text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]"
+                aria-label="Fermer"
                 onClick={() => dismiss(t.id)}
               >
                 ×
