@@ -422,6 +422,50 @@ data class DraftDiscarded(@SerialName("backup_id") val backupId: String = "", va
 @Serializable
 data class DraftRestored(val files: Int = 0)
 
+/* ---- Corrections (vue simple, sans jargon) ---- */
+@Serializable
+data class CorrectionStep(val key: String = "", val label: String = "", val state: String = "todo")
+
+@Serializable
+data class CorrectionReport(
+    val broke: String = "",
+    val changed: String = "",
+    val files: List<String> = emptyList(),
+    @SerialName("test_ok") val testOk: Boolean? = null,
+    val test: String = "",
+    val todo: String = "",
+)
+
+@Serializable
+data class Correction(
+    val id: String = "",
+    val stage: String = "",
+    @SerialName("status_label") val statusLabel: String = "",
+    val persona: String = "",
+    val summary: String = "",
+    val files: List<String> = emptyList(),
+    val message: String? = null,
+    val note: String? = null,
+    val steps: List<CorrectionStep> = emptyList(),
+    val report: CorrectionReport = CorrectionReport(),
+    @SerialName("backup_id") val backupId: String? = null,
+    val restorable: Boolean = false,
+)
+
+@Serializable
+data class CorrectionsState(val current: Correction? = null, val history: List<Correction> = emptyList())
+
+@Serializable
+data class CorrectionApplied(
+    val ok: Boolean = false,
+    val deployed: Boolean = false,
+    val conflict: Boolean = false,
+    val message: String? = null,
+)
+
+@Serializable
+data class OkOnly(val ok: Boolean = false)
+
 @Serializable
 data class DraftReverted(@SerialName("backup_id") val backupId: String = "", val path: String = "")
 

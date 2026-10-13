@@ -204,6 +204,9 @@ async fn inbox(
         }
     }
 
+    // 4. Corrections : proposée, en ligne, échec.
+    events.extend(crate::correction::inbox_events(&state.pool, &projects, &since).await);
+
     events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(Json(json!({
         "data": {

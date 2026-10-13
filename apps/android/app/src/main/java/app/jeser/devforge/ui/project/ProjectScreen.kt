@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Subject
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LocalFireDepartment
@@ -104,6 +105,11 @@ data class ProjectActions(
     val onOpenPreview: () -> Unit = {},
     val onUrlOpened: () -> Unit = {},
     val onOpenDraft: () -> Unit = {},
+    val onOpenCorrections: () -> Unit = {},
+    val onApplyCorrection: (() -> Unit) -> Unit = {},
+    val onRejectCorrection: (() -> Unit) -> Unit = {},
+    val onRedoCorrection: (() -> Unit) -> Unit = {},
+    val onRestoreCorrection: (String) -> Unit = {},
     val onDraftValidate: (String) -> Unit = {},
     val onDraftDiscard: (() -> Unit) -> Unit = {},
     val onDraftRevert: (String, () -> Unit) -> Unit = { _, _ -> },
@@ -121,7 +127,7 @@ data class ProjectActions(
 )
 
 /** Feuilles de la page app (une seule ouverte à la fois). */
-enum class ProjectSheet { None, Details, Deploys, Stop, Restart, Deploy, NewFeature, Workspace, Draft, DraftFile, DraftValidate, DraftDiscard, Chat }
+enum class ProjectSheet { None, Details, Deploys, Stop, Restart, Deploy, NewFeature, Workspace, Draft, DraftFile, DraftValidate, DraftDiscard, Chat, Corrections }
 
 private data class Chip(val key: String, val label: String, val danger: Boolean = false)
 
@@ -136,7 +142,10 @@ fun ProjectScreen(
 ) {
     var sheet by rememberSaveable { mutableStateOf(initialSheet) }
     var draftPath by rememberSaveable { mutableStateOf<String?>(initialDraftPath) }
-    LaunchedEffect(Unit) { if (initialSheet == ProjectSheet.Draft) actions.onOpenDraft() }
+    LaunchedEffect(Unit) {
+        if (initialSheet == ProjectSheet.Draft) actions.onOpenDraft()
+        if (initialSheet == ProjectSheet.Corrections) actions.onOpenCorrections()
+    }
     var input by rememberSaveable { mutableStateOf("") }
     val snackbar = remember { SnackbarHostState() }
     val uri = LocalUriHandler.current
@@ -161,8 +170,10 @@ fun ProjectScreen(
     val project = state.project
     // Fermer le brouillon ramène au Workspace s'il a été ouvert depuis là.
     var draftFromWorkspace by rememberSaveable { mutableStateOf(false) }
+    var fileFromCorrections by rememberSaveable { mutableStateOf(false) }
     val openDraft = { actions.onOpenDraft(); sheet = ProjectSheet.Draft }
     // Tuile Workspace : brouillon en attente → directement le brouillon ; sinon les tuiles du Workspace.
+    val openCorrections = { actions.onOpenCorrections(); sheet = ProjectSheet.Corrections }
     val openWorkspace = {
         actions.onOpenDraft()
         if (state.draft?.dirty == true) {
@@ -235,7 +246,7 @@ fun ProjectScreen(
                             cols = cols,
                             showBraise = showBraise,
                             onBraise = { sheet = ProjectSheet.Chat },
-                            onWorkspace = openWorkspace,
+                            onWorkspace = openCorrections,
                             onDeploys = { sheet = ProjectSheet.Deploys },
                             onSettings = { sheet = ProjectSheet.Details },
                         )
@@ -311,17 +322,26 @@ fun ProjectScreen(
                 state,
                 onDismiss = { if (draftFromWorkspace) { draftFromWorkspace = false; sheet = ProjectSheet.Workspace } else close() },
                 onOpenDiscussion = { sheet = ProjectSheet.Chat },
-                onOpenFile = { p -> draftPath = p; sheet = ProjectSheet.DraftFile },
+                onOpenFile = { p -> draftPath = p; fileFromCorrections = false; sheet = ProjectSheet.DraftFile },
                 onValidate = { actions.onDraftValidatedSeen(); sheet = ProjectSheet.DraftValidate },
                 onDiscard = { sheet = ProjectSheet.DraftDiscard },
                 onUpdate = actions.onDraftUpdate,
                 onRestore = actions.onDraftRestore,
                 onOpenPreview = { actions.onOpenPreview(); close() },
             )
+            ProjectSheet.Corrections -> CorrectionsSheet(
+                state,
+                onDismiss = close,
+                onOpenFile = { p -> draftPath = p; fileFromCorrections = true; sheet = ProjectSheet.DraftFile },
+                onApply = actions.onApplyCorrection,
+                onReject = actions.onRejectCorrection,
+                onRedo = actions.onRedoCorrection,
+                onRestore = actions.onRestoreCorrection,
+            )
             ProjectSheet.DraftFile -> DraftFileSheet(
                 state,
                 path = draftPath.orEmpty(),
-                onBack = { sheet = ProjectSheet.Draft },
+                onBack = { sheet = if (fileFromCorrections) ProjectSheet.Corrections else ProjectSheet.Draft },
                 onDismiss = close,
                 onRevert = { p -> actions.onDraftRevert(p) { sheet = ProjectSheet.Draft } },
             )
@@ -570,9 +590,10 @@ fun ProjectTiles(
             add(TileSpec("braise", "Braise", if (waiting) "Attend ton OK" else "Discuter, faire évoluer", Icons.Filled.LocalFireDepartment,
                 if (waiting) DfColors.Warn else DfColors.Accent, waiting, onBraise))
         }
-        val dirty = draft?.dirty == true
-        add(TileSpec("workspace", "Workspace", if (dirty) "Brouillon · ${filesLabel(draft!!.count)}" else "Brouillon et aperçu", Icons.Filled.Description,
-            if (dirty) DfColors.Warn else DfColors.InkMuted, dirty, onWorkspace))
+        val cur = state.corrections?.current
+        val alert = cur != null && cur.stage in setOf("proposed", "conflict", "failed")
+        add(TileSpec("corrections", "Corrections", correctionsTileText(state.corrections), Icons.Filled.Build,
+            cur?.let { correctionTone(it.stage) } ?: DfColors.InkMuted, alert, onWorkspace))
         val (dl, dc) = latest?.let { deployLabel(it) } ?: ("Aucune" to DfColors.InkFaint)
         val when_ = latest?.let { relativeTime(it.createdAt) }?.takeIf { it.isNotEmpty() }
         add(TileSpec("deploys", "Déploiements", listOfNotNull(dl, when_).joinToString(" · "), Icons.Filled.History,

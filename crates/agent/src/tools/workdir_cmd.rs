@@ -13,7 +13,58 @@ pub struct RunWorkdirCommandTool {
 
 const ALLOWED_BINS: &[&str] = &[
     "npm", "pnpm", "yarn", "bun", "node", "npx", "astro", "tsc", "vite", "eslint", "prettier",
+    "git", "cat", "grep",
 ];
+
+/// Sous-commandes git en lecture seule (diagnostic).
+const GIT_READ_ONLY: &[&str] = &[
+    "status",
+    "diff",
+    "log",
+    "show",
+    "blame",
+    "ls-files",
+    "rev-parse",
+    "branch",
+    "grep",
+];
+
+/// Lecture seule pour le diagnostic : git (sous-commandes sûres), cat, grep. Jamais de fichiers secrets.
+fn validate_read_only(bin: &str, parts: &[String]) -> std::result::Result<(), String> {
+    for a in &parts[1..] {
+        let l = a.to_ascii_lowercase();
+        if a.starts_with('/')
+            || a.starts_with('~')
+            || l.contains(".env")
+            || l.contains("secret")
+            || l.contains(".git/")
+        {
+            return Err(format!("argument interdit en lecture : {a}"));
+        }
+    }
+    if bin == "git" {
+        let sub = parts.get(1).map(|s| s.as_str()).unwrap_or("");
+        if !GIT_READ_ONLY.contains(&sub) {
+            return Err(format!(
+                "git : seules les sous-commandes en lecture sont permises ({})",
+                GIT_READ_ONLY.join(", ")
+            ));
+        }
+        if parts.iter().any(|p| {
+            p == "-c"
+                || p.starts_with("--output")
+                || p == "-D"
+                || p == "-d"
+                || p == "-m"
+                || p == "-M"
+                || p.starts_with("--set")
+                || p.starts_with("--delete")
+        }) {
+            return Err("git : option d'écriture interdite".into());
+        }
+    }
+    Ok(())
+}
 
 const BLOCKED_TOKENS: &[&str] = &[
     ";",
@@ -69,6 +120,9 @@ fn validate_command(raw: &str) -> std::result::Result<Vec<String>, String> {
             "binaire non autorisé « {bin_base} ». Allowlist : {}",
             ALLOWED_BINS.join(", ")
         ));
+    }
+    if matches!(bin_base, "git" | "cat" | "grep") {
+        validate_read_only(bin_base, &parts)?;
     }
     if matches!(bin_base, "npm" | "pnpm" | "yarn" | "bun") {
         let joined = parts.join(" ").to_ascii_lowercase();
@@ -263,6 +317,19 @@ impl Tool for RunWorkdirCommandTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_only_diagnosis() {
+        assert!(validate_command("git status").is_ok());
+        assert!(validate_command("git log --oneline -5").is_ok());
+        assert!(validate_command("cat src/main.ts").is_ok());
+        assert!(validate_command("grep -rn TURSO src").is_ok());
+        assert!(validate_command("git push").is_err());
+        assert!(validate_command("git -c x=y status").is_err());
+        assert!(validate_command("cat .env").is_err());
+        assert!(validate_command("cat /etc/passwd").is_err());
+        assert!(validate_command("git branch -D main").is_err());
+    }
 
     #[test]
     fn allows_npm_run_build() {

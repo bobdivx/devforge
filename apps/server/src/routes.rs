@@ -1749,10 +1749,10 @@ fn build_repair_prompt(dep_uuid: &str, summary: &str, hint: &str, raw_logs: &str
              INTERDIT : répondre sans appeler d'outil. INTERDIT : write_project_file sur package-lock.json. INTERDIT : inventer une variable d'environnement.\n\
              Appelle ces outils, dans cet ordre :\n\
              1. run_workdir_command avec command=\"npm install\"\n\
-             2. sync_workdir_to_github avec paths=[\"package-lock.json\"] et commit_message=\"fix: resynchroniser package-lock.json\"\n\
-             3. trigger_deploy, seulement si l'étape 2 a réussi.\n\
-             La publication est verrouillée côté serveur : si un outil répond publish_approval_required, arrête-toi et demande la validation UNE fois (l'interface affiche le bouton). Ne relance pas npm install en boucle.\n\
-             Ne dis pas que c'est corrigé avant le résultat de trigger_deploy."
+             Ne publie pas (pas de sync_workdir_to_github ni trigger_deploy) : DevForge teste la correction et l'utilisateur l'appliquera d'un bouton. Ne relance pas npm install en boucle.\n\
+             Termine par ce rapport, en français simple :\n\
+             Cassé : la liste des dépendances n'était plus à jour.\n\
+             Changé : une phrase sur ce que tu as changé."
         );
     }
     format!(
@@ -1763,8 +1763,12 @@ fn build_repair_prompt(dep_uuid: &str, summary: &str, hint: &str, raw_logs: &str
         Logs :\n```\n{logs_tail}\n```\n\n\
         N'écris pas que c'est fait tant que les outils n'ont pas répondu.\n\
         1. Identifie la cause dans les logs.\n\
-        2. Corrige avec l'outil adapté (run_workdir_command, write_project_file). Ne réécris pas un lockfile à la main.\n\
-        3. trigger_deploy, puis résume le résultat réel."
+        2. Corrige EN LOCAL avec l'outil adapté (run_workdir_command, write_project_file). Ne réécris pas un lockfile à la main.\n\
+        3. Vérifie que le build passe (run_workdir_command ou run_application_tests).\n\
+        4. Ne publie pas : pas de sync_workdir_to_github, pas de trigger_deploy. DevForge teste ta correction et l'utilisateur l'appliquera d'un bouton.\n\
+        5. Termine par ce rapport, en français simple, sans jargon (pas de commit, branche, brouillon) :\n\
+        Cassé : une ou deux phrases sur ce qui a cassé.\n\
+        Changé : une phrase sur ce que tu as changé."
     )
 }
 
@@ -2400,15 +2404,60 @@ pub(crate) async fn handle_deploy_failure(
             text = crate::wake_causes::escalation_text(&cause, &summary)
         ),
         crate::wake_causes::WakeDecision::Normal => {
+            let logs: Option<(Option<String>,)> =
+                sqlx::query_as("SELECT logs FROM deployments WHERE uuid = $1")
+                    .bind(dep_uuid)
+                    .fetch_optional(&state.pool)
+                    .await
+                    .ok()
+                    .flatten();
+            let logs = logs.and_then(|(l,)| l).unwrap_or_default();
+            if let Some(platform) = crate::correction::platform_failure(&summary, &logs) {
+                // Problème de la plateforme : on ne fait pas modifier l'app par un agent.
+                crate::correction::note_platform_failure(
+                    &state.pool,
+                    project_uuid,
+                    dep_uuid,
+                    platform,
+                )
+                .await;
+                crate::wake_gate::record(
+                    &state.pool,
+                    project_uuid,
+                    "deploy_fail",
+                    &format!("deploy_fail:{}", cause.hash),
+                    "Échec de déploiement",
+                    crate::wake_gate::SKIPPED,
+                    "problème de plateforme DevForge : pas de réparation de l'app",
+                    &cause.hash,
+                    None,
+                )
+                .await;
+                crate::wake_causes::mark_woken(&state.pool, project_uuid, &cause.hash).await;
+                return Ok(());
+            }
             if auto_repair {
-                let st = state.clone();
-                let dep = dep_uuid.to_string();
-                let hash = cause.hash.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = auto_trigger_repair(&st, &dep, &hash).await {
-                        tracing::warn!(error = %e, dep_uuid = %dep, "auto-réparation non lancée");
-                    }
-                });
+                // Rustine répare seule (correction locale + test) ; pas de réveil du Coordinateur en parallèle.
+                let r = auto_trigger_repair(state, dep_uuid, &cause.hash).await;
+                if r.is_ok() {
+                    crate::wake_gate::record(
+                        &state.pool,
+                        project_uuid,
+                        "deploy_fail",
+                        &format!("deploy_fail:{}", cause.hash),
+                        "Échec de déploiement",
+                        crate::wake_gate::LAUNCHED,
+                        "réparation confiée à Rustine",
+                        &cause.hash,
+                        None,
+                    )
+                    .await;
+                    crate::wake_causes::mark_woken(&state.pool, project_uuid, &cause.hash).await;
+                    return Ok(());
+                }
+                if let Err(e) = r {
+                    tracing::warn!(error = %e, dep_uuid, "auto-réparation non lancée");
+                }
             }
             format!(
                 "Événement projet : échec de déploiement.\n\
@@ -2459,7 +2508,7 @@ pub(crate) async fn wake_coordinator_deploy_fail(
     summary: &str,
     hint: &str,
 ) -> Result<(), String> {
-    handle_deploy_failure(state, project_uuid, dep_uuid, summary, hint, false).await
+    handle_deploy_failure(state, project_uuid, dep_uuid, summary, hint, true).await
 }
 
 /// Déploiement réussi : causes résolues, puis vérification HTTP de l'URL publique (P1-08).
@@ -2525,7 +2574,7 @@ async fn post_deploy_smoke(state: &AppState, project_uuid: &str, dep_uuid: &str,
         .await;
     if let Some(summary) = verdict {
         tracing::warn!(project_uuid, dep_uuid, url, %summary, "vérification post-déploiement KO");
-        let _ = handle_deploy_failure(state, project_uuid, dep_uuid, &summary, "", false).await;
+        let _ = handle_deploy_failure(state, project_uuid, dep_uuid, &summary, "", true).await;
     } else {
         let smoke = last
             .get("status")
@@ -2643,17 +2692,7 @@ async fn auto_trigger_repair(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Project not found".to_string())?;
 
-    let agent_uuid: Option<(String,)> = sqlx::query_as(
-        "SELECT uuid FROM project_agents WHERE project_uuid = $1 AND role = 'deploy' LIMIT 1",
-    )
-    .bind(&project.uuid)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| e.to_string())?;
-
-    let Some((agent_uuid,)) = agent_uuid else {
-        return Err("No deploy agent found".to_string());
-    };
+    let agent_uuid = crate::correction::ensure_repair_agent(&state.pool, &project.uuid).await?;
 
     let summary = dep
         .error_summary
@@ -2937,7 +2976,7 @@ async fn execute_claimed_run_inner(
     .map_err(|e| e.to_string())?;
     drop(handle);
     // Origine des fichiers du brouillon (badge + « Voir la discussion »).
-    crate::draft_origin::record_run(state, run, &tools_json).await;
+    crate::draft_origin::record_run(state, run, &tools_json, &result.reply).await;
     if status == "cancelled" {
         return Ok(());
     }

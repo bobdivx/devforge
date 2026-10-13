@@ -64,6 +64,8 @@ fun HomeRoot(
     selected: String?,
     onSelect: (String?) -> Unit,
     onSignOut: () -> Unit,
+    openCorrectionsFor: String? = null,
+    onCorrectionsOpened: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val uri = LocalUriHandler.current
@@ -88,6 +90,10 @@ fun HomeRoot(
         }
     }
     var draftFor by rememberSaveable { mutableStateOf<String?>(null) }
+    // Notification « correction » : ouvre directement la feuille Corrections de l'app.
+    LaunchedEffect(openCorrectionsFor) {
+        openCorrectionsFor?.let { draftFor = it; onSelect(it); onCorrectionsOpened() }
+    }
     var memoryOpen by rememberSaveable { mutableStateOf(false) }
     // Écran plein (app, mémoire) : la barre Apps / Braise / Réglages reste visible dessous.
     val screen: (@Composable (Modifier) -> Unit)? = when {
@@ -320,6 +326,11 @@ private fun ProjectRoute(graph: AppGraph, uuid: String, onBack: (() -> Unit)?, o
             onOpenPreview = vm::openPreview,
             onUrlOpened = vm::urlOpened,
             onOpenDraft = vm::openDraft,
+            onOpenCorrections = vm::openCorrections,
+            onApplyCorrection = vm::applyCorrection,
+            onRejectCorrection = vm::rejectCorrection,
+            onRedoCorrection = vm::redoCorrection,
+            onRestoreCorrection = vm::restoreCorrection,
             onDraftValidate = vm::validateDraft,
             onDraftDiscard = vm::discardDraft,
             onDraftRevert = vm::revertDraftFile,
@@ -328,7 +339,7 @@ private fun ProjectRoute(graph: AppGraph, uuid: String, onBack: (() -> Unit)?, o
             onDraftValidatedSeen = vm::draftValidatedSeen,
             onUndoShown = vm::undoShown,
         ),
-        initialSheet = if (openDraft) ProjectSheet.Draft else ProjectSheet.None,
+        initialSheet = if (openDraft) ProjectSheet.Corrections else ProjectSheet.None,
     )
 }
 

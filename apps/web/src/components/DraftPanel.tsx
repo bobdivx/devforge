@@ -726,10 +726,10 @@ export function DraftsSection({ class: className }: { class?: string }) {
   }, []);
   if (!items.length) return null;
   return (
-    <section class={cn('mt-6', className)} aria-label="Brouillons en attente">
+    <section class={cn('mt-6', className)} aria-label="Corrections en attente">
       <h2 class="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-muted)]">
         <FileDiff size={14} aria-hidden />
-        Brouillons en attente · {items.length}
+        Corrections en attente · {items.length}
       </h2>
       <ul class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {items.map((d) => (

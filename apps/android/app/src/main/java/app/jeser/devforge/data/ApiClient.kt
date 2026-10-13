@@ -319,6 +319,20 @@ class ApiClient(
 
     suspend fun drafts(): List<DraftSummary> = get("/drafts", DraftList.serializer()).drafts
 
+    /* ---- Corrections ---- */
+    suspend fun corrections(uuid: String): CorrectionsState =
+        get("/projects/${enc(uuid)}/corrections", CorrectionsState.serializer())
+
+    /** « Appliquer » : rattrape GitHub, envoie et met en ligne. Seulement après confirmation. */
+    suspend fun correctionApply(uuid: String): CorrectionApplied =
+        send("POST", "/projects/${enc(uuid)}/corrections/apply", buildJsonObject { put("confirm", true) }, CorrectionApplied.serializer())
+
+    suspend fun correctionReject(uuid: String): OkOnly =
+        send("POST", "/projects/${enc(uuid)}/corrections/reject", buildJsonObject { put("confirm", true) }, OkOnly.serializer())
+
+    suspend fun correctionRedo(uuid: String): OkOnly =
+        send("POST", "/projects/${enc(uuid)}/corrections/redo", buildJsonObject { put("confirm", true) }, OkOnly.serializer())
+
     /* Mémoire des agents (écran natif Réglages → Mémoire). */
     suspend fun memoryList(tier: String): MemoryList = get("/memory?tier=${enc(tier)}", MemoryList.serializer())
 

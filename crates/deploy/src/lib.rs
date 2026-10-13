@@ -1600,7 +1600,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                 }
                 Err(e) => {
                     logs.push_str(&format!(
-                        "[blue-green] ⚠️ Erreur application labels: {}\n",
+                        "[blue-green] ⚠️ Erreur application labels (docker_update_labels, plateforme): {}\n",
                         e
                     ));
                 }
@@ -1877,8 +1877,12 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             }
             if std::time::Instant::now() >= deadline {
                 logs.push_str(&format!(
-                    "[readiness] ❌ {container} ne répond pas en HTTP après {timeout}s (dernier état : {last}) — l’ancien conteneur reste en production\n"
+                    "[readiness] ❌ {container} ne répond pas en HTTP après {timeout}s (dernier état : {last}) — l’ancien conteneur reste en production (wait_container_ready timeout)\n"
                 ));
+                let tail = format!("docker logs --tail 40 {container} 2>&1");
+                if let Ok(r) = self.executor.exec(server, workdir, &tail, 15).await {
+                    logs.push_str(&format!("[readiness] logs: {}\n", trim_out(&r.output)));
+                }
                 return false;
             }
             tokio::time::sleep(std::time::Duration::from_millis(1000)).await;

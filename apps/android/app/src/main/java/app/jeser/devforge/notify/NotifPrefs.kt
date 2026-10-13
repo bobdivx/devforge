@@ -7,6 +7,7 @@ enum class NotifKind(val key: String, val title: String, val description: String
     DeployFailed("deploy_failed", "Mise en ligne échouée", "Rustine 🩹 te prévient et peut réparer."),
     AppDown("app_down", "App qui ne répond plus", "Phare 🗼 a repéré une app en panne."),
     SpecWaiting("spec_waiting", "Braise attend ton OK", "Une spec est prête à relire."),
+    Corrections("corrections", "Corrections", "Correction prête, en ligne ou en échec."),
 }
 
 interface NotifSettings {

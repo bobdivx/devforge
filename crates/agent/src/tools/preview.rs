@@ -146,6 +146,13 @@ impl Tool for StartLocalPreviewTool {
         }
 
         let project_env = load_project_env_vars(self.pool.as_ref(), &ctx.uuid).await;
+        // Secrets de prod non montés en aperçu : on donne leurs NOMS (jamais les valeurs) pour que
+        // l'agent n'accuse pas une variable « manquante » qui existe bien en production.
+        let withheld: Vec<String> = project_env
+            .iter()
+            .filter(|v| v.secret && !v.preview_allowed)
+            .map(|v| v.key.clone())
+            .collect();
         // Preview atelier : pas de secrets de prod (sauf opt-in preview_allowed).
         let project_env = devforge_env::env_for_preview(&project_env);
         let _ = devforge_env::materialize_dotenv_file(workdir_path, &project_env);
@@ -317,6 +324,8 @@ impl Tool for StartLocalPreviewTool {
             "npm_install": npm_install,
             "env_count": env_keys.len(),
             "env_keys": env_keys,
+            "withheld_secret_keys": withheld,
+            "env_note": "Les variables de withheld_secret_keys existent sur le projet (production) mais ne sont pas montées en aperçu. Une erreur qui les concerne en aperçu n'est pas la cause d'un échec de mise en ligne.",
             "public_ok": true,
             "public_status": public_status,
             "logs_tail": logs_tail,

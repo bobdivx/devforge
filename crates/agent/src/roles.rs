@@ -100,6 +100,7 @@ const DEPLOY: &[&str] = &[
     "run_workdir_command",
     "start_local_preview",
     "local_preview_status",
+    "run_application_tests",
     "propose_plan",
     // auto-réparation : pousse le correctif (lockfile) après validation
     "write_project_file",
@@ -107,6 +108,25 @@ const DEPLOY: &[&str] = &[
     "sync_workdir_to_github",
     "publish_to_github",
     "create_github_repo",
+];
+
+/// Rustine (réparation) : diagnostique, corrige dans le dossier de travail, teste. Ne publie pas :
+/// l'utilisateur applique la correction d'un bouton (« Appliquer »).
+const REPAIR: &[&str] = &[
+    "get_project",
+    "list_deployments",
+    "get_deployment_logs",
+    "list_env_vars",
+    "list_project_files",
+    "read_project_file",
+    "write_project_file",
+    "run_workdir_command",
+    "run_application_tests",
+    "start_local_preview",
+    "stop_local_preview",
+    "local_preview_status",
+    "http_smoke",
+    "read_github_file",
 ];
 
 const OPS: &[&str] = &[
@@ -149,6 +169,7 @@ pub fn tools_for_role(role: &str, kind: Option<&str>) -> Option<&'static [&'stat
         "coordinator" => None,
         "custom" | "worker" | "subagent" => Some(WORKER),
         "deploy" => Some(DEPLOY),
+        "repair" => Some(REPAIR),
         "ops" => Some(OPS),
         "reviewer" => Some(REVIEWER),
         "runner" | "actions" | "crons" => Some(WATCHER),

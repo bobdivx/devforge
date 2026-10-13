@@ -40,6 +40,7 @@ class MainActivity : ComponentActivity() {
 
     /** Projet à ouvrir (notification touchée). */
     private var deepLinkProject by mutableStateOf<String?>(null)
+    private var deepLinkCorrections by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
@@ -94,6 +95,8 @@ class MainActivity : ComponentActivity() {
                         selected = selected,
                         onSelect = { selected = it },
                         onSignOut = { graph.signOut() },
+                        openCorrectionsFor = deepLinkCorrections,
+                        onCorrectionsOpened = { deepLinkCorrections = null },
                     )
                 }
             }
@@ -129,8 +132,9 @@ class MainActivity : ComponentActivity() {
             return
         }
         intent.getStringExtra(Notifier.EXTRA_PROJECT)?.let {
-            deepLinkProject = it
+            if (intent.getStringExtra(Notifier.EXTRA_OPEN) == Notifier.OPEN_CORRECTIONS) deepLinkCorrections = it else deepLinkProject = it
             intent.removeExtra(Notifier.EXTRA_PROJECT)
+            intent.removeExtra(Notifier.EXTRA_OPEN)
         }
     }
 
