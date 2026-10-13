@@ -716,6 +716,7 @@ name = "devforge-deploy"
 version = "2.0.238"
 dependencies = [
  "async-trait",
+ "base64",
  "devforge-shared",
  "serde",
  "serde_json",
@@ -762,11 +763,14 @@ name = "devforge-github"
 version = "2.0.238"
 dependencies = [
  "async-trait",
+ "chrono",
  "devforge-shared",
+ "jsonwebtoken",
  "reqwest",
  "serde",
  "serde_json",
  "tokio",
+ "wiremock",
 ]
 
 [[package]]

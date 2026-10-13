@@ -84,6 +84,8 @@ async fn remote_url(state: &AppState, c: &Ctx) -> Option<String> {
     if token.trim().is_empty() {
         token = state.github.instance_token().unwrap_or_default();
     }
+    // GitHub App : token d'installation si le projet est lié (URL jamais persistée).
+    let token = crate::github_auth::project_token(state, &c.project.uuid, token).await;
     Some(draft::token_url(repo, Some(&token)))
 }
 

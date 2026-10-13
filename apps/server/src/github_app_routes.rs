@@ -19,7 +19,7 @@ use axum::{
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64URL;
 use base64::Engine;
 use rand::RngCore;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
@@ -405,32 +405,10 @@ async fn manifest_callback(
 
 // ───────────────────── Installation ─────────────────────
 
-#[derive(Serialize)]
-struct JwtClaims {
-    iat: i64,
-    exp: i64,
-    iss: String,
-}
-
-/// JWT d'app RS256 (iat = now−60, exp = now+540). Sera déplacé dans `crates/github` en P2.
-pub fn app_jwt(app_id: i64, pem: &[u8]) -> Result<Redacted<String>, String> {
-    let key = jsonwebtoken::EncodingKey::from_rsa_pem(pem).map_err(|_| "clé privée invalide")?;
-    let now = chrono::Utc::now().timestamp();
-    let claims = JwtClaims {
-        iat: now - 60,
-        exp: now + 540,
-        iss: app_id.to_string(),
-    };
-    jsonwebtoken::encode(
-        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256),
-        &claims,
-        &key,
-    )
-    .map(Redacted)
-    .map_err(|_| "signature JWT impossible".into())
-}
-
-async fn load_app_jwt(pool: &PgPool) -> Result<Redacted<String>, String> {
+/// Identifiants de l'app (clé privée descellée, jamais journalisée).
+pub async fn load_credentials(
+    pool: &PgPool,
+) -> Result<devforge_github::app_auth::AppCredentials, String> {
     let row: Option<(i64, String)> =
         sqlx::query_as("SELECT app_id, private_key_enc FROM github_app WHERE id = 1")
             .fetch_optional(pool)
@@ -438,7 +416,16 @@ async fn load_app_jwt(pool: &PgPool) -> Result<Redacted<String>, String> {
             .map_err(|e| e.to_string())?;
     let (app_id, enc) = row.ok_or("aucune app GitHub configurée")?;
     let pem = crate::secret_box::open(&enc).map_err(|e| e.to_string())?;
-    app_jwt(app_id, &pem)
+    let pem = String::from_utf8(pem.to_vec()).map_err(|_| "clé privée illisible")?;
+    Ok(devforge_github::app_auth::AppCredentials::new(app_id, pem))
+}
+
+async fn load_app_jwt(pool: &PgPool) -> Result<Redacted<String>, String> {
+    let creds = load_credentials(pool).await?;
+    creds
+        .app_jwt()
+        .map(|j| Redacted(j.expose().to_string()))
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Deserialize)]

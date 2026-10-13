@@ -51,6 +51,8 @@ pub struct AppState {
     pub deploy_queue: Arc<crate::deploy_queue::DeployQueue>,
     /// Active backends: executor / github / storage / llm.
     pub backends: Arc<BackendModes>,
+    /// Tokens d'installation GitHub App en cache (P2-02).
+    pub gh_tokens: Arc<devforge_github::app_auth::InstallationTokenCache>,
 }
 
 #[derive(Debug)]
@@ -779,6 +781,7 @@ impl AppState {
             cron_scheduler,
             deploy_queue,
             backends,
+            gh_tokens: Arc::new(devforge_github::app_auth::InstallationTokenCache::default()),
         };
 
         project_store.bind_app(state.clone());

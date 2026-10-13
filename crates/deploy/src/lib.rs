@@ -136,6 +136,9 @@ pub struct DeployRequest {
     pub publish_directory: Option<String>,
     pub is_static: bool,
     pub github_token: Option<String>,
+    /// Token d'installation GitHub App éphémère : passé en en-tête HTTP à git,
+    /// jamais écrit dans l'URL du remote ni dans `.git/config`.
+    pub github_token_ephemeral: bool,
     pub env_file: Option<String>,
     /// Labels Traefik (tous les hosts) appliqués au `docker run`.
     pub proxy_labels: Option<serde_json::Value>,
@@ -347,6 +350,28 @@ fn git_sync_command(workdir: &str, clone_url: &str, branch: &str) -> String {
             fi"
         )
     }
+}
+
+/// Variante « token éphémère » (GitHub App) : l'authentification passe par
+/// `http.<github>.extraheader` via les variables `GIT_CONFIG_*` (git ≥ 2.31),
+/// le remote est (ré)écrit sans token : rien n'est persisté dans `.git/config`.
+fn git_sync_command_header_auth(
+    workdir: &str,
+    clean_url: &str,
+    branch: &str,
+    token: &str,
+) -> String {
+    use base64::Engine;
+    let basic = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
+    let w = shell_single_quote(workdir);
+    let url = shell_single_quote(clean_url);
+    let header = shell_single_quote(&format!("AUTHORIZATION: basic {basic}"));
+    let base = git_sync_command(workdir, clean_url, branch);
+    format!(
+        "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0={header} GIT_TERMINAL_PROMPT=0; \
+         if [ -d {w}/.git ]; then git -C {w} remote set-url origin {url}; fi; \
+         {base}"
+    )
 }
 
 fn shell_single_quote(s: &str) -> String {
@@ -678,13 +703,25 @@ impl DeployFacade {
         }
 
         // Sync git
-        let clone_url = git_clone_url(&req.git_repository, req.github_token.as_deref());
         let branch = if req.git_branch.trim().is_empty() {
             "main"
         } else {
             req.git_branch.trim()
         };
-        let sync_cmd = git_sync_command(&workdir, &clone_url, branch);
+        let sync_cmd = match req
+            .github_token
+            .as_deref()
+            .filter(|t| req.github_token_ephemeral && !t.is_empty() && !cfg!(windows))
+        {
+            Some(tok) => {
+                let clean = git_clone_url(&req.git_repository, None);
+                git_sync_command_header_auth(&workdir, &clean, branch, tok)
+            }
+            None => {
+                let clone_url = git_clone_url(&req.git_repository, req.github_token.as_deref());
+                git_sync_command(&workdir, &clone_url, branch)
+            }
+        };
         match self.executor.exec(server, "", &sync_cmd, 600).await {
             Ok(r) => {
                 logs.push_str(&format!(
@@ -2028,6 +2065,20 @@ mod tests {
         let result = trim_out(&short);
         assert_eq!(result, short);
         assert_eq!(result.len(), 1000);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn header_auth_never_puts_token_in_url_or_config() {
+        let clean = git_clone_url("bobdivx/devforge", None);
+        assert_eq!(clean, "https://github.com/bobdivx/devforge.git");
+        let cmd = git_sync_command_header_auth("/data/w", &clean, "main", "ghs_ephemeral123");
+        assert!(!cmd.contains("ghs_ephemeral123"));
+        assert!(!cmd.contains("x-access-token:"));
+        assert!(cmd.contains("GIT_CONFIG_KEY_0=http.https://github.com/.extraheader"));
+        assert!(cmd.contains("remote set-url origin 'https://github.com/bobdivx/devforge.git'"));
+        // Le PAT historique garde l'URL avec token (comportement inchangé).
+        assert!(git_clone_url("bobdivx/devforge", Some("ghp_x")).contains("x-access-token:ghp_x@"));
     }
 
     #[test]

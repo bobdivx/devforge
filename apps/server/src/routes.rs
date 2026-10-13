@@ -1472,6 +1472,8 @@ pub(crate) async fn run_real_deploy(
             .flatten()
             .map(|(t,)| crate::secret_box::open_compat(&t))
             .filter(|t| !t.trim().is_empty());
+    // GitHub App : token d'installation restreint au dépôt si le projet est lié.
+    let deploy_tok = crate::github_auth::deploy_token(state, &project.uuid, token).await;
 
     match crate::project_oidc::sync_project_oidc_client(&state.pool, project, true).await {
         Ok(true) => {
@@ -1538,7 +1540,8 @@ pub(crate) async fn run_real_deploy(
         docker_build_context: project.docker_build_context.clone(),
         publish_directory: project.publish_directory.clone(),
         is_static: project.is_static != 0,
-        github_token: token,
+        github_token: deploy_tok.token,
+        github_token_ephemeral: deploy_tok.ephemeral,
         env_file,
         proxy_labels: proxy_labels_for_project(state, project).await,
         gpu_nvidia: project.gpu_nvidia != 0,
@@ -2837,6 +2840,8 @@ async fn execute_claimed_run_inner(
         Some(uuid) if spec_turn => match state.llm_for_spec_worker(&uuid).await {
             Some((llm, mode)) => {
                 let token = crate::user_prefs::github_token(&state.pool, &uuid).await;
+                let token =
+                    crate::github_auth::project_token(&state, &run.project_uuid, token).await;
                 devforge_github::with_token(
                     &token,
                     state.agent.handle_with_provider(
@@ -2871,6 +2876,7 @@ async fn execute_claimed_run_inner(
         Some(uuid) => {
             let (llm, mode) = state.llm_for_agents(&uuid).await;
             let token = crate::user_prefs::github_token(&state.pool, &uuid).await;
+            let token = crate::github_auth::project_token(&state, &run.project_uuid, token).await;
             devforge_github::with_token(
                 &token,
                 state.agent.handle_with_provider(
