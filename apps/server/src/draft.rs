@@ -555,10 +555,38 @@ pub fn validate(
             if st.behind > 1 { "s" } else { "" }
         )));
     }
+    commit_files(workdir, &st.files, message, author)?;
+    let dest = format!("HEAD:refs/heads/{branch}");
+    git(workdir, &["push", "--quiet", push_url, &dest]).map_err(|e| {
+        let m = redact(&e.0);
+        if m.contains("non-fast-forward") || m.contains("rejected") || m.contains("fetch first") {
+            err("GitHub a avancé pendant ce temps. Mets à jour depuis GitHub, puis valide à nouveau.")
+        } else {
+            err(format!("Envoi sur GitHub impossible : {m}"))
+        }
+    })?;
+    let _ = git(workdir, &["update-ref", &remote_ref(branch), "HEAD"]);
+    let sha = git(workdir, &["rev-parse", "--short=12", "HEAD"])?
+        .trim()
+        .to_string();
+    Ok(Validated {
+        sha,
+        files: st.files.len(),
+        branch: branch.to_string(),
+    })
+}
+
+/// Indexe uniquement `files` (bruit exclu) et crée un commit. `true` si un commit a été créé.
+fn commit_files(
+    workdir: &Path,
+    files: &[DraftFile],
+    message: &str,
+    author: (&str, &str),
+) -> R<bool> {
     ensure_local_excludes(workdir);
     let gd = git_dir(workdir)?;
     let mut spec = Vec::new();
-    for f in &st.files {
+    for f in files {
         spec.extend_from_slice(f.path.as_bytes());
         spec.push(0);
         if let Some(old) = &f.old_path {
@@ -596,24 +624,109 @@ pub fn validate(
     }
     let _ = std::fs::remove_file(&spec_path);
     let _ = std::fs::remove_file(&msg_path);
-    let dest = format!("HEAD:refs/heads/{branch}");
-    git(workdir, &["push", "--quiet", push_url, &dest]).map_err(|e| {
-        let m = redact(&e.0);
-        if m.contains("non-fast-forward") || m.contains("rejected") || m.contains("fetch first") {
-            err("GitHub a avancé pendant ce temps. Mets à jour depuis GitHub, puis valide à nouveau.")
-        } else {
-            err(format!("Envoi sur GitHub impossible : {m}"))
+    Ok(staged)
+}
+
+/// Résultat d'« Appliquer » : envoyé, ou conflit réel (le brouillon est remis tel quel).
+#[derive(Debug)]
+pub enum Applied {
+    Pushed(Validated),
+    Conflict(String),
+}
+
+/// « Appliquer » : commit local, rattrapage automatique de GitHub (rebase), push.
+/// En cas de conflit réel, tout est annulé et les fichiers restent en local.
+pub fn apply(
+    workdir: &Path,
+    branch: &str,
+    push_url: &str,
+    message: &str,
+    author: (&str, &str),
+) -> R<Applied> {
+    let message = message.trim();
+    let message = if message.is_empty() {
+        "fix: correction DevForge"
+    } else {
+        message
+    };
+    let st = status(workdir, branch, Some(push_url));
+    if !st.available {
+        return Err(err(st.reason.unwrap_or_default()));
+    }
+    if !st.dirty && st.ahead == 0 {
+        return Err(err("Rien à appliquer : aucune correction en attente."));
+    }
+    let before = git(workdir, &["rev-parse", "HEAD"])?.trim().to_string();
+    let committed = if st.dirty {
+        commit_files(workdir, &st.files, message, author)?
+    } else {
+        false
+    };
+    let name = format!("user.name={}", author.0);
+    let email = format!("user.email={}", author.1);
+    let undo = |reason: String| -> R<Applied> {
+        let _ = git(workdir, &["rebase", "--abort"]);
+        if committed {
+            let _ = git(workdir, &["reset", "--quiet", "--mixed", &before]);
         }
-    })?;
-    let _ = git(workdir, &["update-ref", &remote_ref(branch), "HEAD"]);
-    let sha = git(workdir, &["rev-parse", "--short=12", "HEAD"])?
-        .trim()
-        .to_string();
-    Ok(Validated {
-        sha,
-        files: st.files.len(),
-        branch: branch.to_string(),
-    })
+        Ok(Applied::Conflict(reason))
+    };
+    for attempt in 0..2 {
+        if attempt > 0 {
+            if fetch(workdir, branch, Some(push_url)).is_err() {
+                return Err(err("GitHub injoignable, réessaie dans un instant."));
+            }
+        }
+        if has_remote_ref(workdir, branch)
+            && count(workdir, &format!("HEAD..{}", remote_ref(branch))) > 0
+        {
+            let r = remote_ref(branch);
+            if git(
+                workdir,
+                &[
+                    "-c",
+                    &name,
+                    "-c",
+                    &email,
+                    "rebase",
+                    "--quiet",
+                    "--autostash",
+                    &r,
+                ],
+            )
+            .is_err()
+            {
+                return undo(
+                    "Le code a changé entre-temps au même endroit que cette correction. Elle ne peut pas être appliquée telle quelle.".into(),
+                );
+            }
+        }
+        let dest = format!("HEAD:refs/heads/{branch}");
+        match git(workdir, &["push", "--quiet", push_url, &dest]) {
+            Ok(_) => {
+                let _ = git(workdir, &["update-ref", &remote_ref(branch), "HEAD"]);
+                let sha = git(workdir, &["rev-parse", "HEAD"])?.trim().to_string();
+                return Ok(Applied::Pushed(Validated {
+                    sha,
+                    files: st.files.len(),
+                    branch: branch.to_string(),
+                }));
+            }
+            Err(e) => {
+                let m = redact(&e.0);
+                let race = m.contains("non-fast-forward")
+                    || m.contains("rejected")
+                    || m.contains("fetch first");
+                if !race || attempt == 1 {
+                    if committed {
+                        let _ = git(workdir, &["reset", "--quiet", "--mixed", "HEAD~1"]);
+                    }
+                    return Err(err(format!("Envoi impossible : {m}")));
+                }
+            }
+        }
+    }
+    unreachable!()
 }
 
 /* ---------------- Sauvegardes ---------------- */

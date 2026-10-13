@@ -65,6 +65,9 @@ fn token_after(content: &str, marker: &str) -> Option<String> {
 /// Nature d'un run d'après son message déclencheur (+ déploiement visé pour une réparation).
 pub fn classify(content: &str) -> (&'static str, Option<String>) {
     let c = content.trim_start();
+    if c.starts_with(crate::correction::REDO_PREFIX) {
+        return ("repair", None);
+    }
     if c.contains("AUTO-RÉPARATION") {
         return ("repair", token_after(c, "Le déploiement "));
     }
@@ -130,7 +133,12 @@ pub fn touched_by_run(
 }
 
 /// Appelé en fin de run : attribue les fichiers touchés. Best effort, jamais bloquant pour le run.
-pub async fn record_run(state: &AppState, run: &crate::agent_runs::RunRow, tools_json: &str) {
+pub async fn record_run(
+    state: &AppState,
+    run: &crate::agent_runs::RunRow,
+    tools_json: &str,
+    reply: &str,
+) {
     let Ok(Some(project)) = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1")
         .bind(&run.project_uuid)
         .fetch_optional(&state.pool)
@@ -179,7 +187,7 @@ pub async fn record_run(state: &AppState, run: &crate::agent_runs::RunRow, tools
     }
     let (kind, dep) = classify(&run.content);
     let now = crate::state::now_str();
-    for path in touched {
+    for path in touched.iter() {
         let _ = sqlx::query(
             r#"INSERT INTO draft_origins (project_uuid, path, run_uuid, agent_uuid, agent_name, kind, deployment_uuid, recorded_at)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -198,6 +206,8 @@ pub async fn record_run(state: &AppState, run: &crate::agent_runs::RunRow, tools
         .execute(&state.pool)
         .await;
     }
+    crate::correction::note_proposed(state, &run.project_uuid, kind, &agent_name, reply, &touched)
+        .await;
 }
 
 pub async fn load(pool: &PgPool, project_uuid: &str) -> HashMap<String, Origin> {

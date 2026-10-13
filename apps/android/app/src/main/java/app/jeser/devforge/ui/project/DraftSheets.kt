@@ -242,7 +242,7 @@ fun WorkspaceSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DraftSheetFrame(onDismiss: () -> Unit, busy: Boolean = false, modal: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+internal fun DraftSheetFrame(onDismiss: () -> Unit, busy: Boolean = false, modal: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     val body: @Composable ColumnScope.() -> Unit = {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp),
@@ -260,7 +260,7 @@ private fun DraftSheetFrame(onDismiss: () -> Unit, busy: Boolean = false, modal:
 }
 
 @Composable
-private fun ErrorBox(text: String?) {
+internal fun ErrorBox(text: String?) {
     text ?: return
     Surface(color = DfColors.Danger.copy(alpha = .1f), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, DfColors.Danger.copy(alpha = .3f))) {
         Text(text, color = DfColors.Danger, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().padding(12.dp))

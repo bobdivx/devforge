@@ -14,6 +14,7 @@ mod backup_routes;
 mod cluster_routes;
 mod cluster_store;
 mod control_pg;
+mod correction;
 mod cron_routes;
 mod db;
 mod deploy_queue;
@@ -326,6 +327,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    {
+        let state_c = state.clone();
+        tokio::spawn(async move {
+            correction::run_loop(state_c).await;
+        });
+    }
+
     update_routes::spawn_auto_update(state.clone());
 
     // Advertise agent tools on the local MCP server surface.
@@ -358,6 +366,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(actions_routes::router())
         .merge(git_routes::router())
         .merge(draft_routes::router())
+        .merge(correction::router())
         .merge(group_routes::router())
         .merge(domain_catalog::router())
         .merge(update_routes::router())

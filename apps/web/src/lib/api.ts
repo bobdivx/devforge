@@ -414,6 +414,29 @@ export type AgentTriggerConfig = {
 };
 
 /** Origine d'un fichier / d'un brouillon : quel run d'agent l'a écrit. */
+
+export type CorrectionStep = { key: string; label: string; state: 'done' | 'active' | 'todo' | 'failed' | 'skipped' | string };
+export type CorrectionReport = { broke: string; changed: string; files: string[]; test_ok: boolean | null; test: string; todo: string };
+export type Correction = {
+  id: string;
+  stage: 'testing' | 'proposed' | 'conflict' | 'deploying' | 'live' | 'failed' | 'rejected' | 'archived' | string;
+  status_label: string;
+  persona: string;
+  summary: string;
+  files: string[];
+  message?: string;
+  note?: string;
+  tested?: boolean;
+  steps: CorrectionStep[];
+  report: CorrectionReport;
+  sha?: string | null;
+  backup_id?: string | null;
+  restorable?: boolean;
+  run_uuid?: string | null;
+  updated_at?: string | null;
+};
+export type CorrectionsState = { ok: boolean; current: Correction | null; history: Correction[] };
+
 export type DraftOriginKind = 'repair' | 'feature' | 'routine' | 'manual' | 'sync';
 export type DraftOrigin = {
   kind: DraftOriginKind | string;
@@ -2161,6 +2184,22 @@ export const api = {
       { method: 'POST', body: '{}' },
     ),
   drafts: () => request<{ ok: boolean; drafts: DraftSummary[] }>(`/drafts`),
+  corrections: (uuid: string) => request<CorrectionsState>(`/projects/${encodeURIComponent(uuid)}/corrections`),
+  correctionApply: (uuid: string) =>
+    request<{ ok: boolean; deployed?: boolean; stage?: string; conflict?: boolean; message?: string; can_redo?: boolean }>(
+      `/projects/${encodeURIComponent(uuid)}/corrections/apply`,
+      { method: 'POST', body: JSON.stringify({ confirm: true }) },
+    ),
+  correctionReject: (uuid: string) =>
+    request<{ ok: boolean; backup_id: string }>(`/projects/${encodeURIComponent(uuid)}/corrections/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+    }),
+  correctionRedo: (uuid: string) =>
+    request<{ ok: boolean }>(`/projects/${encodeURIComponent(uuid)}/corrections/redo`, {
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+    }),
 
   projectGitDiscard: (uuid: string) =>
     request<{ ok: boolean; message?: string; output?: string }>(

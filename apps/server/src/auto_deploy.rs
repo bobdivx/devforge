@@ -134,12 +134,17 @@ async fn project_is_behind(state: &AppState, project: &Project) -> Option<(u64, 
                         .to_string()
                 })
                 .unwrap_or_else(|| "Auto-deploy (poll)".into());
-            let tip_sha = c
-                .commits
-                .last()
-                .map(|c| c.sha.clone())
+            // La comparaison GitHub tronque la liste des commits (250 max) : la pointe réelle
+            // de la branche est head_sha ; le dernier commit listé n'est qu'un repli.
+            let tip_sha = Some(c.head_sha.clone())
                 .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| c.head_sha.clone());
+                .or_else(|| {
+                    c.commits
+                        .last()
+                        .map(|c| c.sha.clone())
+                        .filter(|s| !s.is_empty())
+                })
+                .unwrap_or_default();
             Some((c.ahead_by, tip, tip_sha))
         }
         Ok(_) => None,
@@ -160,6 +165,11 @@ pub(crate) async fn deploy_project(
     message: &str,
     target_sha: Option<&str>,
 ) {
+    // Une correction de Rustine est en cours en local : pas de remise à zéro du dossier de travail.
+    if crate::correction::has_open_repair(&state.pool, &project.uuid).await {
+        tracing::info!(project = %project.name, "auto-deploy: correction en cours, déploiement reporté");
+        return;
+    }
     let dep_uuid = new_uuid();
     let now = now_str();
 

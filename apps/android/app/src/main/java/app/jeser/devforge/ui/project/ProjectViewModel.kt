@@ -90,6 +90,8 @@ data class ProjectUiState(
     val openUrl: String? = null,
     /** Brouillon : changements locaux pas encore sur GitHub. */
     val draft: DraftStatus? = null,
+    val corrections: app.jeser.devforge.data.CorrectionsState? = null,
+    val correctionConflict: String? = null,
     val draftDiff: List<DraftDiffFile>? = null,
     val draftDiffError: String? = null,
     /** Action brouillon en cours : validate, discard, revert, update, restore. */
@@ -158,6 +160,7 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
                 launch { runCatching { api.git(uuid) }.onSuccess { g -> _state.update { it.copy(git = g) } } }
                 launch { runCatching { api.preview(uuid) }.onSuccess { pv -> _state.update { it.copy(preview = pv) } } }
                 launch { refreshDraft(fetch = true) }
+                launch { refreshCorrections() }
                 val agents = api.agents(uuid)
                 val coord = agents.firstOrNull { it.role == "coordinator" }
                 _state.update { it.copy(coordinatorUuid = coord?.uuid, agents = agents) }
@@ -229,7 +232,7 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
                         _state.update { s -> if (s.project == p) s else s.copy(project = p) }
                     }
                 }
-                if (tick % 2 == 0) refreshDraft()
+                if (tick % 2 == 0) { refreshDraft(); refreshCorrections() }
                 if (tick % 6 == 0) {
                     runCatching { api.git(uuid) }.onSuccess { g -> _state.update { s -> if (s.git == g) s else s.copy(git = g) } }
                     runCatching { api.agents(uuid) }.onSuccess { a -> _state.update { s -> if (s.agents == a) s else s.copy(agents = a) } }
@@ -647,5 +650,45 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
     }
 
     fun undoShown() = _state.update { it.copy(undo = null) }
+    private suspend fun refreshCorrections() {
+        runCatching { api.corrections(uuid) }.onSuccess { c -> _state.update { s -> if (s.corrections == c) s else s.copy(corrections = c) } }
+    }
+
+    fun openCorrections() {
+        _state.update { it.copy(correctionConflict = null) }
+        openDraft()
+        viewModelScope.launch { refreshCorrections() }
+    }
+
+    fun applyCorrection(onDone: () -> Unit) = draftAction("apply") {
+        val r = api.correctionApply(uuid)
+        if (r.conflict) {
+            _state.update { it.copy(correctionConflict = r.message ?: "Le code a changé au même endroit.") }
+        } else {
+            _state.update { it.copy(notice = if (r.deployed) "Correction appliquée · mise en ligne en cours" else "Correction envoyée · pas de nouvelle tentative automatique") }
+            onDone()
+        }
+        refreshDraft(); refreshCorrections()
+    }
+
+    fun rejectCorrection(onDone: () -> Unit) = draftAction("reject") {
+        api.correctionReject(uuid)
+        _state.update { it.copy(notice = "Correction rejetée · récupérable 7 jours") }
+        refreshDraft(); refreshCorrections()
+        onDone()
+    }
+
+    fun redoCorrection(onDone: () -> Unit) = draftAction("redo") {
+        api.correctionRedo(uuid)
+        _state.update { it.copy(correctionConflict = null, notice = "Rustine refait la correction") }
+        refreshDraft(); refreshCorrections()
+        onDone()
+    }
+
+    fun restoreCorrection(backupId: String) = draftAction("restore") {
+        api.draftRestore(uuid, backupId)
+        refreshDraft(); refreshCorrections()
+    }
+
     fun draftValidatedSeen() = _state.update { it.copy(draftValidated = null) }
 }

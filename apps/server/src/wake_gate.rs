@@ -324,24 +324,33 @@ pub async fn after_wake(
         .await;
         return;
     }
-    let run: Option<(String,)> = sqlx::query_as(
-        r#"SELECT uuid FROM agent_runs WHERE project_uuid = $1 AND agent_uuid = $2
-             AND status IN ('pending', 'queued', 'running')
-           ORDER BY created_at DESC LIMIT 1"#,
+    // Le run peut déjà être terminé (tour court ou attendu par l'appelant) : on prend le run
+    // de l'agent créé depuis le réveil, quel que soit son statut, sinon le dernier en cours.
+    let since = gate.log_id.map(|id| id).unwrap_or(0);
+    let run: Option<(String, String)> = sqlx::query_as(
+        r#"SELECT r.uuid, r.status FROM agent_runs r
+           WHERE r.project_uuid = $1 AND r.agent_uuid = $2
+             AND (r.status IN ('pending', 'queued', 'running')
+                  OR r.created_at >= COALESCE((SELECT to_char(l.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS') FROM agent_wake_log l WHERE l.id = $3), ''))
+           ORDER BY r.created_at DESC LIMIT 1"#,
     )
     .bind(project_uuid)
     .bind(agent_uuid)
+    .bind(since)
     .fetch_optional(pool)
     .await
     .ok()
     .flatten();
     match (run, gate.log_id) {
-        (Some((run_uuid,)), Some(id)) => {
+        (Some((run_uuid, status)), Some(id)) => {
             let _ = sqlx::query("UPDATE agent_wake_log SET run_uuid = $1 WHERE id = $2")
                 .bind(&run_uuid)
                 .bind(id)
                 .execute(pool)
                 .await;
+            if !matches!(status.as_str(), "pending" | "queued" | "running") {
+                finish_by_run(pool, &run_uuid).await;
+            }
         }
         // Réveil dédupliqué par marqueur ou agent désactivé : rien ne tourne.
         _ => {

@@ -19,6 +19,11 @@ object Notifier {
     const val CHANNEL_ALERTS = "alerts"
     const val CHANNEL_WAITING = "waiting"
     const val EXTRA_PROJECT = "project_uuid"
+    const val EXTRA_OPEN = "open"
+    const val OPEN_CORRECTIONS = "corrections"
+
+    /** Réglage qui couvre un type d'événement (les 3 étapes de correction partagent un réglage). */
+    fun settingKey(kind: String): String = if (kind.startsWith("correction_") || kind == "fix_ready") NotifKind.Corrections.key else kind
 
     fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -40,15 +45,16 @@ object Notifier {
         return NotificationManagerCompat.from(context).areNotificationsEnabled()
     }
 
-    fun openProjectIntent(context: Context, projectUuid: String): PendingIntent {
+    fun openProjectIntent(context: Context, projectUuid: String, open: String? = null): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
-            action = "app.jeser.devforge.OPEN_PROJECT.$projectUuid"
+            action = "app.jeser.devforge.OPEN_PROJECT.$projectUuid${open?.let { ".$it" } ?: ""}"
             putExtra(EXTRA_PROJECT, projectUuid)
+            open?.let { putExtra(EXTRA_OPEN, it) }
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         return PendingIntent.getActivity(
             context,
-            projectUuid.hashCode(),
+            (projectUuid + (open ?: "")).hashCode(),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -56,18 +62,18 @@ object Notifier {
 
     fun show(context: Context, events: List<InboxEvent>) {
         val settings = PrefsNotifSettings(context)
-        val wanted = events.filter { settings.enabled(it.kind) }
+        val wanted = events.filter { settings.enabled(settingKey(it.kind)) }
         if (wanted.isEmpty() || !canNotify(context)) return
         val nm = NotificationManagerCompat.from(context)
         for (e in wanted.take(6)) {
-            val channel = if (e.kind == "spec_waiting") CHANNEL_WAITING else CHANNEL_ALERTS
+            val channel = if (e.kind == "spec_waiting" || e.kind == "fix_ready" || e.kind == "correction_live") CHANNEL_WAITING else CHANNEL_ALERTS
             val n = NotificationCompat.Builder(context, channel)
                 .setSmallIcon(R.drawable.ic_stat_devforge)
                 .setColor(0xFFA78BFA.toInt())
                 .setContentTitle(e.title)
                 .setContentText(e.body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(e.body))
-                .setContentIntent(openProjectIntent(context, e.projectUuid))
+                .setContentIntent(openProjectIntent(context, e.projectUuid, if (e.kind.startsWith("correction_") || e.kind == "fix_ready") OPEN_CORRECTIONS else null))
                 .setAutoCancel(true)
                 .setCategory(if (channel == CHANNEL_ALERTS) NotificationCompat.CATEGORY_ERROR else NotificationCompat.CATEGORY_REMINDER)
                 .setGroup("devforge")

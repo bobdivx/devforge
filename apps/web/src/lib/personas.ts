@@ -74,6 +74,7 @@ export function personaForAgent(agent: ProjectAgent): PersonaKey | null {
   if (agent.role === 'coordinator') return 'braise';
   if (agent.kind === 'subagent' || agent.role === 'worker') return 'braise';
   if (agent.role === 'reviewer') return 'plume';
+  if (agent.role === 'repair') return 'rustine';
   if (PHARE_ROLES.has(agent.role)) return 'phare';
   const isRoutine = agent.trigger_type === 'cron' || agent.trigger_type === 'event';
   if (isRoutine) {

@@ -11,8 +11,8 @@ import { PreviewModal } from './workspace/PreviewModal';
 import { WorkspaceAtelier } from './workspace/WorkspaceAtelier';
 import { FadeIn, HubGrid, HubTile, Modal, Switch, Button, Spinner } from './ui';
 import type { Project } from '../lib/api';
-import { ChevronLeft, FileCode2, FileDiff, MessageSquare, MonitorPlay } from 'lucide-preact';
-import { AdviceChip, DraftModal, filesLabel, relativeFr, useDraft } from './DraftPanel';
+import { ChevronLeft, FileCode2, MessageSquare, Wrench, MonitorPlay } from 'lucide-preact';
+import { CorrectionsModal, correctionsStatus, useCorrections } from './CorrectionsPanel';
 
 type WorkspaceView = 'hub' | 'chat';
 
@@ -21,7 +21,7 @@ function readWorkspaceQuery(): { view: WorkspaceView; draft: boolean } {
   const q = new URLSearchParams(window.location.search);
   // Lien direct vers une discussion (?agent=…) : on ouvre le fil, pas la grille.
   const view: WorkspaceView = q.get('view') === 'chat' || q.has('agent') ? 'chat' : 'hub';
-  return { view, draft: q.get('draft') === '1' };
+  return { view, draft: q.get('corrections') === '1' || q.get('draft') === '1' };
 }
 
 function setQuery(mutate: (u: URL) => void) {
@@ -47,7 +47,7 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
   const [draftOpen, setDraftOpen] = useState(initialQuery.draft);
   const [filesOpen, setFilesOpen] = useState(false);
   const [previewInfoOpen, setPreviewInfoOpen] = useState(false);
-  const { draft, refresh: refreshDraft } = useDraft(projectUuid);
+  const { data: corrections, refresh: refreshCorrections } = useCorrections(projectUuid);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [mobilePane, setMobilePane] = useState<'chat' | 'atelier'>('chat');
   const [atelierTab, setAtelierTab] = useState<'preview' | 'files'>('preview');
@@ -207,45 +207,36 @@ export function ProjectWorkspace({ projectUuid, project, builderMode, builderAge
   }
 
   const draftModal = (
-    <DraftModal
+    <CorrectionsModal
       open={draftOpen}
       onClose={() => {
         setDraftOpen(false);
-        setQuery((u) => u.searchParams.delete('draft'));
+        setQuery((u) => u.searchParams.delete('corrections'));
       }}
       uuid={projectUuid}
       name={project?.name ?? 'cette app'}
-      draft={draft}
-      onChanged={() => refreshDraft(true)}
+      data={corrections}
+      onChanged={async () => {
+        await refreshCorrections();
+      }}
     />
   );
 
   if (view === 'hub') {
     const running = previewStatus === 'running';
-    const draftSubtitle = draft?.dirty ? (
-      <div class="mt-1 flex min-w-0 flex-col items-center gap-1">
-        <span class="max-w-full truncate text-[11px] text-[var(--color-warn)]">
-          {filesLabel(draft.count)}
-          {relativeFr(draft.updated_at) ? ` · ${relativeFr(draft.updated_at)}` : ''}
-        </span>
-        <AdviceChip advice={draft.advice} class="max-w-full text-[10.5px]" />
-      </div>
-    ) : (
-      <div class="mt-1 truncate text-[11px] text-[var(--color-ink-muted)]">
-        {draft?.backups?.length ? 'Vide · sauvegarde restaurable' : 'Rien en attente'}
-      </div>
-    );
+    const cst = correctionsStatus(corrections);
+    const draftSubtitle = <div class={cn('mt-1 max-w-full truncate text-[11px]', cst.tone)}>{cst.text}</div>;
     return (
       <FadeIn>
         <HubGrid cols={4}>
           <HubTile
             index={0}
-            title="Brouillon"
-            icon={<FileDiff size={26} aria-hidden />}
+            title="Corrections"
+            icon={<Wrench size={26} aria-hidden />}
             subtitle={draftSubtitle}
             onClick={() => {
               setDraftOpen(true);
-              setQuery((u) => u.searchParams.set('draft', '1'));
+              setQuery((u) => u.searchParams.set('corrections', '1'));
             }}
           />
           <HubTile

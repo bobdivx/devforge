@@ -35,7 +35,7 @@ import { ProjectAgentsPanel, type ChatChip } from './ProjectAgentsPanel';
 import { PersonaAvatar } from './personas/PersonaAvatar';
 import { PreviewModal } from './workspace/PreviewModal';
 import { StatusBadge } from './StatusBadge';
-import { DraftModal, DraftStatusLine, draftStatusText, filesLabel, useDraft } from './DraftPanel';
+import { CorrectionsModal, correctionsStatus, useCorrections } from './CorrectionsPanel';
 import { PreviewPane } from './workspace/WorkspaceAtelier';
 import type { PreviewServerStatus } from './workspace/WorkspaceTopBar';
 import { Button, FadeIn, HubGrid, HubTile, Modal, Spinner, useToast } from './ui';
@@ -243,9 +243,10 @@ export function ProjectHome({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deployBusy, setDeployBusy] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const { draft, refresh: refreshDraft } = useDraft(uuid);
+  const { data: corrections, refresh: refreshCorrections } = useCorrections(uuid);
+  const pending = corrections?.current ?? null;
   const [draftOpen, setDraftOpen] = useState(
-    () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('draft') === '1',
+    () => typeof window !== 'undefined' && (new URLSearchParams(window.location.search).get('corrections') === '1' || new URLSearchParams(window.location.search).get('draft') === '1'),
   );
 
   const latest = deployments[0] ?? null;
@@ -380,7 +381,7 @@ export function ProjectHome({
       key: 'health',
       label: '🩺 Est-ce que tout va bien ?',
       // Bilan en lecture seule : la puce ne doit jamais déclencher de modification.
-      send: 'Est-ce que tout va bien ? Fais juste un bilan rapide (app en ligne, dernière mise en ligne, brouillon), sans rien modifier.',
+      send: 'Est-ce que tout va bien ? Fais juste un bilan rapide (app en ligne, dernière mise en ligne, corrections en attente), sans rien modifier.',
     },
     {
       key: 'design',
@@ -525,11 +526,20 @@ export function ProjectHome({
               name: PERSONAS.braise.name,
               title: braiseTitle(project?.name),
               tagline: PERSONAS.braise.tagline,
-              status: draftStatusText(draft) ? <DraftStatusLine draft={draft} onOpen={() => setDraftOpen(true)} /> : undefined,
+              status: pending ? (
+                <button
+                  type="button"
+                  data-testid="correction-status-line"
+                  class={cn('df-tap-skip df-hit -mx-1 flex h-4 max-w-full items-center gap-1.5 rounded px-1 text-left text-xs leading-4 hover:underline', correctionsStatus(corrections).tone)}
+                  onClick={() => setDraftOpen(true)}
+                >
+                  <span class="truncate">Correction · {correctionsStatus(corrections).text}</span>
+                </button>
+              ) : undefined,
               avatar: <PersonaAvatar persona="braise" size={38} />,
               smallAvatar: <PersonaAvatar persona="braise" size={26} />,
               placeholder: 'Dis à Braise ce que tu veux…',
-              emptyText: `Salut 👋 Je suis Braise. Dis-moi ce que tu veux changer dans ${name} : je prépare un plan, je construis en brouillon et je te montre l’aperçu. Rien ne part en ligne sans ton OK.`,
+              emptyText: `Salut 👋 Je suis Braise. Dis-moi ce que tu veux changer dans ${name} : je prépare un plan, je construis, je teste et je te montre l’aperçu. Rien ne part en ligne sans ton OK.`,
               chips,
             }}
           />
@@ -543,7 +553,7 @@ export function ProjectHome({
               <div class="inline-flex rounded-full border border-[var(--color-line)] p-0.5" role="tablist">
                 {(
                   [
-                    ['draft', 'Brouillon'],
+                    ['draft', 'En test'],
                     ['live', 'En ligne'],
                   ] as const
                 ).map(([key, label]) => (
@@ -710,11 +720,9 @@ export function ProjectHome({
               ) : null}
             </p>
           )}
-          {draft?.dirty ? (
+          {pending ? (
             <div class="rounded-xl border border-amber-500/25 bg-amber-500/[0.07] p-3">
-              <p>
-                Le brouillon ({filesLabel(draft.count)}) n’est pas encore sur GitHub : il ne sera pas inclus.
-              </p>
+              <p>Une correction attend encore : elle ne sera pas incluse.</p>
               <button
                 type="button"
                 class="mt-1 inline-flex min-h-[44px] items-center text-sm font-semibold text-[var(--color-accent)] hover:underline sm:min-h-0"
@@ -723,39 +731,32 @@ export function ProjectHome({
                   setDraftOpen(true);
                 }}
               >
-                Valider le brouillon d’abord →
+                Voir la correction →
               </button>
             </div>
-          ) : (
-            <p>Les changements du brouillon qui ne sont pas encore sur GitHub ne seront pas inclus.</p>
-          )}
+          ) : null}
         </div>
       </Modal>
 
-      <DraftModal
+      <CorrectionsModal
         open={draftOpen}
         onClose={() => {
           setDraftOpen(false);
           const u = new URL(window.location.href);
-          if (u.searchParams.has('draft')) {
+          if (u.searchParams.has('draft') || u.searchParams.has('corrections')) {
             u.searchParams.delete('draft');
+            u.searchParams.delete('corrections');
             window.history.replaceState(null, '', u.toString());
           }
         }}
         uuid={uuid}
         name={name}
-        draft={draft}
-        onChanged={() => refreshDraft()}
-        onDeployNow={
-          canDeploy
-            ? async () => {
-                await api.createDeployment(uuid, { git_message: 'Mise en ligne après validation du brouillon' });
-                toast.push({ title: 'Mise en ligne lancée', detail: 'Reconstruction depuis GitHub…', tone: 'info' });
-                const list = await api.deployments(uuid);
-                onDeployments(list.data ?? []);
-              }
-            : undefined
-        }
+        data={corrections}
+        onChanged={async () => {
+          await refreshCorrections();
+          const list = await api.deployments(uuid);
+          onDeployments(list.data ?? []);
+        }}
       />
 
       <AdvancedSettingsModal
