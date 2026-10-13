@@ -247,6 +247,7 @@ fun ProjectScreen(
                             showBraise = showBraise,
                             onBraise = { sheet = ProjectSheet.Chat },
                             onWorkspace = openCorrections,
+                            onPreview = actions.onOpenPreview,
                             onDeploys = { sheet = ProjectSheet.Deploys },
                             onSettings = { sheet = ProjectSheet.Details },
                         )
@@ -581,6 +582,7 @@ fun ProjectTiles(
     onWorkspace: () -> Unit,
     onDeploys: () -> Unit,
     onSettings: () -> Unit,
+    onPreview: () -> Unit = {},
 ) {
     val draft = state.draft
     val latest = state.latest
@@ -594,6 +596,9 @@ fun ProjectTiles(
         val alert = cur != null && cur.stage in setOf("proposed", "conflict", "failed")
         add(TileSpec("corrections", "Corrections", correctionsTileText(state.corrections), Icons.Filled.Build,
             cur?.let { correctionTone(it.stage) } ?: DfColors.InkMuted, alert, onWorkspace))
+        val running = state.preview?.running == true
+        add(TileSpec("preview", "Aperçu", if (state.previewStarting) "Démarrage…" else if (running) "En marche" else "Arrêté",
+            Icons.Filled.PlayArrow, if (running) DfColors.Ok else DfColors.InkMuted, false, onPreview))
         val (dl, dc) = latest?.let { deployLabel(it) } ?: ("Aucune" to DfColors.InkFaint)
         val when_ = latest?.let { relativeTime(it.createdAt) }?.takeIf { it.isNotEmpty() }
         add(TileSpec("deploys", "Déploiements", listOfNotNull(dl, when_).joinToString(" · "), Icons.Filled.History,
