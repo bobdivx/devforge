@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { api, type InstanceDomain } from '../lib/api';
 import { AcmeEmailTile } from './AcmeEmailTile';
 import { AppShell } from './AppShell';
+import { GithubAppSettingsPanel } from './GithubAppSettingsPanel';
 import { LlmProvidersPanel } from './LlmProvidersPanel';
 import { MemorySettingsPanel } from './MemorySettingsPanel';
 import {
@@ -583,6 +584,11 @@ function SettingsPageInner() {
               </form>
             )}
           </Card>
+          {isAdmin && (
+            <div class="mt-4">
+              <GithubAppSettingsPanel />
+            </div>
+          )}
         </FadeIn>
       )}
 

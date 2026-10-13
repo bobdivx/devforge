@@ -494,6 +494,38 @@ export type DraftSummary = {
   advice?: DraftAdvice | null;
 };
 
+/** GitHub App native (P1) : statut sans aucun secret. */
+export type GithubInstallation = {
+  installation_id: number;
+  account_login: string;
+  account_type: string;
+  repository_selection: string;
+  repositories: number;
+  suspended: boolean;
+  permissions: Record<string, string>;
+  missing_permissions: string[];
+};
+export type GithubAppStatus = {
+  ok: boolean;
+  configured: boolean;
+  app_id?: number;
+  slug?: string;
+  client_id?: string;
+  html_url?: string;
+  owner_login?: string;
+  owner_type?: string;
+  install_url?: string;
+  manage_url?: string;
+  required_permissions: Record<string, string>;
+  installations: GithubInstallation[];
+};
+export type GithubAppManifest = {
+  ok: boolean;
+  post_url: string;
+  manifest: Record<string, unknown>;
+  state: string;
+};
+
 export const api = {
   bootstrap: () => request<Bootstrap>('/bootstrap'),
   register: async (body: {
@@ -1402,6 +1434,13 @@ export const api = {
     request(`/projects/${projectUuid}/ports`, {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+  githubAppStatus: () => request<GithubAppStatus>('/github-app'),
+  githubAppManifest: (body: { org?: string; workflows?: boolean } = {}) =>
+    request<GithubAppManifest>('/github-app/manifest', { method: 'POST', body: JSON.stringify(body) }),
+  githubAppForget: () =>
+    request<{ ok: boolean; configured: boolean; manage_url?: string | null }>('/github-app', {
+      method: 'DELETE',
     }),
   githubStatus: () =>
     request<{

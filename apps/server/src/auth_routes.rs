@@ -1635,3 +1635,15 @@ mod session_cookie_tests {
         assert_eq!(session_from_cookie_header("other=df_abc"), None);
     }
 }
+
+/// Utilisateur depuis `Authorization: Bearer` ou, à défaut, le cookie de session
+/// (redirections navigateur depuis GitHub, sans en-tête).
+pub async fn user_from_bearer_or_cookie(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Option<UserRow>, (axum::http::StatusCode, Json<Value>)> {
+    let Some(token) = bearer_from(headers).or_else(|| session_cookie_from(headers)) else {
+        return Ok(None);
+    };
+    session_user(state, &token).await
+}

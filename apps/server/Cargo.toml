@@ -59,6 +59,9 @@ hmac = "0.12"
 subtle = "2.6"
 png = "0.18"
 
+[dev-dependencies]
+wiremock = "0.6"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 tray-icon = { version = "0.25", default-features = false, features = ["ksni"] }
 

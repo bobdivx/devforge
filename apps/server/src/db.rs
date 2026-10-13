@@ -1057,6 +1057,11 @@ pub async fn migrate_github_app(pool: &PgPool) -> Result<(), sqlx::Error> {
     ] {
         sqlx::query(sql).execute(pool).await?;
     }
+    // P1 : type du propriétaire (User/Organization) pour le lien de gestion GitHub.
+    let _ =
+        sqlx::query("ALTER TABLE github_app ADD COLUMN owner_type TEXT NOT NULL DEFAULT 'User'")
+            .execute(pool)
+            .await;
     // Échec toléré : colonne déjà présente.
     for (col, def) in [
         ("github_installation_id", "BIGINT"),
