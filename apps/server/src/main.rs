@@ -49,6 +49,7 @@ mod run_events;
 mod run_routes;
 mod runner_routes;
 mod runner_store;
+mod secret_box;
 mod security;
 mod spec_routes;
 mod sso;
