@@ -72,7 +72,6 @@ describe('Markdown riche (P5-01)', () => {
 
   it('sanitizeSvg retire scripts et gestionnaires', () => {
     const out = sanitizeSvg('<svg><script>x</script><rect onload="x" style="fill:url(javascript:x)" /><image href="https://e.x/a.png"/></svg>');
-    expect(out).not.toMatch(/script|onload|javascript/);
-    expect(out).toContain('href="https://e.x/a.png"');
+    expect(out).not.toMatch(/script|onload|javascript|image/);
   });
 });
