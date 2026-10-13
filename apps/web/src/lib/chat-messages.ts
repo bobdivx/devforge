@@ -33,13 +33,29 @@ export function isLocalId(id: string): boolean {
 /** Signature : longueur + dernier id + taille du dernier contenu + nb d'outils du dernier. */
 export function messagesSignature(messages: IdentifiedMessage[]): string {
   const last = messages[messages.length - 1];
+
+  // Réactions (P5-03) : une réaction ailleurs dans le fil doit se voir au rechargement.
+  // Using string concatenation in a loop to avoid intermediate array allocations and map calls
+  // which causes significant memory/CPU overhead on long lists.
+  let reactionsSig = '';
+  for (let i = 0; i < messages.length; i++) {
+    const r = messages[i].reactions;
+    if (r && r.length > 0) {
+      reactionsSig += i + ':';
+      for (let j = 0; j < r.length; j++) {
+        const x = r[j];
+        reactionsSig += x.emoji + x.count + (x.mine ? '*' : '');
+      }
+      reactionsSig += ',';
+    }
+  }
+
   return [
     messages.length,
     last?.id ?? '',
     last?.content.length ?? 0,
     last?.toolCalls?.length ?? 0,
-    // Réactions (P5-03) : une réaction ailleurs dans le fil doit se voir au rechargement.
-    messages.map((m) => (m.reactions ?? []).map((r) => `${r.emoji}${r.count}${r.mine ? '*' : ''}`).join('')).join(','),
+    reactionsSig,
   ].join('|');
 }
 
