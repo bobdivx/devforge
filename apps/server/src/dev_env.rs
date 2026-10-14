@@ -543,6 +543,8 @@ pub(crate) async fn run_dev_deploy(
             .flatten()
             .map(|(t,)| crate::secret_box::open_compat(&t))
             .filter(|t| !t.trim().is_empty());
+    // GitHub App : token d'installation restreint au dépôt si le projet est lié.
+    let deploy_tok = crate::github_auth::deploy_token(state, &project.uuid, token).await;
 
     // Mêmes variables que la prod (jamais loguées).
     let env_file = crate::routes::load_env_file_content(&state.pool, &project.uuid).await;
@@ -585,7 +587,8 @@ pub(crate) async fn run_dev_deploy(
         docker_build_context: project.docker_build_context.clone(),
         publish_directory: project.publish_directory.clone(),
         is_static: project.is_static != 0,
-        github_token: token,
+        github_token: deploy_tok.token,
+        github_token_ephemeral: deploy_tok.ephemeral,
         env_file,
         proxy_labels: Some(labels),
         gpu_nvidia: project.gpu_nvidia != 0,

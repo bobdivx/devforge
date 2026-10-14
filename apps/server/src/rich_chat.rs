@@ -756,6 +756,7 @@ impl ServerRoutineRunner {
         let owner = ctx.user_uuid.clone().unwrap_or_default();
         let (llm, mode) = state.llm_for_user(&owner).await;
         let gh = crate::user_prefs::github_token(&state.pool, &owner).await;
+        let gh = crate::github_auth::project_token(state, &cron.project_uuid, gh).await;
         let result = devforge_github::with_token(
             &gh,
             state

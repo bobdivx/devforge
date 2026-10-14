@@ -652,6 +652,7 @@ async fn remote(state: &AppState, user_uuid: &str, project: &Project) -> Option<
     if token.trim().is_empty() {
         token = state.github.instance_token().unwrap_or_default();
     }
+    let token = crate::github_auth::project_token(state, &project.uuid, token).await;
     Some(draft::token_url(repo, Some(&token)))
 }
 

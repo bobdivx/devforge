@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::{Arc, RwLock};
 
+pub mod app_auth;
 pub mod http;
 
 pub use http::HttpGitHubClient;

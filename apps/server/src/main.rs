@@ -28,6 +28,7 @@ mod draft_origin;
 mod draft_routes;
 mod git_routes;
 mod github_app_routes;
+mod github_auth;
 mod group_routes;
 mod infra_routes;
 mod infra_sqlite;
