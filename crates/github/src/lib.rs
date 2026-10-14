@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::sync::{Arc, RwLock};
 
 pub mod app_auth;
+pub mod checks;
 pub mod http;
 
 pub use http::HttpGitHubClient;

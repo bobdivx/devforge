@@ -2266,7 +2266,9 @@ pub async fn handle_push(
                 .execute(&state.pool)
                 .await;
 
-        let outcome = crate::routes::run_real_deploy(&state, &project, &dep_uuid).await;
+        // Relance GitHub (« Re-run ») : on déploie exactement le commit demandé.
+        let pin = payload.get("devforge_pin_sha").and_then(Value::as_str);
+        let outcome = crate::routes::run_real_deploy_at(&state, &project, &dep_uuid, pin).await;
         if outcome.cancelled {
             deployed.push(json!({
                 "project": project.uuid,

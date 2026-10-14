@@ -300,6 +300,7 @@ pub fn rerequest_as_push(event: &str, payload: &Value) -> Option<Value> {
         "repository": payload.get("repository")?,
         "installation": payload.get("installation"),
         "head_commit": { "id": sha, "message": "Relance demandée depuis GitHub" },
+        "devforge_pin_sha": sha,
     }))
 }
 

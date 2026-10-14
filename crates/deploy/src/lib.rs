@@ -139,6 +139,8 @@ pub struct DeployRequest {
     /// Token d'installation GitHub App éphémère : passé en en-tête HTTP à git,
     /// jamais écrit dans l'URL du remote ni dans `.git/config`.
     pub github_token_ephemeral: bool,
+    /// SHA exact à déployer (relance GitHub « Re-run ») ; `None` = tête de branche.
+    pub pin_sha: Option<String>,
     pub env_file: Option<String>,
     /// Labels Traefik (tous les hosts) appliqués au `docker run`.
     pub proxy_labels: Option<serde_json::Value>,
@@ -372,6 +374,18 @@ fn git_sync_command_header_auth(
          if [ -d {w}/.git ]; then git -C {w} remote set-url origin {url}; fi; \
          {base}"
     )
+}
+
+/// Suffixe shell qui fixe le dépôt sur un commit précis (après la synchro de branche).
+fn pin_sha_suffix(workdir: &str, sha: &str) -> Option<String> {
+    let sha = sha.trim();
+    if !(7..=40).contains(&sha.len()) || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let w = shell_single_quote(workdir);
+    Some(format!(
+        " && git -C {w} fetch origin {sha} && git -C {w} reset --hard {sha}"
+    ))
 }
 
 fn shell_single_quote(s: &str) -> String {
@@ -721,6 +735,19 @@ impl DeployFacade {
                 let clone_url = git_clone_url(&req.git_repository, req.github_token.as_deref());
                 git_sync_command(&workdir, &clone_url, branch)
             }
+        };
+        let sync_cmd = match req.pin_sha.as_deref() {
+            Some(sha) if !cfg!(windows) => match pin_sha_suffix(&workdir, sha) {
+                Some(suffix) => {
+                    logs.push_str(&format!("[git] commit demandé : {sha}\n"));
+                    format!("{sync_cmd}{suffix}")
+                }
+                None => {
+                    logs.push_str("[git] SHA demandé invalide — tête de branche déployée\n");
+                    sync_cmd
+                }
+            },
+            _ => sync_cmd,
         };
         match self.executor.exec(server, "", &sync_cmd, 600).await {
             Ok(r) => {
@@ -2065,6 +2092,15 @@ mod tests {
         let result = trim_out(&short);
         assert_eq!(result, short);
         assert_eq!(result.len(), 1000);
+    }
+
+    #[test]
+    fn pin_sha_is_validated() {
+        let s = pin_sha_suffix("/data/w", "6dcb09b5b57875f334f61aebed695e2e4193db5e").unwrap();
+        assert!(s.contains("fetch origin 6dcb09b5b57875f334f61aebed695e2e4193db5e"));
+        assert!(s.contains("reset --hard 6dcb09b5b57875f334f61aebed695e2e4193db5e"));
+        assert!(pin_sha_suffix("/w", "main; rm -rf /").is_none());
+        assert!(pin_sha_suffix("/w", "abc").is_none());
     }
 
     #[cfg(not(windows))]
