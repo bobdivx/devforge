@@ -195,6 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
         let mut app = worker::worker_router(state.clone())
+            .layer(middleware::from_fn(security::security_headers))
             .layer(middleware::from_fn(security::static_cache_headers))
             .layer(security::cors_layer())
             .layer(TraceLayer::new_for_http());
@@ -392,6 +393,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.clone(),
             worker::fence_stale_leader,
         ))
+        .layer(middleware::from_fn(security::security_headers))
         .layer(middleware::from_fn(security::static_cache_headers))
         .layer(security::cors_layer())
         .layer(TraceLayer::new_for_http())

@@ -49,6 +49,28 @@ pub fn cors_layer() -> CorsLayer {
         ])
 }
 
+/// Ajoute les headers de sécurité HTTP (X-Frame-Options, X-Content-Type-Options, HSTS).
+pub async fn security_headers(req: Request<Body>, next: Next) -> Response<Body> {
+    let mut res = next.run(req).await;
+
+    // HSTS : Strict-Transport-Security, max-age=1 year, includeSubDomains
+    res.headers_mut().insert(
+        header::STRICT_TRANSPORT_SECURITY,
+        HeaderValue::from_static("max-age=31536000; includeSubDomains")
+    );
+    // Anti-Clickjacking : X-Frame-Options DENY
+    res.headers_mut().insert(
+        header::X_FRAME_OPTIONS,
+        HeaderValue::from_static("DENY")
+    );
+    // Anti-MIME-Sniffing : X-Content-Type-Options nosniff
+    res.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff")
+    );
+    res
+}
+
 /// HTML / routes app : pas de cache (évite page blanche après MAJ Flatpak).
 /// Assets fingerprinted `/_astro/*` : cache long.
 pub async fn static_cache_headers(req: Request<Body>, next: Next) -> Response<Body> {
