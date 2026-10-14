@@ -606,7 +606,7 @@ checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 
 [[package]]
 name = "devforge-agent"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "chrono",
@@ -633,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-auth"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "argon2",
  "devforge-shared",
@@ -648,7 +648,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-backup"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "chrono",
@@ -665,7 +665,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-cluster"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "chrono",
@@ -701,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-database"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "devforge-shared",
  "serde",
@@ -713,7 +713,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-deploy"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "base64",
@@ -726,7 +726,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-detect"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "devforge-shared",
  "serde",
@@ -735,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-domain"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "devforge-deploy",
@@ -749,7 +749,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-env"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "devforge-shared",
@@ -760,7 +760,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-github"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "chrono",
@@ -775,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-llm"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "devforge-shared",
@@ -791,7 +791,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-mcp"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "base64",
@@ -810,7 +810,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-memory"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "chrono",
@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-ports"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "devforge-shared",
@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-proxy"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "devforge-deploy",
@@ -851,7 +851,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-runner"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "chrono",
@@ -868,7 +868,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-server"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-shared"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "serde",
@@ -936,7 +936,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-storage"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "chrono",
@@ -953,7 +953,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-update"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "chrono",
@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "devforge-wireguard"
-version = "2.0.239"
+version = "2.0.240"
 dependencies = [
  "async-trait",
  "devforge-deploy",
