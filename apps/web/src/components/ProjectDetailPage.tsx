@@ -15,6 +15,7 @@ import { ProjectHome } from './ProjectHome';
 import { WakeLogPanel } from './WakeLogPanel';
 import { StatusBadge } from './StatusBadge';
 import { DeployLogSheet } from './DeployLogSheet';
+import { RuntimeLogsPanel } from './RuntimeLogsPanel';
 import { ProjectSpecsModal } from './ProjectSpecsModal';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
@@ -63,6 +64,7 @@ type Tab =
   | 'overview'
   | 'workspace'
   | 'deployments'
+  | 'logs'
   | 'git'
   | 'actions'
   | 'agents'
@@ -88,6 +90,7 @@ function readQuery(): { uuid: string; tab: Tab; builder?: boolean; agent?: strin
     'overview',
     'workspace',
     'deployments',
+    'logs',
     'git',
     'actions',
     'agents',
@@ -253,6 +256,7 @@ export function ProjectDetailPage(props: Props) {
     overview: project?.name ?? 'Projet',
     workspace: 'Espace de travail',
     deployments: 'Déploiements',
+    logs: 'Logs en live',
     git: 'Git',
     actions: 'Actions',
     agents: 'Agents',
@@ -409,6 +413,12 @@ export function ProjectDetailPage(props: Props) {
           projectUuid={uuid}
           initial={deployments}
           onRefresh={(d) => setDeployments(d)}
+        />
+      )}
+      {tab === 'logs' && (
+        <RuntimeLogsPanel
+          projectUuid={uuid}
+          latestDeployUuid={deployments[0]?.uuid ?? null}
         />
       )}
       {tab === 'git' && (
@@ -1164,6 +1174,13 @@ function ProjectOverview({
         ]
       : []),
     {
+      key: 'logs',
+      title: 'Logs en live',
+      description: 'Sortie du conteneur en cours',
+      href: `${base}&tab=logs`,
+      icon: <HealthIcon kind="logs" tone="neutral" />,
+    },
+    {
       key: 'agents',
       title: 'Agents',
       description: 'Routines autonomes',
@@ -1535,7 +1552,22 @@ function HealthIcon({
   kind,
   tone,
 }: {
-  kind: 'deploy' | 'pulse' | 'db' | 'env' | 'git' | 'globe' | 'actions' | 'node' | 'gpu' | 'settings' | 'chat' | 'more' | 'archive' | 'clock';
+  kind:
+    | 'deploy'
+    | 'pulse'
+    | 'db'
+    | 'env'
+    | 'git'
+    | 'globe'
+    | 'actions'
+    | 'node'
+    | 'gpu'
+    | 'settings'
+    | 'chat'
+    | 'more'
+    | 'archive'
+    | 'clock'
+    | 'logs';
   tone: 'ok' | 'warn' | 'danger' | 'neutral';
 }) {
   const color =
@@ -1549,6 +1581,12 @@ function HealthIcon({
   const paths: Record<string, ComponentChildren> = {
     deploy: <path d="M12 2v14M7 11l5 5 5-5M5 20h14" />,
     chat: <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z" />,
+    logs: (
+      <>
+        <rect x="5" y="3" width="14" height="18" rx="2" />
+        <path d="M9 8h6M9 12h6M9 16h4" />
+      </>
+    ),
     archive: (
       <>
         <rect x="3" y="4" width="18" height="4" rx="1" />

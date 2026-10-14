@@ -1218,6 +1218,11 @@ export const api = {
       `/projects/${projectUuid}/lifecycle/${action}`,
       { method: 'POST', body: '{}' },
     ),
+  /** Logs d’exécution du conteneur (lecture seule, tronqués côté serveur). */
+  runtimeLogs: (projectUuid: string, tail = 300) =>
+    request<{
+      data: { ok?: boolean; container?: string; logs?: string; error?: string };
+    }>(`/projects/${projectUuid}/runtime-logs?tail=${tail}`),
   previewStatus: (projectUuid: string) =>
     request<{
       data: {

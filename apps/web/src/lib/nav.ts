@@ -57,7 +57,7 @@ export function mobileAvatarNav(role?: string | null): NavItem[] {
 }
 
 const PROJECT_PRIMARY_KEYS = ['overview', 'workspace', 'agents', 'deployments'] as const;
-const PROJECT_MORE_KEYS = ['domains', 'git', 'actions', 'database', 'env', 'backups', 'settings', 'home'] as const;
+const PROJECT_MORE_KEYS = ['logs', 'domains', 'git', 'actions', 'database', 'env', 'backups', 'settings', 'home'] as const;
 
 function projectNavItems(uuid: string, opts?: { workspace?: boolean }): NavItem[] {
   const base = `/app/projects/view?uuid=${encodeURIComponent(uuid)}`;
@@ -65,6 +65,7 @@ function projectNavItems(uuid: string, opts?: { workspace?: boolean }): NavItem[
     { href: `${base}&tab=overview`, label: 'Tableau de bord', key: 'overview' },
     { href: `${base}&tab=workspace`, label: 'Workspace', key: 'workspace', beta: true },
     { href: `${base}&tab=deployments`, label: 'Déploiements', key: 'deployments' },
+    { href: `${base}&tab=logs`, label: 'Logs en live', key: 'logs' },
     { href: `${base}&tab=agents`, label: 'Agents', key: 'agents' },
     { href: `${base}&tab=domains`, label: 'Domaines', key: 'domains' },
     { href: `${base}&tab=git`, label: 'Git', key: 'git' },

@@ -18,6 +18,7 @@ import {
   ScrollText,
   Settings2,
   SlidersHorizontal,
+  Terminal,
   Users,
   Workflow,
 } from 'lucide-preact';
@@ -841,6 +842,13 @@ function AdvancedSettingsModal({
           icon: icon(Globe),
           href: tabHref(uuid, 'domains'),
           tone: project?.production_url ? 'ok' : null,
+        },
+        {
+          key: 'logs',
+          title: 'Logs en live',
+          description: 'Sortie du conteneur en cours',
+          icon: icon(Terminal),
+          href: tabHref(uuid, 'logs'),
         },
         { key: 'env', title: 'Variables', description: 'Clés et secrets de l’app', icon: icon(KeyRound), href: tabHref(uuid, 'env') },
         { key: 'database', title: 'Base de données', description: 'Créer ou relier une base', icon: icon(Database), href: tabHref(uuid, 'database') },
