@@ -684,6 +684,14 @@ pub async fn status_json(pool: &PgPool) -> Result<Value, sqlx::Error> {
     )
     .fetch_all(pool)
     .await?;
+    // Projets liés à une installation supprimée côté GitHub (mode « déconnecté »).
+    let (disconnected,): (i64,) = sqlx::query_as(
+        r#"SELECT count(*) FROM projects p WHERE p.github_installation_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM github_installations i
+                           WHERE i.installation_id = p.github_installation_id)"#,
+    )
+    .fetch_one(pool)
+    .await?;
     let web = web_base();
     let installations: Vec<Value> = insts
         .into_iter()
@@ -712,7 +720,7 @@ pub async fn status_json(pool: &PgPool) -> Result<Value, sqlx::Error> {
     Ok(match app {
         None => json!({
             "ok": true, "configured": false, "required_permissions": required,
-            "installations": installations,
+            "installations": installations, "disconnected_projects": disconnected,
         }),
         Some((app_id, slug, client_id, html_url, owner, owner_type)) => json!({
             "ok": true,
@@ -727,6 +735,7 @@ pub async fn status_json(pool: &PgPool) -> Result<Value, sqlx::Error> {
             "manage_url": manage_url(&web, &slug, &owner, &owner_type),
             "required_permissions": required,
             "installations": installations,
+            "disconnected_projects": disconnected,
         }),
     })
 }

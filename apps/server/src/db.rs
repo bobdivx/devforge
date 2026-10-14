@@ -1057,6 +1057,14 @@ pub async fn migrate_github_app(pool: &PgPool) -> Result<(), sqlx::Error> {
     ] {
         sqlx::query(sql).execute(pool).await?;
     }
+    // P3 : observabilité des livraisons webhook app-level.
+    for sql in [
+        "ALTER TABLE github_webhook_deliveries ADD COLUMN duration_ms BIGINT",
+        "ALTER TABLE github_webhook_deliveries ADD COLUMN installation_id BIGINT",
+        "ALTER TABLE github_webhook_deliveries ADD COLUMN action TEXT",
+    ] {
+        let _ = sqlx::query(sql).execute(pool).await;
+    }
     // P1 : type du propriétaire (User/Organization) pour le lien de gestion GitHub.
     let _ =
         sqlx::query("ALTER TABLE github_app ADD COLUMN owner_type TEXT NOT NULL DEFAULT 'User'")

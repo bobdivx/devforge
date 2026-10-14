@@ -2098,6 +2098,27 @@ async fn github_webhook(
             Json(json!({"error": e.to_string()})),
         )
     })?;
+    handle_push(&state, &payload, PushScope::Legacy)
+        .await
+        .map(Json)
+}
+
+/// Quels projets un push peut déployer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushScope {
+    /// Webhook historique par dépôt : tous les projets du dépôt, sauf ceux migrés vers
+    /// l'installation GitHub App (traités par le webhook app-level, pas de double déploiement).
+    Legacy,
+    /// Webhook app-level : uniquement les projets liés à cette installation.
+    Installation(i64),
+}
+
+/// Projets ciblés par un push (sans effet de bord).
+pub async fn push_target_projects(
+    pool: &sqlx::PgPool,
+    payload: &Value,
+    scope: PushScope,
+) -> Result<Vec<Project>, (axum::http::StatusCode, Json<Value>)> {
     let full_name = payload
         .pointer("/repository/full_name")
         .and_then(|v| v.as_str())
@@ -2106,6 +2127,81 @@ async fn github_webhook(
         .pointer("/repository/html_url")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    if full_name.is_empty() && html_url.is_empty() {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": "repository manquant"})),
+        ));
+    }
+
+    let projects = sqlx::query_as::<_, Project>(
+        r#"SELECT * FROM projects
+           WHERE git_repository LIKE $1 OR git_repository LIKE $2 OR git_repository = $3
+           ORDER BY updated_at DESC"#,
+    )
+    .bind(format!("%{full_name}%"))
+    .bind(format!("%{html_url}%"))
+    .bind(full_name)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
+
+    let app_mode = crate::github_auth::app_enabled(pool).await;
+    let repo_id = payload.pointer("/repository/id").and_then(Value::as_i64);
+    let links: Vec<(String, Option<i64>, Option<i64>)> = sqlx::query_as(
+        "SELECT uuid, github_installation_id, github_repo_id FROM projects WHERE github_installation_id IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+    let link = |uuid: &str| links.iter().find(|l| l.0 == uuid).map(|l| (l.1, l.2));
+    Ok(projects
+        .into_iter()
+        .filter(|p| match (scope, link(&p.uuid)) {
+            (PushScope::Legacy, Some(_)) => !app_mode,
+            (PushScope::Legacy, None) => true,
+            (PushScope::Installation(id), Some((Some(i), r))) => {
+                i == id && (r.is_none() || repo_id.is_none() || r == repo_id)
+            }
+            (PushScope::Installation(_), _) => false,
+        })
+        .collect())
+}
+
+/// Suppression de branche ou push de tag : rien à déployer.
+pub fn push_skip_reason(payload: &Value) -> Option<&'static str> {
+    if payload
+        .get("deleted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Some("deleted");
+    }
+    if payload
+        .get("ref")
+        .and_then(Value::as_str)
+        .is_some_and(|r| r.starts_with("refs/tags/"))
+    {
+        return Some("tag");
+    }
+    None
+}
+
+/// Traitement d'un événement `push` partagé par les deux webhooks.
+pub async fn handle_push(
+    state: &AppState,
+    payload: &Value,
+    scope: PushScope,
+) -> Result<Value, (axum::http::StatusCode, Json<Value>)> {
+    if let Some(reason) = push_skip_reason(payload) {
+        return Ok(json!({"ok": true, "ignored": reason}));
+    }
+    let state = state.clone();
     let branch_ref = payload
         .get("ref")
         .and_then(|v| v.as_str())
@@ -2124,29 +2220,7 @@ async fn github_webhook(
         .unwrap_or("webhook push")
         .to_string();
 
-    if full_name.is_empty() && html_url.is_empty() {
-        return Err((
-            axum::http::StatusCode::BAD_REQUEST,
-            Json(json!({"error": "repository manquant"})),
-        ));
-    }
-
-    let projects = sqlx::query_as::<_, Project>(
-        r#"SELECT * FROM projects
-           WHERE git_repository LIKE $1 OR git_repository LIKE $2 OR git_repository = $3
-           ORDER BY updated_at DESC"#,
-    )
-    .bind(format!("%{full_name}%"))
-    .bind(format!("%{html_url}%"))
-    .bind(full_name)
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|e| {
-        (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
-        )
-    })?;
+    let projects = push_target_projects(&state.pool, payload, scope).await?;
 
     // Environnement dev : branche `dev_branch` → conteneur dev séparé (tâche détachée).
     let dev_deployed =
@@ -2269,9 +2343,7 @@ async fn github_webhook(
         }));
     }
 
-    Ok(Json(
-        json!({"ok": true, "deployed": deployed, "dev_deployed": dev_deployed}),
-    ))
+    Ok(json!({"ok": true, "deployed": deployed, "dev_deployed": dev_deployed}))
 }
 
 fn verify_github_sig(secret: &str, body: &[u8], signature_header: &str) -> bool {
