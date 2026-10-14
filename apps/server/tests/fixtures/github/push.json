@@ -1,0 +1,6 @@
+{"ref":"refs/heads/main","before":"0000000000000000000000000000000000000000","after":"6dcb09b5b57875f334f61aebed695e2e4193db5e","created":false,"deleted":false,"forced":false,
+ "repository":{"id":9001,"node_id":"R_1","name":"demo","full_name":"bobdivx/demo","private":true,"html_url":"https://github.com/bobdivx/demo","default_branch":"main"},
+ "pusher":{"name":"bobdivx","email":"noreply@example.com"},
+ "sender":{"login":"bobdivx","id":6737167,"type":"User"},
+ "installation":{"id":77,"node_id":"I_1"},
+ "head_commit":{"id":"6dcb09b5b57875f334f61aebed695e2e4193db5e","tree_id":"t","distinct":true,"message":"feat: hello\n\nbody","timestamp":"2026-10-14T01:00:00+02:00","url":"https://github.com/bobdivx/demo/commit/6dcb09b","author":{"name":"Mathieu","email":"noreply@example.com","username":"bobdivx"}}}

@@ -1,0 +1,1 @@
+{"action":"suspend","installation":{"id":77,"account":{"login":"bobdivx","type":"User"},"repository_selection":"selected","permissions":{"contents":"write","metadata":"read"},"suspended_at":"2026-10-14T02:00:00Z","suspended_by":{"login":"bobdivx"}},"sender":{"login":"bobdivx"}}

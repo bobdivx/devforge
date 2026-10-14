@@ -27,6 +27,7 @@ mod draft;
 mod draft_origin;
 mod draft_routes;
 mod git_routes;
+mod github_app_events;
 mod github_app_routes;
 mod github_auth;
 mod group_routes;
@@ -368,6 +369,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(actions_routes::router())
         .merge(git_routes::router())
         .merge(github_app_routes::router())
+        .merge(github_app_events::router())
         .merge(draft_routes::router())
         .merge(correction::router())
         .merge(group_routes::router())
