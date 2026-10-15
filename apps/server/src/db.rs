@@ -1072,6 +1072,8 @@ pub async fn migrate_github_app(pool: &PgPool) -> Result<(), sqlx::Error> {
         "ALTER TABLE github_webhook_deliveries ADD COLUMN duration_ms BIGINT",
         "ALTER TABLE github_webhook_deliveries ADD COLUMN installation_id BIGINT",
         "ALTER TABLE github_webhook_deliveries ADD COLUMN action TEXT",
+        // P8 : payload temporaire pour reprendre les livraisons « received » après un redémarrage.
+        "ALTER TABLE github_webhook_deliveries ADD COLUMN payload TEXT",
     ] {
         let _ = sqlx::query(sql).execute(pool).await;
     }

@@ -1,9 +1,8 @@
-//! Auto-deploy poller + GitHub webhook ensure.
+//! Auto-deploy poller + (legacy) GitHub webhook ensure.
 //!
-//! Le toggle `auto_deploy` filtrait déjà les webhooks push, mais sans webhook
-//! GitHub configuré sur le repo rien ne se déclenchait. Ce module :
-//! 1. Poll périodiquement les projets `auto_deploy=1` en retard vs GitHub
-//! 2. Assure (si possible) un webhook push vers `/api/v1/webhooks/github`
+//! En mode App GitHub, les pushes arrivent via `/api/v1/webhooks/github-app` ;
+//! ce module ne crée plus de hooks par dépôt. Le poller reste le filet.
+//! Sans App : assure encore un webhook push vers `/api/v1/webhooks/github`.
 
 use crate::infra_routes::parse_github_owner_repo;
 use crate::state::{new_uuid, now_str, AppState, Project};
@@ -44,6 +43,10 @@ pub fn webhook_callback_url(instance_url: &str) -> String {
 /// Tente de créer/assurer le webhook GitHub push pour un projet.
 pub async fn ensure_project_webhook(state: &AppState, project: &Project) -> Option<String> {
     if project.auto_deploy == 0 {
+        return None;
+    }
+    // P8 : mode App actif ⇒ plus de création de hooks par dépôt (webhook app-level + poller).
+    if crate::github_auth::app_enabled(&state.pool).await {
         return None;
     }
     // P7-02 : projet relié à l'app GitHub ⇒ le webhook app-level suffit, aucun hook par dépôt.

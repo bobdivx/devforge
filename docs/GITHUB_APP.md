@@ -32,9 +32,12 @@ App mode is active when `DEVFORGE_GITHUB_APP=1` is set or an app is registered. 
    - deletes the per-repo DevForge webhook (URL `…/api/v1/webhooks/github`) using the PAT that is still present.
 3. **Rollback** for one project: `POST /api/v1/github-app/migrate/rollback` with `{"project_uuid": "…"}`. It unlinks the project and recreates the push webhook.
 
-After migration, `ensure_project_webhook` no longer creates hooks for linked projects. When every project is migrated, a banner suggests deleting the PAT.
+After migration, `ensure_project_webhook` no longer creates per-repo hooks when App mode is active (app-level webhook + poller). When every project is migrated, a banner offers **« Supprimer le jeton »** (clears the instance PAT).
 
-The old `/api/v1/webhooks/github` endpoint answers **410 Gone** if `DEVFORGE_LEGACY_WEBHOOK=0`. The default stays `1` for one more version.
+The old `/api/v1/webhooks/github` endpoint answers **410 Gone** if `DEVFORGE_LEGACY_WEBHOOK=0`. Keep the default `1` until the PAT is removed in production; set `DEVFORGE_LEGACY_WEBHOOK=0` in the **next** release, then delete the legacy handler code.
+
+### Deliveries stuck in `received`
+If the process restarts while a delivery is still `received`, DevForge resumes it at boot (payload kept temporarily, then cleared). Without a stored payload (body larger than 2 MiB, or old rows), the status becomes `interrupted` — use GitHub › App › Recent deliveries › **Redeliver**.
 
 ## PR previews
 - One instance per PR, at `pr-<n>-<slug>.<prod zone>`.

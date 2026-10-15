@@ -334,6 +334,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // P8 : livraisons app webhook restées en « received » après un redémarrage.
+    {
+        let state_resume = state.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            let n = github_app_events::resume_pending_deliveries(&state_resume).await;
+            if n > 0 {
+                tracing::info!(count = n, "Livraisons webhook GitHub App reprises");
+            }
+        });
+    }
+
     {
         let state_c = state.clone();
         tokio::spawn(async move {
