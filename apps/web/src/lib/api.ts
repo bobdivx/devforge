@@ -516,6 +516,7 @@ export type GithubAppStatus = {
   owner_type?: string;
   install_url?: string;
   manage_url?: string;
+  settings_url?: string;
   required_permissions: Record<string, string>;
   installations: GithubInstallation[];
   unmigrated_projects?: number;

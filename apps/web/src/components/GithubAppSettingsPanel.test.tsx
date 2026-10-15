@@ -11,7 +11,7 @@ function client(status: GithubAppStatus): GithubAppClient {
     githubAppManifest: vi.fn(async () => ({
       ok: true,
       post_url: 'https://github.com/settings/apps/new?state=s1',
-      manifest: { name: 'DevForge-x' },
+      manifest: { name: 'DevForgeApp' },
       state: 's1',
     })),
     githubAppForget: vi.fn(async () => ({ ok: true, configured: false })),
@@ -37,6 +37,7 @@ describe('GithubAppSettingsPanel', () => {
       slug: 'devforge-nas',
       owner_login: 'bobdivx',
       install_url: 'https://github.com/apps/devforge-nas/installations/new',
+      settings_url: 'https://github.com/settings/apps/devforge-nas',
       installations: [
         {
           installation_id: 1,
@@ -54,6 +55,9 @@ describe('GithubAppSettingsPanel', () => {
     await r.findByText(/3 dépôt\(s\)/);
     expect(r.getByText(/checks:write/)).toBeTruthy();
     expect(r.getByText('Installer sur un autre compte')).toBeTruthy();
+    expect(r.getByText('Ajouter le logo')).toBeTruthy();
+    expect(r.getByText('Télécharger le logo').getAttribute('href')).toBe('/brand/icon-512.png');
+    expect(r.getByText('Ouvrir les réglages GitHub').closest('a')?.getAttribute('href')).toBe('https://github.com/settings/apps/devforge-nas');
   });
 
   it('formulaire caché : POST vers GitHub avec le champ manifest JSON', () => {

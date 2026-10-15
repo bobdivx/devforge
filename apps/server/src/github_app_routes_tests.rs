@@ -25,7 +25,7 @@ async fn pool() -> PgPool {
 #[test]
 fn manifest_urls_and_permissions_whitelist() {
     let m = build_manifest("NAS Maison", "https://web.jeser.app/", false);
-    assert_eq!(m["name"], "DevForge-NAS-Maison");
+    assert_eq!(m["name"], "DevForgeApp");
     assert_eq!(m["url"], "https://web.jeser.app");
     assert_eq!(
         m["hook_attributes"]["url"],
@@ -71,10 +71,17 @@ fn workflows_is_opt_in_only() {
 }
 
 #[test]
-fn app_name_is_sanitized_and_bounded() {
-    assert_eq!(app_name(""), "DevForge");
-    assert!(app_name(&"a".repeat(80)).len() <= 34);
-    assert_eq!(app_name("  été/prod "), "DevForge-t--prod");
+fn app_name_is_always_devforgeapp() {
+    for n in [
+        "",
+        "DevForge",
+        " devforge ",
+        "NAS Maison",
+        "Jeser",
+        &"a".repeat(80),
+    ] {
+        assert_eq!(app_name(n), "DevForgeApp");
+    }
 }
 
 #[test]
@@ -298,4 +305,16 @@ async fn installation_is_verified_then_stored_with_repos() {
     assert_eq!(i["repositories"], 1);
     assert_eq!(i["missing_permissions"].as_array().unwrap().len(), 4);
     assert!(!st.to_string().contains("ghs_inst"));
+}
+
+#[test]
+fn settings_url_user_vs_org() {
+    assert_eq!(
+        settings_url("https://github.com", "devforgeapp", "bobdivx", "User"),
+        "https://github.com/settings/apps/devforgeapp"
+    );
+    assert_eq!(
+        settings_url("https://github.com", "devforgeapp", "acme", "Organization"),
+        "https://github.com/organizations/acme/settings/apps/devforgeapp"
+    );
 }

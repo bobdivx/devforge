@@ -128,6 +128,25 @@ export function GithubAppSettingsPanel({
             </a>{' '}
             <span class="text-[var(--color-ink-muted)]">· @{status.owner_login}</span>
           </p>
+          {status.settings_url && (
+            <div class="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-line)] p-3 text-sm" data-testid="logo-step">
+              <img src="/brand/icon-512.png" alt="" width={32} height={32} class="rounded" />
+              <span class="flex-1">
+                <span class="font-medium">Ajouter le logo</span>
+                <span class="block text-xs text-[var(--color-ink-muted)]">GitHub ne permet pas de le définir automatiquement.</span>
+              </span>
+              <a
+                href="/brand/icon-512.png"
+                download="devforge-logo.png"
+                class="rounded-lg border border-[var(--color-line)] px-2.5 py-1 text-xs font-medium hover:bg-white/5"
+              >
+                Télécharger le logo
+              </a>
+              <Button size="sm" variant="ghost" href={status.settings_url} target="_blank">
+                Ouvrir les réglages GitHub
+              </Button>
+            </div>
+          )}
           {missing.length > 0 && (
             <Alert tone="warn">Permissions manquantes à accepter sur GitHub : {[...new Set(missing)].join(', ')}</Alert>
           )}
