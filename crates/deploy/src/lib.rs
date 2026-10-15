@@ -118,7 +118,7 @@ pub struct DeployStatus {
     pub message: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DeployRequest {
     pub project_uuid: String,
     pub server_id: String,
@@ -155,6 +155,40 @@ pub struct DeployRequest {
     /// Montages `source:cible[:ro]` (`docker run -v`).
     pub volumes: Vec<String>,
     pub runtime: RuntimeSpec,
+}
+
+impl std::fmt::Debug for DeployRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeployRequest")
+            .field("project_uuid", &self.project_uuid)
+            .field("server_id", &self.server_id)
+            .field("workdir", &self.workdir)
+            .field("git_repository", &self.git_repository)
+            .field("git_branch", &self.git_branch)
+            .field("build_pack", &self.build_pack)
+            .field("port", &self.port)
+            .field("base_directory", &self.base_directory)
+            .field("docker_compose_location", &self.docker_compose_location)
+            .field("dockerfile_path", &self.dockerfile_path)
+            .field("docker_build_context", &self.docker_build_context)
+            .field("publish_directory", &self.publish_directory)
+            .field("is_static", &self.is_static)
+            .field(
+                "github_token",
+                &self.github_token.as_ref().map(|_| "[redacted]"),
+            )
+            .field("github_token_ephemeral", &self.github_token_ephemeral)
+            .field("pin_sha", &self.pin_sha)
+            .field("env_file", &self.env_file.as_ref().map(|_| "[set]"))
+            .field("proxy_labels", &self.proxy_labels)
+            .field("gpu_nvidia", &self.gpu_nvidia)
+            .field("gpu_dri", &self.gpu_dri)
+            .field("group_network", &self.group_network)
+            .field("group_alias", &self.group_alias)
+            .field("volumes", &self.volumes)
+            .field("runtime", &self.runtime)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -2216,6 +2250,40 @@ mod runtime_logs_tests {
         assert!(out.ends_with("ligne 99"));
         assert!(out.starts_with("ligne "));
         assert_eq!(truncate_runtime_logs("court", 40), "court");
+    }
+
+    #[test]
+    fn deploy_request_debug_redacts_github_token() {
+        let req = DeployRequest {
+            project_uuid: "p".into(),
+            server_id: "s".into(),
+            workdir: "/w".into(),
+            git_repository: "https://github.com/o/r".into(),
+            git_branch: "main".into(),
+            build_pack: "static".into(),
+            port: 80,
+            base_directory: "/".into(),
+            docker_compose_location: None,
+            dockerfile_path: None,
+            docker_build_context: None,
+            publish_directory: None,
+            is_static: true,
+            github_token: Some("ghp_supersecret_token_value".into()),
+            github_token_ephemeral: true,
+            pin_sha: None,
+            env_file: Some("SECRET=1".into()),
+            proxy_labels: None,
+            gpu_nvidia: false,
+            gpu_dri: false,
+            group_network: None,
+            group_alias: None,
+            volumes: vec![],
+            runtime: RuntimeSpec::default(),
+        };
+        let s = format!("{req:?}");
+        assert!(s.contains("[redacted]"), "{s}");
+        assert!(!s.contains("ghp_supersecret"), "{s}");
+        assert!(!s.contains("SECRET=1"), "{s}");
     }
 
     #[test]

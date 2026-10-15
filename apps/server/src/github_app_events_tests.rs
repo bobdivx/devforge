@@ -349,3 +349,33 @@ async fn purge_keeps_recent_deliveries() {
         .unwrap();
     assert_eq!(n, 1);
 }
+
+#[tokio::test]
+async fn received_without_payload_marked_interrupted() {
+    let pool = pool_with_app().await;
+    sqlx::query(
+        "INSERT INTO github_webhook_deliveries (delivery_id, event, status) VALUES ('stale','push','received')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO github_webhook_deliveries (delivery_id, event, status, payload) VALUES ('keep','push','received', '{\"ok\":true}')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(mark_unresumable_received(&pool).await, 1);
+    let (stale,): (String,) =
+        sqlx::query_as("SELECT status FROM github_webhook_deliveries WHERE delivery_id = 'stale'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let (keep,): (String,) =
+        sqlx::query_as("SELECT status FROM github_webhook_deliveries WHERE delivery_id = 'keep'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stale, "interrupted");
+    assert_eq!(keep, "received");
+}

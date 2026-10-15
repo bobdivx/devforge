@@ -23,6 +23,8 @@ use crate::state::AppState;
 
 /// Limite GitHub pour un payload webhook.
 pub const MAX_BODY: usize = 25 * 1024 * 1024;
+/// Au-delà, on n'enregistre pas le corps (reprise impossible après crash).
+pub const MAX_STORED_PAYLOAD: usize = 2 * 1024 * 1024;
 pub const RETENTION_DAYS: i32 = 7;
 
 pub fn router() -> Router<AppState> {
@@ -114,8 +116,9 @@ fn reply(code: StatusCode, v: Value) -> Outcome {
 }
 
 async fn set_status(pool: &PgPool, delivery_id: &str, status: &str, duration_ms: Option<i64>) {
+    // Une fois traitée, on jette le payload (plus besoin pour la reprise).
     let _ = sqlx::query(
-        "UPDATE github_webhook_deliveries SET status = $2, duration_ms = COALESCE($3, duration_ms) WHERE delivery_id = $1",
+        "UPDATE github_webhook_deliveries SET status = $2, duration_ms = COALESCE($3, duration_ms), payload = NULL WHERE delivery_id = $1",
     )
     .bind(delivery_id)
     .bind(status)
@@ -163,14 +166,20 @@ pub async fn receive(pool: &PgPool, headers: &HeaderMap, body: &[u8]) -> Outcome
         .to_string();
     let installation_id = payload.pointer("/installation/id").and_then(Value::as_i64);
 
+    let stored_payload: Option<&str> = if body.len() <= MAX_STORED_PAYLOAD {
+        std::str::from_utf8(body).ok()
+    } else {
+        None
+    };
     let inserted = sqlx::query(
-        r#"INSERT INTO github_webhook_deliveries (delivery_id, event, status, installation_id, action)
-           VALUES ($1, $2, 'received', $3, $4) ON CONFLICT (delivery_id) DO NOTHING"#,
+        r#"INSERT INTO github_webhook_deliveries (delivery_id, event, status, installation_id, action, payload)
+           VALUES ($1, $2, 'received', $3, $4, $5) ON CONFLICT (delivery_id) DO NOTHING"#,
     )
     .bind(&delivery_id)
     .bind(&event)
     .bind(installation_id)
     .bind(&action)
+    .bind(stored_payload)
     .execute(pool)
     .await;
     match inserted {
@@ -490,6 +499,62 @@ pub async fn purge_old_deliveries(pool: &PgPool) {
     .bind(RETENTION_DAYS)
     .execute(pool)
     .await;
+}
+
+/// Marque `interrupted` les `received` sans payload (impossible à reprendre).
+pub async fn mark_unresumable_received(pool: &PgPool) -> u64 {
+    let r = sqlx::query(
+        r#"UPDATE github_webhook_deliveries
+           SET status = 'interrupted', duration_ms = COALESCE(duration_ms, 0), payload = NULL
+           WHERE status = 'received' AND (payload IS NULL OR payload = '')"#,
+    )
+    .execute(pool)
+    .await;
+    r.map(|x| x.rows_affected()).unwrap_or(0)
+}
+
+/// Reprend les livraisons restées en `received` (crash / redémarrage avant `process`).
+/// Sans payload stocké : marquées `interrupted` (redeliver côté GitHub).
+pub async fn resume_pending_deliveries(state: &AppState) -> u64 {
+    let interrupted = mark_unresumable_received(&state.pool).await;
+    if interrupted > 0 {
+        tracing::warn!(
+            count = interrupted,
+            "webhook GitHub App : livraisons received sans payload → interrupted"
+        );
+    }
+    let rows: Vec<(String, String, Option<String>, Option<i64>, String)> = sqlx::query_as(
+        r#"SELECT delivery_id, event, action, installation_id, payload
+           FROM github_webhook_deliveries
+           WHERE status = 'received' AND payload IS NOT NULL AND payload <> ''
+           ORDER BY received_at ASC LIMIT 50"#,
+    )
+    .fetch_all(&state.pool)
+    .await
+    .unwrap_or_default();
+    let mut resumed = 0u64;
+    for (delivery_id, event, action, installation_id, raw) in rows {
+        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+            set_status(&state.pool, &delivery_id, "interrupted", Some(0)).await;
+            continue;
+        };
+        let acc = Accepted {
+            delivery_id: delivery_id.clone(),
+            event: event.clone(),
+            action: action.unwrap_or_default(),
+            installation_id,
+            payload: value,
+        };
+        tracing::info!(
+            delivery = %delivery_id,
+            event = %event,
+            "webhook GitHub App : reprise livraison received"
+        );
+        let st = state.clone();
+        tokio::spawn(async move { process(&st, acc).await });
+        resumed += 1;
+    }
+    resumed
 }
 
 pub async fn recent_deliveries(pool: &PgPool) -> Result<Vec<Value>, sqlx::Error> {

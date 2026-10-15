@@ -74,7 +74,7 @@ const SETTINGS_CARDS: SettingCardMeta[] = [
   {
     key: 'github',
     title: 'GitHub',
-    description: 'Connexion API GitHub (token PAT)',
+    description: 'App GitHub DevForge (et jeton optionnel)',
     icon: 'github',
   },
   {

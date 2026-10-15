@@ -172,7 +172,12 @@ export function GithubAppSettingsPanel({
               Oublier l’app
             </Button>
           </div>
-          {status.installations.length > 0 && <GithubMigrationPanel patRemovable={status.pat_removable} />}
+          {status.installations.length > 0 && (
+            <GithubMigrationPanel
+              patRemovable={status.pat_removable}
+              onPatCleared={() => void load()}
+            />
+          )}
         </div>
       )}
     </Card>
