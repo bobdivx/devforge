@@ -20,6 +20,8 @@ class InboxWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
         if (graph.store.load() == null) return Result.success()
         return try {
             graph.syncInbox(notify = true)
+            // Si un déploiement tourne, démarrer le suivi de progression (notif barre système).
+            runCatching { graph.syncDeployProgress() }
             Result.success()
         } catch (e: UnauthorizedException) {
             Result.success()

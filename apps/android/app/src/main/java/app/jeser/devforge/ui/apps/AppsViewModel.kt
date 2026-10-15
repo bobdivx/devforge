@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.jeser.devforge.AppGraph
 import app.jeser.devforge.data.ApiException
+import app.jeser.devforge.data.AppStatus
 import app.jeser.devforge.data.InboxEvent
 import app.jeser.devforge.data.Me
 import app.jeser.devforge.data.Project
@@ -46,6 +47,7 @@ class AppsViewModel(private val graph: AppGraph) : ViewModel() {
             try {
                 val list = graph.api.projects()
                 _state.update { it.copy(projects = list, loading = false, refreshing = false, error = null) }
+                graph.applyDeployProgress(list)
             } catch (e: UnauthorizedException) {
                 _state.update { it.copy(loading = false, refreshing = false) }
             } catch (e: ApiException) {
@@ -58,13 +60,17 @@ class AppsViewModel(private val graph: AppGraph) : ViewModel() {
         }
     }
 
-    /** Rafraîchissement doux tant que l'écran est visible. */
+    /** Rafraîchissement doux tant que l'écran est visible ; plus fréquent pendant un déploiement. */
     fun startPolling() {
         if (poll?.isActive == true) return
         poll = viewModelScope.launch {
             while (isActive) {
-                delay(60_000)
-                runCatching { graph.api.projects() }.onSuccess { list -> _state.update { it.copy(projects = list, error = null) } }
+                val deploying = _state.value.projects.any { it.appStatus == AppStatus.Deploying }
+                delay(if (deploying) 5_000 else 60_000)
+                runCatching { graph.api.projects() }.onSuccess { list ->
+                    _state.update { it.copy(projects = list, error = null) }
+                    graph.applyDeployProgress(list)
+                }
                 runCatching { graph.syncInbox(notify = false, probe = false) }
             }
         }

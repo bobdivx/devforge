@@ -4,6 +4,7 @@ import android.content.Context
 
 /** Types de notifications (réglables dans Réglages). Tous actifs par défaut. */
 enum class NotifKind(val key: String, val title: String, val description: String) {
+    DeployProgress("deploy_progress", "Déploiement en cours", "Barre de progression dans les notifications du téléphone."),
     DeployFailed("deploy_failed", "Mise en ligne échouée", "Rustine 🩹 te prévient et peut réparer."),
     AppDown("app_down", "App qui ne répond plus", "Phare 🗼 a repéré une app en panne."),
     SpecWaiting("spec_waiting", "Braise attend ton OK", "Une spec est prête à relire."),

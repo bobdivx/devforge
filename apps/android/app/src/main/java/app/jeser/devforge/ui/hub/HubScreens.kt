@@ -292,7 +292,7 @@ fun SettingsScreen(
                             )
                         }
                     }
-                    Text("Vérifié toutes les 15 minutes environ, sans service tiers.", color = DfColors.InkFaint, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    Text("Déploiements suivis ~toutes les 20 s ; alertes ~toutes les 15 min, sans service tiers.", color = DfColors.InkFaint, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 }
             }
             item(key = "memory") {

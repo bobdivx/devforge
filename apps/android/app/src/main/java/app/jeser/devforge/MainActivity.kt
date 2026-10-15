@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.browser.customtabs.CustomTabColorSchemeParams
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -38,7 +39,7 @@ class MainActivity : ComponentActivity() {
     private val graph by lazy { AppGraph.get(this) }
     private val loginVm: LoginViewModel by viewModels { viewModelFactory { initializer { LoginViewModel(graph) } } }
 
-    /** Projet à ouvrir (notification touchée). */
+    /** Projet à ouvrir (notification touchée). Observé via Compose — jamais écrit pendant la composition. */
     private var deepLinkProject by mutableStateOf<String?>(null)
     private var deepLinkCorrections by mutableStateOf<String?>(null)
 
@@ -71,7 +72,12 @@ class MainActivity : ComponentActivity() {
                     )
                 } else {
                     var selected by rememberSaveable { mutableStateOf<String?>(null) }
-                    deepLinkProject?.let { selected = it; deepLinkProject = null }
+                    // Deep link : appliquer après composition (évite d'écrire l'état pendant le rendu).
+                    LaunchedEffect(deepLinkProject) {
+                        val uuid = deepLinkProject ?: return@LaunchedEffect
+                        selected = uuid
+                        deepLinkProject = null
+                    }
                     // Android 13+ : permission demandée une fois, juste après la connexion, avec une explication.
                     var askNotif by rememberSaveable {
                         mutableStateOf(Build.VERSION.SDK_INT >= 33 && !Notifier.canNotify(this@MainActivity) && !prefs.getBoolean("notif_asked", false))
@@ -131,8 +137,12 @@ class MainActivity : ComponentActivity() {
             intent.data = null
             return
         }
-        intent.getStringExtra(Notifier.EXTRA_PROJECT)?.let {
-            if (intent.getStringExtra(Notifier.EXTRA_OPEN) == Notifier.OPEN_CORRECTIONS) deepLinkCorrections = it else deepLinkProject = it
+        intent.getStringExtra(Notifier.EXTRA_PROJECT)?.let { uuid ->
+            if (intent.getStringExtra(Notifier.EXTRA_OPEN) == Notifier.OPEN_CORRECTIONS) {
+                deepLinkCorrections = uuid
+            } else {
+                deepLinkProject = uuid
+            }
             intent.removeExtra(Notifier.EXTRA_PROJECT)
             intent.removeExtra(Notifier.EXTRA_OPEN)
         }
