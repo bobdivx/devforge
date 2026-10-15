@@ -228,6 +228,12 @@ async fn webhook(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> (StatusCode, Json<Value>) {
+    if !crate::github_migration::webhook_allowed() {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": "trop de livraisons, réessaie plus tard"})),
+        );
+    }
     match receive(&state.pool, &headers, &body).await {
         Outcome::Reply(code, v) => (code, Json(v)),
         Outcome::Process(acc) => {

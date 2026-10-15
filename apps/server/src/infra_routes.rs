@@ -2053,6 +2053,21 @@ async fn github_webhook(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
+    // P7-03 : ancien webhook par dépôt désactivable une fois la migration terminée.
+    if !crate::github_migration::legacy_webhook_enabled(
+        std::env::var("DEVFORGE_LEGACY_WEBHOOK").ok().as_deref(),
+    ) {
+        return Err((
+            axum::http::StatusCode::GONE,
+            Json(json!({"error": "webhook par dépôt retiré : utilise l’app GitHub DevForge"})),
+        ));
+    }
+    if !crate::github_migration::webhook_allowed() {
+        return Err((
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": "trop de livraisons, réessaie plus tard"})),
+        ));
+    }
     if let Ok(secret) = std::env::var("DEVFORGE_GITHUB_WEBHOOK_SECRET") {
         if !secret.is_empty() {
             let sig = headers

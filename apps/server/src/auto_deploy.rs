@@ -16,14 +16,14 @@ fn poll_interval_secs() -> u64 {
         .clamp(30, 3600)
 }
 
-fn webhook_secret() -> Option<String> {
+pub(crate) fn webhook_secret() -> Option<String> {
     std::env::var("DEVFORGE_GITHUB_WEBHOOK_SECRET")
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
 }
 
-async fn instance_public_url(state: &AppState) -> Option<String> {
+pub(crate) async fn instance_public_url(state: &AppState) -> Option<String> {
     let row: Option<(String,)> =
         sqlx::query_as("SELECT instance_url FROM instance_settings WHERE id = 1")
             .fetch_optional(&state.pool)
@@ -44,6 +44,17 @@ pub fn webhook_callback_url(instance_url: &str) -> String {
 /// Tente de créer/assurer le webhook GitHub push pour un projet.
 pub async fn ensure_project_webhook(state: &AppState, project: &Project) -> Option<String> {
     if project.auto_deploy == 0 {
+        return None;
+    }
+    // P7-02 : projet relié à l'app GitHub ⇒ le webhook app-level suffit, aucun hook par dépôt.
+    let linked: Option<(Option<i64>,)> =
+        sqlx::query_as("SELECT github_installation_id FROM projects WHERE id = $1")
+            .bind(project.id)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten();
+    if linked.is_some_and(|(i,)| i.is_some()) {
         return None;
     }
     let repo_url = project.git_repository.as_deref()?.trim();

@@ -1,3 +1,4 @@
+import { GithubMigrationPanel } from './GithubMigrationPanel';
 import { useEffect, useState } from 'preact/hooks';
 import { api, type GithubAppManifest, type GithubAppStatus } from '../lib/api';
 import { Alert, Badge, Button, Card, CardHeader, Input } from './ui';
@@ -152,6 +153,7 @@ export function GithubAppSettingsPanel({
               Oublier l’app
             </Button>
           </div>
+          {status.installations.length > 0 && <GithubMigrationPanel patRemovable={status.pat_removable} />}
         </div>
       )}
     </Card>

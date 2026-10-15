@@ -518,6 +518,22 @@ export type GithubAppStatus = {
   manage_url?: string;
   required_permissions: Record<string, string>;
   installations: GithubInstallation[];
+  unmigrated_projects?: number;
+  pat_removable?: boolean;
+};
+export type GithubMigrationReport = {
+  ok: boolean;
+  dry_run: boolean;
+  migrated: number;
+  not_covered: number;
+  projects: {
+    project_uuid: string;
+    name: string;
+    status: string;
+    repo?: string;
+    migrated?: boolean;
+    hook_error?: string;
+  }[];
 };
 export type GithubAppManifest = {
   ok: boolean;
@@ -1441,6 +1457,8 @@ export const api = {
       body: JSON.stringify(body),
     }),
   githubAppStatus: () => request<GithubAppStatus>('/github-app'),
+  githubAppMigrate: (body: { dry_run: boolean; project_uuids?: string[] }) =>
+    request<GithubMigrationReport>('/github-app/migrate', { method: 'POST', body: JSON.stringify(body) }),
   projectPreviews: (uuid: string) => request<PreviewsResponse>(`/projects/${encodeURIComponent(uuid)}/previews`),
   setProjectPreviews: (uuid: string, enabled: boolean) =>
     request<{ ok: boolean; enabled: boolean }>(`/projects/${encodeURIComponent(uuid)}/previews/settings`, {

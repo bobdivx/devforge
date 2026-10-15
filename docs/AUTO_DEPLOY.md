@@ -252,3 +252,11 @@ Depuis le fix auto-deploy :
 ## Conclusion
 
 Cause historique : le toggle `auto_deploy` filtrait seulement les webhooks, sans webhook GitHub ni polling — l'UI montrait des commits « à déployer » sans jamais déployer.
+
+## Legacy PAT
+
+Projects not yet linked to the DevForge GitHub App still use the instance PAT (Réglages › GitHub) and a per-repo `push` webhook to `…/api/v1/webhooks/github`, created automatically. Polling (every 90 s) stays active as a safety net.
+
+Once linked (migration or repo picker), a project receives its events through the app-level webhook `…/api/v1/webhooks/github-app`. No per-repo webhook is created any more. See [GITHUB_APP.md](GITHUB_APP.md).
+
+An auto-deploy is held back only by a repair (Rustine) that is **actively being tested** and was updated less than 30 min ago. A repair that is "ready" but never applied is archived when a new commit arrives (the draft is backed up first).
