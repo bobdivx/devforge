@@ -7,6 +7,7 @@ import app.jeser.devforge.data.EncryptedSessionStore
 import app.jeser.devforge.data.InboxEvent
 import app.jeser.devforge.data.SessionStore
 import app.jeser.devforge.data.TokenManager
+import app.jeser.devforge.notify.DeployWatchWorker
 import app.jeser.devforge.notify.InboxDiff
 import app.jeser.devforge.notify.Notifier
 import app.jeser.devforge.notify.PrefsInboxMemory
@@ -17,6 +18,7 @@ import java.util.concurrent.TimeUnit
 
 /** Dépendances de l'app (petit conteneur manuel, sans framework d'injection). */
 class AppGraph private constructor(private val context: Context) {
+    val appContext: Context get() = context
     val store: SessionStore = EncryptedSessionStore(context)
     val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -44,6 +46,7 @@ class AppGraph private constructor(private val context: Context) {
         inboxMemory.reset()
         _inbox.value = emptyList()
         _signedIn.value = false
+        DeployWatchWorker.cancel(context)
     }
 
     /** Arrière-plan : notifie les nouveautés. Premier plan : met à jour sans notifier (déjà à l'écran). */
@@ -54,6 +57,22 @@ class AppGraph private constructor(private val context: Context) {
         _inbox.value = inbox.events
         if (notify) Notifier.show(context, diff.toNotify)
         return inbox.events
+    }
+
+    /**
+     * Met à jour les notifs de progression des déploiements.
+     * @return true s'il reste un déploiement actif.
+     */
+    suspend fun syncDeployProgress(): Boolean {
+        val projects = api.projects()
+        return applyDeployProgress(projects)
+    }
+
+    /** Applique une liste déjà chargée (évite un 2e GET) et démarre le worker si besoin. */
+    fun applyDeployProgress(projects: List<app.jeser.devforge.data.Project>): Boolean {
+        val still = Notifier.syncDeployProgress(context, projects)
+        if (still) DeployWatchWorker.kick(context)
+        return still
     }
 
     companion object {

@@ -12,6 +12,7 @@ import app.jeser.devforge.data.Agent
 import app.jeser.devforge.data.AgentMessage
 import app.jeser.devforge.data.ContainerState
 import app.jeser.devforge.data.ContainerStatus
+import app.jeser.devforge.data.DeployCard
 import app.jeser.devforge.data.Deployment
 import app.jeser.devforge.data.DraftDiffFile
 import app.jeser.devforge.data.DraftStatus
@@ -26,6 +27,7 @@ import app.jeser.devforge.data.UnauthorizedException
 import app.jeser.devforge.data.liveSummary
 import app.jeser.devforge.data.parseContainerStatus
 import app.jeser.devforge.data.teamStatus
+import app.jeser.devforge.notify.DeployWatchWorker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -491,8 +493,24 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
         viewModelScope.launch {
             try {
                 val dep = api.deploy(uuid, message.ifBlank { "Mise en ligne depuis l'app Android" })
-                _state.update { it.copy(deployments = listOf(dep) + it.deployments.filter { d -> d.uuid != dep.uuid }, notice = "Mise en ligne lancée. Reconstruction depuis GitHub…") }
+                _state.update {
+                    it.copy(
+                        deployments = listOf(dep) + it.deployments.filter { d -> d.uuid != dep.uuid },
+                        // Statut local : la tuile anime tout de suite ; onChanged rafraîchit la grille Apps.
+                        project = it.project?.copy(
+                            status = "deploying",
+                            deploy = DeployCard(
+                                status = dep.status.ifBlank { "queued" },
+                                sha = dep.gitSha,
+                                message = dep.gitMessage,
+                            ),
+                        ),
+                        notice = "Mise en ligne lancée. Reconstruction depuis GitHub…",
+                    )
+                }
                 refreshDeployments()
+                // Notif barre système : démarrer le suivi tout de suite.
+                DeployWatchWorker.kick(graph.appContext, force = true)
             } catch (e: ApiException) {
                 _state.update { it.copy(notice = "Mise en ligne impossible : ${e.message}") }
             } catch (e: IOException) {

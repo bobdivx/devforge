@@ -5,4 +5,6 @@
     <string name="channel_alerts_desc">Mise en ligne échouée, app qui ne répond plus.</string>
     <string name="channel_waiting">Braise attend ton OK</string>
     <string name="channel_waiting_desc">Une spec est prête et attend ta validation.</string>
+    <string name="channel_progress">Déploiements</string>
+    <string name="channel_progress_desc">Avancement d\'un build ou d\'une mise en ligne en cours.</string>
 </resources>

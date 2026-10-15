@@ -258,7 +258,11 @@ private fun InboxSheet(events: List<InboxEvent>, onDismiss: () -> Unit, onOpen: 
 @Composable
 fun AppTile(project: Project, onClick: () -> Unit) {
     val status = project.appStatus
-    DfTile(onClick = onClick, minHeight = 148.dp) {
+    DfTile(
+        onClick = onClick,
+        minHeight = 148.dp,
+        tone = if (status == AppStatus.Deploying) DfColors.Warn else null,
+    ) {
         AppIcon(project.name, project.productionUrl, project.gitRepository, status, size = 56.dp)
         Text(
             project.name,

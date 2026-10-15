@@ -24,10 +24,11 @@ fun NotificationPrompt(onAccept: () -> Unit, onLater: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.Start) {
                 Text("Phare 🗼 t'envoie une notification quand :", color = DfColors.InkMuted)
+                Text("• un déploiement est en cours (avec l'avancement) ;", color = DfColors.InkMuted)
                 Text("• une mise en ligne échoue ;", color = DfColors.InkMuted)
                 Text("• une app ne répond plus ;", color = DfColors.InkMuted)
                 Text("• Braise attend ton OK pour construire.", color = DfColors.InkMuted)
-                Text("Rien d'autre. Tu pourras couper ça dans les réglages d'Android.", color = DfColors.InkFaint)
+                Text("Tu pourras couper ça dans les réglages.", color = DfColors.InkFaint)
             }
         },
         confirmButton = {

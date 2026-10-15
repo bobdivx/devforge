@@ -14,13 +14,18 @@ import androidx.core.content.ContextCompat
 import app.jeser.devforge.MainActivity
 import app.jeser.devforge.R
 import app.jeser.devforge.data.InboxEvent
+import app.jeser.devforge.data.Project
 
 object Notifier {
     const val CHANNEL_ALERTS = "alerts"
     const val CHANNEL_WAITING = "waiting"
+    const val CHANNEL_PROGRESS = "progress"
     const val EXTRA_PROJECT = "project_uuid"
     const val EXTRA_OPEN = "open"
     const val OPEN_CORRECTIONS = "corrections"
+
+    private const val PROGRESS_PREFS = "devforge_deploy_progress"
+    private const val KEY_ACTIVE = "active"
 
     /** Réglage qui couvre un type d'événement (les 3 étapes de correction partagent un réglage). */
     fun settingKey(kind: String): String = if (kind.startsWith("correction_") || kind == "fix_ready") NotifKind.Corrections.key else kind
@@ -36,6 +41,13 @@ object Notifier {
             NotificationChannel(CHANNEL_WAITING, context.getString(R.string.channel_waiting), NotificationManager.IMPORTANCE_DEFAULT)
                 .apply { description = context.getString(R.string.channel_waiting_desc) },
         )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_PROGRESS, context.getString(R.string.channel_progress), NotificationManager.IMPORTANCE_LOW)
+                .apply {
+                    description = context.getString(R.string.channel_progress_desc)
+                    setShowBadge(false)
+                },
+        )
     }
 
     fun canNotify(context: Context): Boolean {
@@ -50,7 +62,9 @@ object Notifier {
             action = "app.jeser.devforge.OPEN_PROJECT.$projectUuid${open?.let { ".$it" } ?: ""}"
             putExtra(EXTRA_PROJECT, projectUuid)
             open?.let { putExtra(EXTRA_OPEN, it) }
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         return PendingIntent.getActivity(
             context,
@@ -85,4 +99,72 @@ object Notifier {
             }
         }
     }
+
+    /**
+     * Met à jour les notifs « déploiement en cours » (barre de progression).
+     * @return true s'il reste au moins un déploiement actif (pour replanifier le worker).
+     */
+    fun syncDeployProgress(context: Context, projects: List<Project>): Boolean {
+        val settings = PrefsNotifSettings(context)
+        val enabled = settings.enabled(NotifKind.DeployProgress.key)
+        val deploying = projects.mapNotNull { deployProgressOf(it) }
+        val prefs = context.getSharedPreferences(PROGRESS_PREFS, Context.MODE_PRIVATE)
+        val previous = prefs.getStringSet(KEY_ACTIVE, emptySet())!!.toSet()
+        val nowIds = deploying.map { it.projectUuid }.toSet()
+
+        // Annuler les notifs des déploiements terminés (succès ou disparus de la liste « deploying »).
+        for (uuid in previous - nowIds) {
+            cancelProgress(context, uuid)
+        }
+
+        if (!enabled || !canNotify(context)) {
+            if (!enabled) {
+                for (uuid in nowIds) cancelProgress(context, uuid)
+                prefs.edit().putStringSet(KEY_ACTIVE, emptySet()).apply()
+            } else {
+                prefs.edit().putStringSet(KEY_ACTIVE, nowIds).apply()
+            }
+            return deploying.isNotEmpty()
+        }
+
+        val nm = NotificationManagerCompat.from(context)
+        for (p in deploying) {
+            val body = listOfNotNull(p.label, p.detail).joinToString(" · ")
+            val n = NotificationCompat.Builder(context, CHANNEL_PROGRESS)
+                .setSmallIcon(R.drawable.ic_stat_devforge)
+                .setColor(0xFFA78BFA.toInt())
+                .setContentTitle("Déploiement · ${p.projectName}")
+                .setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setProgress(100, p.percent, false)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(openProjectIntent(context, p.projectUuid))
+                .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+                .setGroup("devforge-progress")
+                .setSilent(true)
+                .build()
+            try {
+                nm.notify(progressNotifId(p.projectUuid), n)
+            } catch (_: SecurityException) {
+                break
+            }
+        }
+        prefs.edit().putStringSet(KEY_ACTIVE, nowIds).apply()
+        return deploying.isNotEmpty()
+    }
+
+    fun clearDeployProgress(context: Context) {
+        val prefs = context.getSharedPreferences(PROGRESS_PREFS, Context.MODE_PRIVATE)
+        val active = prefs.getStringSet(KEY_ACTIVE, emptySet())!!.toSet()
+        for (uuid in active) cancelProgress(context, uuid)
+        prefs.edit().putStringSet(KEY_ACTIVE, emptySet()).apply()
+    }
+
+    private fun cancelProgress(context: Context, projectUuid: String) {
+        NotificationManagerCompat.from(context).cancel(progressNotifId(projectUuid))
+    }
+
+    /** Identifiant stable, distinct des notifs inbox (`e.id.hashCode()`). */
+    fun progressNotifId(projectUuid: String): Int = ("deploying:$projectUuid").hashCode()
 }
