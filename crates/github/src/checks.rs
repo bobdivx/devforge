@@ -287,6 +287,48 @@ impl RepoApi {
             .and_then(Value::as_i64)
             .ok_or_else(|| "id absent".into())
     }
+
+    /// Webhooks du dépôt (`GET /repos/{o}/{r}/hooks`) : `(id, url de config)`.
+    pub async fn list_hooks(&self) -> Result<Vec<(i64, String)>, String> {
+        let v = self
+            .send(self.http.get(self.url("/hooks?per_page=100")))
+            .await?;
+        Ok(v.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|h| {
+                Some((
+                    h.get("id")?.as_i64()?,
+                    h.pointer("/config/url")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                ))
+            })
+            .collect())
+    }
+
+    pub async fn delete_hook(&self, id: i64) -> Result<(), String> {
+        self.send(self.http.delete(self.url(&format!("/hooks/{id}"))))
+            .await
+            .map(|_| ())
+    }
+
+    /// Recrée un webhook `push` (rollback de migration).
+    pub async fn create_push_hook(&self, url: &str, secret: Option<&str>) -> Result<i64, String> {
+        let mut config = json!({ "url": url, "content_type": "json", "insecure_ssl": "0" });
+        if let Some(s) = secret.filter(|s| !s.is_empty()) {
+            config["secret"] = json!(s);
+        }
+        let v = self
+            .send(self.http.post(self.url("/hooks")).json(&json!({
+                "name": "web", "active": true, "events": ["push"], "config": config,
+            })))
+            .await?;
+        v.get("id")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| "id absent".into())
+    }
 }
 
 fn urlencode(s: &str) -> String {

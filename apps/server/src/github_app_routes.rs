@@ -27,7 +27,7 @@ use crate::auth_routes::UserRow;
 use crate::secret_box::Redacted;
 use crate::state::AppState;
 
-type ApiErr = (StatusCode, Json<Value>);
+pub(crate) type ApiErr = (StatusCode, Json<Value>);
 
 pub const STATE_TTL_MINUTES: i64 = 10;
 const SETTINGS_PATH: &str = "/app/settings?tab=github";
@@ -78,11 +78,11 @@ fn http() -> reqwest::Client {
         .unwrap_or_default()
 }
 
-fn err(code: StatusCode, msg: &str) -> ApiErr {
+pub(crate) fn err(code: StatusCode, msg: &str) -> ApiErr {
     (code, Json(json!({ "error": msg })))
 }
 
-fn db_err(e: sqlx::Error) -> ApiErr {
+pub(crate) fn db_err(e: sqlx::Error) -> ApiErr {
     tracing::error!("github-app : erreur base : {e}");
     err(StatusCode::INTERNAL_SERVER_ERROR, "erreur base de données")
 }
@@ -91,7 +91,10 @@ fn settings_redirect(extra: &str) -> Response {
     Redirect::to(&format!("{SETTINGS_PATH}&{extra}")).into_response()
 }
 
-async fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<UserRow, ApiErr> {
+pub(crate) async fn require_admin(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<UserRow, ApiErr> {
     let user = crate::auth_routes::user_from_bearer_or_cookie(state, headers)
         .await?
         .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "connexion requise"))?;
@@ -684,6 +687,17 @@ pub async fn status_json(pool: &PgPool) -> Result<Value, sqlx::Error> {
     )
     .fetch_all(pool)
     .await?;
+    // P7-03 : projets GitHub encore en PAT (migration à faire).
+    let (unmigrated,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM projects WHERE github_installation_id IS NULL AND git_repository ILIKE '%github.com%'",
+    )
+    .fetch_one(pool)
+    .await?;
+    let pat_set: bool =
+        sqlx::query_as::<_, (String,)>("SELECT github_token FROM instance_settings WHERE id = 1")
+            .fetch_optional(pool)
+            .await?
+            .is_some_and(|(t,)| !t.trim().is_empty());
     // Projets liés à une installation supprimée côté GitHub (mode « déconnecté »).
     let (disconnected,): (i64,) = sqlx::query_as(
         r#"SELECT count(*) FROM projects p WHERE p.github_installation_id IS NOT NULL
@@ -721,6 +735,7 @@ pub async fn status_json(pool: &PgPool) -> Result<Value, sqlx::Error> {
         None => json!({
             "ok": true, "configured": false, "required_permissions": required,
             "installations": installations, "disconnected_projects": disconnected,
+            "unmigrated_projects": unmigrated, "pat_removable": false,
         }),
         Some((app_id, slug, client_id, html_url, owner, owner_type)) => json!({
             "ok": true,
@@ -736,6 +751,8 @@ pub async fn status_json(pool: &PgPool) -> Result<Value, sqlx::Error> {
             "required_permissions": required,
             "installations": installations,
             "disconnected_projects": disconnected,
+            "unmigrated_projects": unmigrated,
+            "pat_removable": unmigrated == 0 && pat_set,
         }),
     })
 }
