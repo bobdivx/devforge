@@ -55,9 +55,12 @@ describe('GithubAppSettingsPanel', () => {
     await r.findByText(/3 dépôt\(s\)/);
     expect(r.getByText(/checks:write/)).toBeTruthy();
     expect(r.getByText('Installer sur un autre compte')).toBeTruthy();
-    expect(r.getByText('Ajouter le logo')).toBeTruthy();
-    expect(r.getByText('Télécharger le logo').getAttribute('href')).toBe('/brand/icon-512.png');
-    expect(r.getByText('Ouvrir les réglages GitHub').closest('a')?.getAttribute('href')).toBe('https://github.com/settings/apps/devforge-nas');
+    expect(r.getByTestId('app-identity').querySelector('img')?.getAttribute('src')).toBe(
+      '/brand/icon-512.png',
+    );
+    expect(r.getByText('Réglages GitHub').closest('a')?.getAttribute('href')).toBe(
+      'https://github.com/settings/apps/devforge-nas',
+    );
   });
 
   it('formulaire caché : POST vers GitHub avec le champ manifest JSON', () => {
