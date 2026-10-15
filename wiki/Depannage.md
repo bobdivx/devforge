@@ -34,7 +34,7 @@ Wildcard manquant : Settings → Domaine.
 - **App GitHub** installée sur le dépôt + livraison dans `/api/v1/github-app/deliveries`
 - Branche du push = `git_branch`
 - Le poller (~90 s) reste le filet
-- Ancien webhook par dépôt : uniquement si `DEVFORGE_LEGACY_WEBHOOK` ≠ `0` et secret `DEVFORGE_GITHUB_WEBHOOK_SECRET`
+- Ancien webhook par dépôt : réglage admin `legacy_webhook` (Réglages › GitHub › Retirer le legacy) + secret si encore actif
 
 ## Agents muets
 

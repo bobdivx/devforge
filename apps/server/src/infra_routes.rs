@@ -2053,10 +2053,8 @@ async fn github_webhook(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
-    // P7-03 : ancien webhook par dépôt désactivable une fois la migration terminée.
-    if !crate::github_migration::legacy_webhook_enabled(
-        std::env::var("DEVFORGE_LEGACY_WEBHOOK").ok().as_deref(),
-    ) {
+    // Ancien webhook par dépôt : coupé depuis Réglages › GitHub (retire-legacy), pas via env.
+    if !crate::github_migration::legacy_webhook_enabled(&state.pool).await {
         return Err((
             axum::http::StatusCode::GONE,
             Json(json!({"error": "webhook par dépôt retiré : utilise l’app GitHub DevForge"})),

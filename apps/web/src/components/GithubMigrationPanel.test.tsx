@@ -18,10 +18,14 @@ describe('GithubMigrationPanel', () => {
     const githubAppMigrate = vi.fn(async (b: { dry_run: boolean }) =>
       b.dry_run ? dry : { ...dry, dry_run: false, migrated: 1, projects: [{ ...dry.projects[0], migrated: true }, dry.projects[1]] },
     );
-    const githubDisconnect = vi.fn(async () => ({ ok: true, connected: false, mode: 'off' }));
+    const githubAppRetireLegacy = vi.fn(async () => ({
+      ok: true,
+      pat_cleared: true,
+      legacy_webhook: false,
+    }));
     const confirmFn = vi.fn(() => true);
     const r = render(
-      <GithubMigrationPanel client={{ githubAppMigrate, githubDisconnect }} confirmFn={confirmFn} />,
+      <GithubMigrationPanel client={{ githubAppMigrate, githubAppRetireLegacy }} confirmFn={confirmFn} />,
     );
     fireEvent.click(r.getByText('Analyser (sans rien modifier)'));
     expect(await r.findByText(/non couvert/)).toBeTruthy();
@@ -34,32 +38,39 @@ describe('GithubMigrationPanel', () => {
 
   it('refus de confirmation ⇒ aucun appel réel', async () => {
     const githubAppMigrate = vi.fn(async () => dry);
-    const githubDisconnect = vi.fn(async () => ({ ok: true, connected: false, mode: 'off' }));
+    const githubAppRetireLegacy = vi.fn();
     const r = render(
-      <GithubMigrationPanel client={{ githubAppMigrate, githubDisconnect }} confirmFn={() => false} />,
+      <GithubMigrationPanel
+        client={{ githubAppMigrate, githubAppRetireLegacy }}
+        confirmFn={() => false}
+      />,
     );
     fireEvent.click(r.getByText('Analyser (sans rien modifier)'));
     fireEvent.click(await r.findByText('Migrer 1 projet(s)'));
     expect(githubAppMigrate).toHaveBeenCalledTimes(1);
   });
 
-  it('bannière patRemovable ⇒ supprimer le jeton après confirmation', async () => {
+  it('bannière patRemovable ⇒ retire legacy après confirmation', async () => {
     const githubAppMigrate = vi.fn();
-    const githubDisconnect = vi.fn(async () => ({ ok: true, connected: false, mode: 'off' }));
+    const githubAppRetireLegacy = vi.fn(async () => ({
+      ok: true,
+      pat_cleared: true,
+      legacy_webhook: false,
+    }));
     const confirmFn = vi.fn(() => true);
     const onPatCleared = vi.fn();
     const r = render(
       <GithubMigrationPanel
-        client={{ githubAppMigrate, githubDisconnect }}
+        client={{ githubAppMigrate, githubAppRetireLegacy }}
         patRemovable
         confirmFn={confirmFn}
         onPatCleared={onPatCleared}
       />,
     );
-    fireEvent.click(r.getByText('Supprimer le jeton'));
-    await waitFor(() => expect(githubDisconnect).toHaveBeenCalled());
+    fireEvent.click(r.getByText('Retirer le legacy'));
+    await waitFor(() => expect(githubAppRetireLegacy).toHaveBeenCalled());
     expect(confirmFn).toHaveBeenCalled();
     expect(onPatCleared).toHaveBeenCalled();
-    expect(await r.findByText(/Jeton personnel supprimé/)).toBeTruthy();
+    expect(await r.findByText(/Legacy retiré/)).toBeTruthy();
   });
 });

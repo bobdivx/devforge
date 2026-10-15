@@ -521,6 +521,8 @@ export type GithubAppStatus = {
   installations: GithubInstallation[];
   unmigrated_projects?: number;
   pat_removable?: boolean;
+  /** Ancien webhook par dépôt encore servi (réglage admin). */
+  legacy_webhook?: boolean;
 };
 export type GithubMigrationReport = {
   ok: boolean;
@@ -1460,6 +1462,12 @@ export const api = {
   githubAppStatus: () => request<GithubAppStatus>('/github-app'),
   githubAppMigrate: (body: { dry_run: boolean; project_uuids?: string[] }) =>
     request<GithubMigrationReport>('/github-app/migrate', { method: 'POST', body: JSON.stringify(body) }),
+  /** Efface le PAT instance et coupe l’ancien webhook par dépôt (admin, projets migrés). */
+  githubAppRetireLegacy: () =>
+    request<{ ok: boolean; pat_cleared: boolean; legacy_webhook: boolean }>(
+      '/github-app/retire-legacy',
+      { method: 'POST', body: '{}' },
+    ),
   projectPreviews: (uuid: string) => request<PreviewsResponse>(`/projects/${encodeURIComponent(uuid)}/previews`),
   setProjectPreviews: (uuid: string, enabled: boolean) =>
     request<{ ok: boolean; enabled: boolean }>(`/projects/${encodeURIComponent(uuid)}/previews/settings`, {

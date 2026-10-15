@@ -698,6 +698,7 @@ pub async fn status_json(pool: &PgPool) -> Result<Value, sqlx::Error> {
             .fetch_optional(pool)
             .await?
             .is_some_and(|(t,)| !t.trim().is_empty());
+    let legacy_webhook = crate::github_migration::legacy_webhook_enabled(pool).await;
     // Projets liés à une installation supprimée côté GitHub (mode « déconnecté »).
     let (disconnected,): (i64,) = sqlx::query_as(
         r#"SELECT count(*) FROM projects p WHERE p.github_installation_id IS NOT NULL
@@ -736,6 +737,7 @@ pub async fn status_json(pool: &PgPool) -> Result<Value, sqlx::Error> {
             "ok": true, "configured": false, "required_permissions": required,
             "installations": installations, "disconnected_projects": disconnected,
             "unmigrated_projects": unmigrated, "pat_removable": false,
+            "legacy_webhook": legacy_webhook,
         }),
         Some((app_id, slug, client_id, html_url, owner, owner_type)) => json!({
             "ok": true,
@@ -753,7 +755,8 @@ pub async fn status_json(pool: &PgPool) -> Result<Value, sqlx::Error> {
             "installations": installations,
             "disconnected_projects": disconnected,
             "unmigrated_projects": unmigrated,
-            "pat_removable": unmigrated == 0 && pat_set,
+            "pat_removable": unmigrated == 0 && (pat_set || legacy_webhook),
+            "legacy_webhook": legacy_webhook,
         }),
     })
 }

@@ -87,12 +87,15 @@ fn rate_window_limits_per_minute() {
     assert!(w.allow(180, 2), "nouvelle minute");
 }
 
-#[test]
-fn legacy_flag() {
-    assert!(legacy_webhook_enabled(None));
-    assert!(legacy_webhook_enabled(Some("1")));
-    assert!(!legacy_webhook_enabled(Some("0")));
-    assert!(!legacy_webhook_enabled(Some(" false ")));
+#[tokio::test]
+async fn legacy_flag_from_instance_settings() {
+    let pool = devforge_database::ephemeral_pg().await;
+    crate::db::migrate(&pool).await.unwrap();
+    assert!(legacy_webhook_enabled(&pool).await);
+    set_legacy_webhook(&pool, false).await.unwrap();
+    assert!(!legacy_webhook_enabled(&pool).await);
+    set_legacy_webhook(&pool, true).await.unwrap();
+    assert!(legacy_webhook_enabled(&pool).await);
 }
 
 #[tokio::test]

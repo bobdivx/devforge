@@ -480,6 +480,9 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         ("beta_workspace", "BIGINT NOT NULL DEFAULT 1"),
         ("beta_agent_builder", "BIGINT NOT NULL DEFAULT 1"),
         ("acme_email", "TEXT NOT NULL DEFAULT ''"),
+        // Ancien webhook par dépôt (`/api/v1/webhooks/github`) : 1 = actif, 0 = 410 Gone.
+        // Piloté depuis Réglages › GitHub (pas de variable d’environnement).
+        ("legacy_webhook", "BIGINT NOT NULL DEFAULT 1"),
     ] {
         let sql = format!("ALTER TABLE instance_settings ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;
