@@ -3,10 +3,10 @@
 DevForge has its own GitHub App. It replaces the personal access token (PAT) and the per-repo webhooks: one app-level webhook, short-lived installation tokens, Check Runs, GitHub Deployments and PR previews.
 
 ## Create the app (once per instance)
-1. **Réglages › GitHub › « Créer l’app GitHub DevForge »**, optionally with an organisation.
+1. During **onboarding** (recommended path or custom › GitHub), or later **Réglages › GitHub › « Créer l’app GitHub DevForge »**, optionally with an organisation. Pasting a PAT is optional and collapsed.
 2. GitHub opens with the app manifest pre-filled. Click **Create GitHub App**.
 3. DevForge receives the private key, the webhook secret and the client secret. They are sealed (AES-256-GCM, key from `DEVFORGE_SECRET_KEY` or `secret.key`) and never displayed or logged.
-4. **« Installer »**: choose the account and the repos (or "All repositories").
+4. **« Installer »**: choose the account and the repos (or "All repositories"). New apps use the GitHub App repo picker (no PAT).
 
 ## Permissions and why
 | Permission | Level | Why |
