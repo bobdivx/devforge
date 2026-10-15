@@ -1451,6 +1451,19 @@ export const api = {
     request<{ ok: boolean }>(`/projects/${encodeURIComponent(uuid)}/previews/${pr}/redeploy`, { method: 'POST' }),
   deletePreview: (uuid: string, pr: number) =>
     request<{ ok: boolean }>(`/projects/${encodeURIComponent(uuid)}/previews/${pr}`, { method: 'DELETE' }),
+  githubAppRepositories: (p: { q?: string; refresh?: boolean } = {}) => {
+    const qs = new URLSearchParams();
+    if (p.q) qs.set('q', p.q);
+    if (p.refresh) qs.set('refresh', '1');
+    const tail = qs.toString();
+    return request<AppReposResponse>(`/github-app/repositories${tail ? `?${tail}` : ''}`);
+  },
+  projectGithubLink: (uuid: string) => request<ProjectGithubLink>(`/projects/${encodeURIComponent(uuid)}/github-link`),
+  linkProjectGithub: (uuid: string, body: { installation_id: number; repo_id: number; branch?: string }) =>
+    request<{ ok: boolean; git_repository: string; git_branch: string }>(`/projects/${encodeURIComponent(uuid)}/github-link`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   githubAppManifest: (body: { org?: string; workflows?: boolean } = {}) =>
     request<GithubAppManifest>('/github-app/manifest', { method: 'POST', body: JSON.stringify(body) }),
   githubAppForget: () =>
@@ -2758,3 +2771,18 @@ export type PreviewItem = {
   updated_at: string;
 };
 export type PreviewsResponse = { ok: boolean; enabled: boolean; linked: boolean; previews: PreviewItem[] };
+export type AppRepo = {
+  installation_id: number;
+  repo_id: number;
+  full_name: string;
+  private: boolean;
+  default_branch?: string | null;
+  html_url: string;
+};
+export type AppReposResponse = {
+  ok: boolean;
+  installations: { installation_id: number; account_login: string; account_type: string; suspended: boolean; configure_url: string }[];
+  repositories: AppRepo[];
+  refresh_error?: string | null;
+};
+export type ProjectGithubLink = { ok: boolean; linked: boolean; lost: boolean; installation_id?: number; repo_id?: number | null };

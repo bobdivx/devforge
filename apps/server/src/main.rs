@@ -31,6 +31,7 @@ mod github_app_events;
 mod github_app_routes;
 mod github_auth;
 mod github_checks;
+mod github_repos;
 mod group_routes;
 mod infra_routes;
 mod infra_sqlite;
@@ -372,6 +373,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(git_routes::router())
         .merge(github_app_routes::router())
         .merge(pr_previews::router())
+        .merge(github_repos::router())
         .merge(github_app_events::router())
         .merge(draft_routes::router())
         .merge(correction::router())
