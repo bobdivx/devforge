@@ -1057,6 +1057,14 @@ pub async fn migrate_github_app(pool: &PgPool) -> Result<(), sqlx::Error> {
     ] {
         sqlx::query(sql).execute(pool).await?;
     }
+    // P4 : liens GitHub (Check Run / Deployment) par déploiement DevForge.
+    for sql in [
+        "ALTER TABLE deployments ADD COLUMN check_run_id BIGINT",
+        "ALTER TABLE deployments ADD COLUMN github_deployment_id BIGINT",
+        "ALTER TABLE deployments ADD COLUMN github_head_sha TEXT",
+    ] {
+        let _ = sqlx::query(sql).execute(pool).await;
+    }
     // P3 : observabilité des livraisons webhook app-level.
     for sql in [
         "ALTER TABLE github_webhook_deliveries ADD COLUMN duration_ms BIGINT",

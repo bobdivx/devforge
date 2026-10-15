@@ -589,6 +589,7 @@ pub(crate) async fn run_dev_deploy(
         is_static: project.is_static != 0,
         github_token: deploy_tok.token,
         github_token_ephemeral: deploy_tok.ephemeral,
+        pin_sha: None,
         env_file,
         proxy_labels: Some(labels),
         gpu_nvidia: project.gpu_nvidia != 0,

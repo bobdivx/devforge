@@ -1445,6 +1445,45 @@ pub(crate) async fn run_real_deploy(
     project: &Project,
     deployment_uuid: &str,
 ) -> DeployRunOutcome {
+    run_real_deploy_at(state, project, deployment_uuid, None).await
+}
+
+/// Déploiement, éventuellement fixé sur un commit précis (`pin_sha`, relance GitHub).
+/// Le retour d'état GitHub (Checks/statuts/Deployments, P4) est piloté ici : tous les
+/// chemins de déploiement prod passent par cette fonction.
+pub(crate) async fn run_real_deploy_at(
+    state: &AppState,
+    project: &Project,
+    deployment_uuid: &str,
+    pin_sha: Option<&str>,
+) -> DeployRunOutcome {
+    let gh_lifecycle = crate::github_checks::begin(state, project, deployment_uuid, pin_sha);
+    let run = run_real_deploy_inner(
+        state,
+        project,
+        deployment_uuid,
+        pin_sha,
+        gh_lifecycle.started_signal(),
+    )
+    .await;
+    crate::github_checks::end(
+        state,
+        project,
+        gh_lifecycle,
+        run.result.ok,
+        run.cancelled,
+        run.result.logs.clone(),
+    );
+    run
+}
+
+async fn run_real_deploy_inner(
+    state: &AppState,
+    project: &Project,
+    deployment_uuid: &str,
+    pin_sha: Option<&str>,
+    build_started: std::sync::Arc<tokio::sync::Notify>,
+) -> DeployRunOutcome {
     {
         let _start = state.deploy_queue.lock_project_start(project.id).await;
         let _cancel_rx = state.deploy_queue.register_cancel(deployment_uuid).await;
@@ -1542,6 +1581,7 @@ pub(crate) async fn run_real_deploy(
         is_static: project.is_static != 0,
         github_token: deploy_tok.token,
         github_token_ephemeral: deploy_tok.ephemeral,
+        pin_sha: pin_sha.map(str::to_string),
         env_file,
         proxy_labels: proxy_labels_for_project(state, project).await,
         gpu_nvidia: project.gpu_nvidia != 0,
@@ -1560,7 +1600,11 @@ pub(crate) async fn run_real_deploy(
         deployment_uuid,
         move || {
             let deploy = deploy.clone();
-            async move { deploy.deploy(&req).await }
+            let started = build_started.clone();
+            async move {
+                started.notify_one();
+                deploy.deploy(&req).await
+            }
         },
     )
     .await;

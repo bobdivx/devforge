@@ -30,6 +30,7 @@ mod git_routes;
 mod github_app_events;
 mod github_app_routes;
 mod github_auth;
+mod github_checks;
 mod group_routes;
 mod infra_routes;
 mod infra_sqlite;
