@@ -106,21 +106,12 @@ pub(crate) async fn require_admin(
 
 // ───────────────────────── Manifest ─────────────────────────
 
-/// Nom d'app GitHub : 34 caractères max, lettres/chiffres/tirets.
-pub fn app_name(instance_name: &str) -> String {
-    let cleaned: String = instance_name
-        .trim()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    let cleaned = cleaned.trim_matches('-');
-    let mut name = if cleaned.is_empty() {
-        "DevForge".to_string()
-    } else {
-        format!("DevForge-{cleaned}")
-    };
-    name.truncate(34);
-    name.trim_end_matches('-').to_string()
+/// Nom par défaut de l'app GitHub dans le manifest (« DevForge » seul est réservé sur GitHub).
+pub const DEFAULT_APP_NAME: &str = "DevForgeApp";
+
+/// Nom d'app du manifest : toujours `DevForgeApp` (modifiable ensuite sur GitHub).
+pub fn app_name(_instance_name: &str) -> String {
+    DEFAULT_APP_NAME.to_string()
 }
 
 pub fn build_manifest(instance_name: &str, instance_url: &str, workflows: bool) -> Value {
@@ -669,6 +660,15 @@ pub fn manage_url(web: &str, slug: &str, owner_login: &str, owner_type: &str) ->
     }
 }
 
+/// Page des réglages de l'app (logo, description) : compte perso ou organisation.
+pub fn settings_url(web: &str, slug: &str, owner_login: &str, owner_type: &str) -> String {
+    if owner_type.eq_ignore_ascii_case("Organization") {
+        format!("{web}/organizations/{owner_login}/settings/apps/{slug}")
+    } else {
+        format!("{web}/settings/apps/{slug}")
+    }
+}
+
 pub async fn status_json(pool: &PgPool) -> Result<Value, sqlx::Error> {
     let app: Option<(i64, String, String, String, String, String)> = sqlx::query_as(
         "SELECT app_id, slug, client_id, html_url, owner_login, owner_type FROM github_app WHERE id = 1",
@@ -748,6 +748,7 @@ pub async fn status_json(pool: &PgPool) -> Result<Value, sqlx::Error> {
             "owner_type": owner_type,
             "install_url": format!("{web}/apps/{slug}/installations/new"),
             "manage_url": manage_url(&web, &slug, &owner, &owner_type),
+            "settings_url": settings_url(&web, &slug, &owner, &owner_type),
             "required_permissions": required,
             "installations": installations,
             "disconnected_projects": disconnected,
