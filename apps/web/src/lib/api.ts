@@ -1441,6 +1441,16 @@ export const api = {
       body: JSON.stringify(body),
     }),
   githubAppStatus: () => request<GithubAppStatus>('/github-app'),
+  projectPreviews: (uuid: string) => request<PreviewsResponse>(`/projects/${encodeURIComponent(uuid)}/previews`),
+  setProjectPreviews: (uuid: string, enabled: boolean) =>
+    request<{ ok: boolean; enabled: boolean }>(`/projects/${encodeURIComponent(uuid)}/previews/settings`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    }),
+  redeployPreview: (uuid: string, pr: number) =>
+    request<{ ok: boolean }>(`/projects/${encodeURIComponent(uuid)}/previews/${pr}/redeploy`, { method: 'POST' }),
+  deletePreview: (uuid: string, pr: number) =>
+    request<{ ok: boolean }>(`/projects/${encodeURIComponent(uuid)}/previews/${pr}`, { method: 'DELETE' }),
   githubAppManifest: (body: { org?: string; workflows?: boolean } = {}) =>
     request<GithubAppManifest>('/github-app/manifest', { method: 'POST', body: JSON.stringify(body) }),
   githubAppForget: () =>
@@ -2737,3 +2747,14 @@ export interface WakeLogEntry {
   created_at: string;
   last_at: string;
 }
+
+export type PreviewItem = {
+  pr_number: number;
+  head_sha: string;
+  head_ref?: string | null;
+  url?: string | null;
+  status: string;
+  deployment_uuid?: string | null;
+  updated_at: string;
+};
+export type PreviewsResponse = { ok: boolean; enabled: boolean; linked: boolean; previews: PreviewItem[] };

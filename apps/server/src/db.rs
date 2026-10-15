@@ -1020,6 +1020,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
 
     // GitHub App (P0) : schéma + scellement des PAT existants.
     migrate_github_app(pool).await?;
+    // Previews de PR (P5) : branche de tête, deployment GitHub, portée « preview » des env.
+    crate::pr_previews::migrate(pool).await?;
 
     Ok(())
 }

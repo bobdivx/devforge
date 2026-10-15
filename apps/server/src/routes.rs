@@ -1861,6 +1861,8 @@ async fn cancel_deployment(
     // Le conteneur temporaire à nettoyer dépend de l'environnement (prod ≠ dev).
     let instance = if crate::dev_env::is_dev(&dep.environment) {
         crate::dev_env::dev_instance_id(&project.uuid)
+    } else if let Some(pr) = crate::pr_previews::pr_of_env(&dep.environment) {
+        crate::pr_previews::preview_instance_id(&project.uuid, pr)
     } else {
         project.uuid.clone()
     };
@@ -3278,8 +3280,27 @@ pub fn resume_deploy_queue(state: AppState) {
                     .await
                     .ok()
                     .flatten();
-            if env.is_some_and(|(e,)| crate::dev_env::is_dev(&e)) {
+            if env.as_ref().is_some_and(|(e,)| crate::dev_env::is_dev(e)) {
                 crate::dev_env::finish_dev_deploy(&state, &project, &uuid).await;
+                continue;
+            }
+            if env
+                .as_ref()
+                .is_some_and(|(e,)| crate::pr_previews::is_preview_env(e))
+            {
+                // Preview interrompue par un redémarrage : relancée par le prochain push
+                // ou depuis l'onglet « Previews » (jamais rejouée comme une prod).
+                let _ = crate::deploy_queue::finalize_if_active(
+                    &state.pool,
+                    &uuid,
+                    "failed",
+                    "unknown",
+                    "[devforge] preview interrompue par un redémarrage\n",
+                    Some("Preview interrompue : redéploie-la depuis l’onglet Previews"),
+                    None,
+                    None,
+                )
+                .await;
                 continue;
             }
             let outcome = run_real_deploy(&state, &project, &uuid).await;

@@ -44,6 +44,7 @@ mod platform_sso;
 #[cfg(test)]
 mod platform_sso_tests;
 mod pocket_id;
+mod pr_previews;
 mod project_oidc;
 mod project_oidc_routes;
 mod project_pg;
@@ -370,6 +371,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(actions_routes::router())
         .merge(git_routes::router())
         .merge(github_app_routes::router())
+        .merge(pr_previews::router())
         .merge(github_app_events::router())
         .merge(draft_routes::router())
         .merge(correction::router())

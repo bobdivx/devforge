@@ -38,6 +38,7 @@ serde_json = { workspace = true }
 sqlx = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+chrono-tz = "0.10"
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = { workspace = true }

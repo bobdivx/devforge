@@ -280,8 +280,10 @@ async fn route(state: &AppState, acc: &Accepted) -> Result<&'static str, String>
                 .map(|_| "processed")
                 .map_err(|(_, j)| j.0.to_string())
         }
-        // Previews de PR : phase P5.
-        "pull_request" => Ok("ignored_until_p5"),
+        "pull_request" => {
+            let id = acc.installation_id.ok_or("installation absente")?;
+            crate::pr_previews::handle_pull_request(state, id, &acc.action, &acc.payload).await
+        }
         _ => Ok("ignored"),
     }
 }
