@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
+import { GithubRepoPicker } from './GithubRepoPicker';
+import type { AppRepo } from '../lib/api';
 import { api } from '../lib/api';
 import type { ClusterNode } from '../lib/api';
 import { NodeSelect } from './NodeSelect';
@@ -84,6 +86,7 @@ export function NewGithubAppWizard({
   const [repos, setRepos] = useState<GhRepo[]>([]);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<GhRepo | null>(null);
+  const [appRepo, setAppRepo] = useState<AppRepo | null>(null);
   const [branches, setBranches] = useState<string[]>([]);
   const [branch, setBranch] = useState('main');
   const [buildPack, setBuildPack] = useState<string>('nixpacks');
@@ -256,6 +259,14 @@ export function NewGithubAppWizard({
           tone: 'ok',
         });
       }
+      // Dépôt choisi via l'app GitHub : liaison à l'installation (aucun PAT requis).
+      if (appRepo) {
+        await api.linkProjectGithub(p.data.uuid, {
+          installation_id: appRepo.installation_id,
+          repo_id: appRepo.repo_id,
+          branch,
+        });
+      }
       // Lance le premier déploiement automatiquement
       await api.createDeployment(p.data.uuid, { git_message: 'Initial deploy from GitHub wizard' });
       toast.push({
@@ -355,6 +366,25 @@ export function NewGithubAppWizard({
 
       {step === 'repo' && (
         <div class="space-y-3">
+          <details open>
+            <summary class="cursor-pointer text-sm font-medium">Depuis l’app GitHub DevForge</summary>
+            <GithubRepoPicker
+              selected={appRepo}
+              onSelect={(r) => {
+                const [owner, repoName] = r.full_name.split('/');
+                setAppRepo(r);
+                setSelected({
+                  name: repoName,
+                  full_name: r.full_name,
+                  owner,
+                  private: r.private,
+                  default_branch: r.default_branch || 'main',
+                  html_url: r.html_url,
+                } as GhRepo);
+                setName(repoName);
+              }}
+            />
+          </details>
           <Input
             placeholder="Filtrer les repos…"
             value={query}
@@ -369,6 +399,7 @@ export function NewGithubAppWizard({
                   selected?.full_name === r.full_name ? 'bg-white/5' : ''
                 }`}
                 onClick={() => {
+                  setAppRepo(null);
                   setSelected(r);
                   setName(r.name);
                 }}

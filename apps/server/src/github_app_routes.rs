@@ -54,7 +54,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/github-app/installed", get(installed))
 }
 
-fn api_base() -> String {
+pub(crate) fn api_base() -> String {
     std::env::var("DEVFORGE_GITHUB_API_URL")
         .ok()
         .map(|s| s.trim().trim_end_matches('/').to_string())
@@ -62,7 +62,7 @@ fn api_base() -> String {
         .unwrap_or_else(|| "https://api.github.com".into())
 }
 
-fn web_base() -> String {
+pub(crate) fn web_base() -> String {
     std::env::var("DEVFORGE_GITHUB_WEB_URL")
         .ok()
         .map(|s| s.trim().trim_end_matches('/').to_string())

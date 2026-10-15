@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
+import { GithubRepoPicker } from './GithubRepoPicker';
+import type { ProjectGithubLink } from '../lib/api';
 import { api, type ProjectSync } from '../lib/api';
 import { projectSyncMeta } from '../lib/status';
 import { DiffViewer, type DiffFile } from './DiffViewer';
@@ -71,6 +73,10 @@ export function ProjectGitPanel({
 }) {
   const toast = useToast();
   const [data, setData] = useState<GitStatus | null>(null);
+  const [ghLink, setGhLink] = useState<ProjectGithubLink | null>(null);
+  useEffect(() => {
+    api.projectGithubLink(projectUuid).then(setGhLink).catch(() => setGhLink(null));
+  }, [projectUuid]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -242,6 +248,27 @@ export function ProjectGitPanel({
 
   return (
     <div class="space-y-5">
+      {ghLink?.lost && (
+        <div role="alert" class="rounded border border-amber-400 bg-amber-50 p-3 text-sm text-amber-900">
+          Accès GitHub perdu : ce dépôt n’est plus accessible à l’app GitHub DevForge. Ajoute-le à l’installation ou
+          choisis un autre dépôt ci-dessous.
+        </div>
+      )}
+      <details>
+        <summary class="cursor-pointer text-sm font-medium">Choisir le dépôt depuis l’app GitHub</summary>
+        <GithubRepoPicker
+          selected={ghLink?.installation_id ? { installation_id: ghLink.installation_id, repo_id: ghLink.repo_id ?? 0 } : null}
+          onSelect={async (r) => {
+            try {
+              await api.linkProjectGithub(projectUuid, { installation_id: r.installation_id, repo_id: r.repo_id });
+              setGhLink(await api.projectGithubLink(projectUuid));
+              toast.push({ title: 'Dépôt relié', detail: r.full_name, tone: 'ok' });
+            } catch (e) {
+              toast.push({ title: 'Liaison impossible', detail: String((e as Error).message || e), tone: 'danger' });
+            }
+          }}
+        />
+      </details>
       <DiffViewer
         open={diffOpen}
         onClose={() => setDiffOpen(false)}
