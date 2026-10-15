@@ -280,6 +280,7 @@ pub(crate) async fn deploy_project(
 
 async fn tick(state: &AppState, ensure_webhooks: bool) {
     crate::github_app_events::purge_old_deliveries(&state.pool).await;
+    crate::pr_previews::sweep(state).await;
     let projects = sqlx::query_as::<_, Project>(
         r#"SELECT * FROM projects
            WHERE auto_deploy != 0

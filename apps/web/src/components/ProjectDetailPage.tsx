@@ -19,6 +19,7 @@ import { RuntimeLogsPanel } from './RuntimeLogsPanel';
 import { ProjectSpecsModal } from './ProjectSpecsModal';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
+import { ProjectPreviewsPanel } from './ProjectPreviewsPanel';
 import { ProjectOidcPanel } from './ProjectOidcPanel';
 import { EnvBadge, ProjectBranchesPanel, isDevDeployment } from './ProjectBranchesPanel';
 import { ProjectGroupPanel, ProjectGroupSuggest } from './GroupPage';
@@ -73,6 +74,7 @@ type Tab =
   | 'env'
   | 'backups'
   | 'crons'
+  | 'previews'
   | 'settings';
 
 type Props = { uuid?: string; tab?: Tab };
@@ -99,6 +101,7 @@ function readQuery(): { uuid: string; tab: Tab; builder?: boolean; agent?: strin
     'env',
     'backups',
     'crons',
+    'previews',
     'settings',
   ];
   return {
@@ -443,6 +446,7 @@ export function ProjectDetailPage(props: Props) {
       {tab === 'env' && <EnvPanel uuid={uuid} />}
       {tab === 'backups' && <BackupsPanel projectUuid={uuid} />}
       {tab === 'crons' && <CronsPanel projectUuid={uuid} />}
+      {tab === 'previews' && <ProjectPreviewsPanel uuid={uuid} />}
       {tab === 'domains' && (
         <DomainsPanel
           uuid={uuid}
@@ -749,7 +753,7 @@ type HealthItem = {
 };
 
 /** Tuiles rangées dans « Plus » (modal) : utiles mais rares. */
-const SECONDARY_TILE_KEYS = new Set(['domains', 'git', 'actions', 'backups', 'crons', 'gpu', 'node']);
+const SECONDARY_TILE_KEYS = new Set(['domains', 'git', 'actions', 'backups', 'crons', 'previews', 'gpu', 'node']);
 
 
 function deployWord(status: string): string {
@@ -1008,6 +1012,14 @@ function ProjectOverview({
       detail: 'Tâches planifiées',
       tone: 'neutral',
       href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=crons`,
+    },
+    {
+      key: 'previews',
+      icon: 'git',
+      label: 'Previews',
+      detail: 'Une instance par pull request',
+      tone: 'neutral',
+      href: `/app/projects/view?uuid=${encodeURIComponent(uuid)}&tab=previews`,
     },
     {
       key: 'gpu',

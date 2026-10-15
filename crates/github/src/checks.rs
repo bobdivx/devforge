@@ -221,6 +221,72 @@ impl RepoApi {
         .await
         .map(|_| ())
     }
+
+    /// Commentaires d'une issue/PR (une page, `per_page` ≤ 100).
+    pub async fn list_issue_comments(&self, number: i64, page: u32) -> Result<Vec<Value>, String> {
+        let v = self
+            .send(self.http.get(self.url(&format!(
+                "/issues/{number}/comments?per_page=100&page={page}"
+            ))))
+            .await?;
+        Ok(v.as_array().cloned().unwrap_or_default())
+    }
+
+    pub async fn create_issue_comment(&self, number: i64, body: &str) -> Result<i64, String> {
+        let v = self
+            .send(
+                self.http
+                    .post(self.url(&format!("/issues/{number}/comments")))
+                    .json(&json!({ "body": clip(body, OUTPUT_MAX) })),
+            )
+            .await?;
+        v.get("id")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| "id absent".into())
+    }
+
+    pub async fn update_issue_comment(&self, comment_id: i64, body: &str) -> Result<(), String> {
+        self.send(
+            self.http
+                .patch(self.url(&format!("/issues/comments/{comment_id}")))
+                .json(&json!({ "body": clip(body, OUTPUT_MAX) })),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// État d'une PR : `open` | `closed`.
+    pub async fn pull_state(&self, number: i64) -> Result<String, String> {
+        let v = self
+            .send(self.http.get(self.url(&format!("/pulls/{number}"))))
+            .await?;
+        v.get("state")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| "state absent".into())
+    }
+
+    /// Check Run terminé directement (ex. `neutral` pour une PR de fork).
+    pub async fn completed_check_run(
+        &self,
+        name: &str,
+        head_sha: &str,
+        conclusion: &str,
+        title: &str,
+        summary: &str,
+    ) -> Result<i64, String> {
+        let body = json!({
+            "name": name, "head_sha": head_sha, "status": "completed",
+            "conclusion": conclusion,
+            "output": { "title": clip(title, 200), "summary": clip(summary, OUTPUT_MAX) },
+        });
+        let v = self
+            .send(self.http.post(self.url("/check-runs")).json(&body))
+            .await?;
+        v.get("id")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| "id absent".into())
+    }
 }
 
 fn urlencode(s: &str) -> String {
