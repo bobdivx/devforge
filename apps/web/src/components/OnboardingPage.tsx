@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import type { Bootstrap } from '../lib/auth';
 import { AuthGate } from './AuthGate';
 import { DockerEngineAlert, type DockerEngineInfo } from './DockerEngineAlert';
+import { submitManifestForm } from './GithubAppSettingsPanel';
 import { JoinClusterForm } from './JoinClusterForm';
 import {
   Alert,
@@ -24,6 +25,7 @@ type StepId = 'docker' | 'suite' | 'instance' | 'domain' | 'github' | 'finish';
 const FAST_STEPS: { id: StepId; label: string }[] = [
   { id: 'docker', label: 'Docker' },
   { id: 'domain', label: 'Domaine' },
+  { id: 'github', label: 'GitHub' },
   { id: 'suite', label: 'Première app' },
 ];
 
@@ -56,6 +58,10 @@ export function OnboardingWizard() {
   const [instanceUrl, setInstanceUrl] = useState('http://localhost:8000');
   const [domain, setDomain] = useState('');
   const [githubToken, setGithubToken] = useState('');
+  const [githubOrg, setGithubOrg] = useState('');
+  const [showPat, setShowPat] = useState(false);
+  const [appConfigured, setAppConfigured] = useState(false);
+  const [appInstallUrl, setAppInstallUrl] = useState<string | null>(null);
   const [joinMode, setJoinMode] = useState(false);
   const [docker, setDocker] = useState<DockerEngineInfo | null>(null);
 
@@ -79,6 +85,20 @@ export function OnboardingWizard() {
       .then((h) => setDocker(h.backends?.docker ?? null))
       .catch(() => setDocker(null));
   }, []);
+
+  useEffect(() => {
+    if (step !== 'github') return;
+    api
+      .githubAppStatus()
+      .then((s) => {
+        setAppConfigured(!!s.configured);
+        setAppInstallUrl(s.install_url ?? null);
+      })
+      .catch(() => {
+        setAppConfigured(false);
+        setAppInstallUrl(null);
+      });
+  }, [step]);
 
   async function savePartial(body: Record<string, string | undefined>) {
     setBusy(true);
@@ -127,6 +147,34 @@ export function OnboardingWizard() {
     } catch {
       /* error already set */
     }
+  }
+
+  async function createGithubApp() {
+    setBusy(true);
+    setError(null);
+    try {
+      // Garantir URL d’instance avant le manifest (callback GitHub).
+      await api.saveOnboarding({
+        instance_name: instanceName.trim() || 'DevForge',
+        instance_url: instanceUrl.trim() || 'http://localhost:8000',
+        ...(domainOk() ? { wildcard_domain: domain.trim() } : {}),
+      });
+      const m = await api.githubAppManifest(
+        githubOrg.trim() ? { org: githubOrg.trim() } : {},
+      );
+      submitManifestForm(m);
+    } catch (e) {
+      setError(String((e as Error).message || e));
+      setBusy(false);
+    }
+  }
+
+  function afterGithubStep() {
+    if (door === 'fast') {
+      setStep('suite');
+      return;
+    }
+    void nextCustom();
   }
 
   async function finishCustom() {
@@ -333,7 +381,7 @@ export function OnboardingWizard() {
                       return;
                     }
                     setError(null);
-                    setStep('suite');
+                    setStep('github');
                   }}
                 >
                   Continuer
@@ -344,12 +392,12 @@ export function OnboardingWizard() {
 
           {door === 'fast' && step === 'suite' && (
             <div class="space-y-4">
-              <h2 class="text-xl font-semibold tracking-tight">3 · Première app</h2>
+              <h2 class="text-xl font-semibold tracking-tight">4 · Première app</h2>
               <p class="text-sm text-[var(--color-ink-muted)]">
-                Importe un dépôt ou décris l’app. Tu arrives dans le workspace.
+                Importe un dépôt via le sélecteur GitHub App, ou décris l’app. Tu arrives dans le workspace.
               </p>
               <div class="flex gap-2">
-                <Button variant="ghost" onClick={() => setStep('domain')}>
+                <Button variant="ghost" onClick={() => setStep('github')}>
                   Retour
                 </Button>
                 <Button class="flex-1" disabled={busy} onClick={finishFast}>
@@ -410,33 +458,71 @@ export function OnboardingWizard() {
             </div>
           )}
 
-          {door === 'custom' && step === 'github' && (
+          {(door === 'custom' || door === 'fast') && step === 'github' && (
             <div class="space-y-4">
-              <h2 class="text-xl font-semibold tracking-tight">GitHub</h2>
+              <h2 class="text-xl font-semibold tracking-tight">
+                {door === 'fast' ? '3 · GitHub' : 'GitHub'}
+              </h2>
               <p class="text-sm text-[var(--color-ink-muted)]">
-                Colle un personal access token (repo + actions). Tu pourras changer plus tard.
+                Crée l’app GitHub DevForge : déploiements, previews et choix des dépôts sans jeton à coller.
               </p>
-              {boot?.settings.github_connected && (
-                <div class="flex items-center gap-2 text-sm">
-                  <PulseDot tone="ok" />
-                  <Badge tone="ok">Déjà connecté</Badge>
+              {appConfigured ? (
+                <div class="space-y-3">
+                  <div class="flex items-center gap-2 text-sm">
+                    <PulseDot tone="ok" />
+                    <Badge tone="ok">App GitHub prête</Badge>
+                  </div>
+                  {appInstallUrl && (
+                    <Button href={appInstallUrl} size="sm" variant="outline" target="_blank">
+                      Installer sur des dépôts
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <div class="space-y-3">
+                  <Input
+                    label="Organisation (optionnel)"
+                    hint="Vide = ton compte personnel."
+                    placeholder="mon-organisation"
+                    value={githubOrg}
+                    onInput={(e) => setGithubOrg((e.target as HTMLInputElement).value)}
+                  />
+                  <Button class="w-full" disabled={busy} onClick={() => void createGithubApp()}>
+                    {busy ? <Spinner /> : null}
+                    Créer l’app GitHub DevForge
+                  </Button>
                 </div>
               )}
-              <Input
-                label="Token"
-                type="password"
-                placeholder="ghp_…"
-                value={githubToken}
-                onInput={(e) => setGithubToken((e.target as HTMLInputElement).value)}
-              />
+              <button
+                type="button"
+                class="text-xs text-[var(--color-ink-muted)] underline"
+                onClick={() => setShowPat((v) => !v)}
+              >
+                {showPat ? 'Masquer le jeton optionnel' : 'Jeton personnel (optionnel)'}
+              </button>
+              {showPat && (
+                <Input
+                  label="Token"
+                  type="password"
+                  placeholder="ghp_…"
+                  value={githubToken}
+                  onInput={(e) => setGithubToken((e.target as HTMLInputElement).value)}
+                />
+              )}
               <div class="flex gap-2">
                 <Button variant="ghost" onClick={() => setStep('domain')}>
                   Retour
                 </Button>
-                <Button variant="outline" onClick={skipGithub}>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (door === 'fast') setStep('suite');
+                    else skipGithub();
+                  }}
+                >
                   Plus tard
                 </Button>
-                <Button class="flex-1" disabled={busy} onClick={nextCustom}>
+                <Button class="flex-1" disabled={busy} onClick={afterGithubStep}>
                   {busy ? <Spinner /> : null}
                   Continuer
                 </Button>
