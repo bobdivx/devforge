@@ -136,7 +136,7 @@ export function GithubAppSettingsPanel({
                   {status.slug}
                 </a>
               </p>
-              <p class="text-xs text-[var(--color-ink-muted)]">@{status.owner_login} · logo DevForge</p>
+              <p class="text-xs text-[var(--color-ink-muted)]">@{status.owner_login}</p>
             </div>
             {status.settings_url && (
               <Button size="sm" variant="ghost" href={status.settings_url} target="_blank">
