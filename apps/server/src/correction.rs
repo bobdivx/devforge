@@ -503,16 +503,88 @@ pub async fn ensure_repair_agent(pool: &PgPool, project_uuid: &str) -> Result<St
     Ok(uuid)
 }
 
-/// Une réparation est ouverte (en test, prête ou en conflit) : le dossier de travail ne doit pas être remis à zéro.
-pub async fn has_open_repair(pool: &PgPool, project_uuid: &str) -> bool {
-    sqlx::query_as::<_, (i64,)>(
-        "SELECT COUNT(*) FROM corrections WHERE project_uuid = $1 AND kind = 'repair' AND state IN ('testing', 'proposed', 'conflict')",
+/// Durée maximale pendant laquelle une réparation « en test » retarde un nouveau commit.
+pub const REPAIR_TESTING_HOLD_MIN: i64 = 30;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepairGate {
+    /// Rustine teste activement sa correction : on reporte (au prochain tick).
+    Wait,
+    /// Réparation prête / en conflit / test bloqué : le nouveau commit passe devant,
+    /// le brouillon est sauvegardé puis la réparation est archivée.
+    Supersede,
+}
+
+/// Décision pure : seule une réparation en cours de test récente retient un nouveau commit.
+/// Avant (incident du 14/10/2026), une réparation « prête » jamais appliquée bloquait
+/// silencieusement tout auto-deploy du projet, indéfiniment.
+pub fn repair_gate(
+    state: &str,
+    updated_at: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> RepairGate {
+    if state != "testing" {
+        return RepairGate::Supersede;
+    }
+    match chrono::DateTime::parse_from_rfc3339(updated_at) {
+        Ok(t) if (now - t.with_timezone(&chrono::Utc)).num_minutes() < REPAIR_TESTING_HOLD_MIN => {
+            RepairGate::Wait
+        }
+        _ => RepairGate::Supersede,
+    }
+}
+
+/// Avant un déploiement d'un nouveau commit : `true` = reporter. Sinon les réparations
+/// ouvertes sont archivées (le brouillon est sauvegardé par l'appelant avant le reset).
+pub async fn gate_deploy_on_repair(pool: &PgPool, project_uuid: &str) -> bool {
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT uuid, state, updated_at FROM corrections WHERE project_uuid = $1 AND kind = 'repair' AND state IN ('testing', 'proposed', 'conflict')",
     )
     .bind(project_uuid)
-    .fetch_one(pool)
+    .fetch_all(pool)
     .await
-    .map(|(n,)| n > 0)
-    .unwrap_or(false)
+    .unwrap_or_default();
+    let now = chrono::Utc::now();
+    if rows
+        .iter()
+        .any(|(_, st, up)| repair_gate(st, up, now) == RepairGate::Wait)
+    {
+        return true;
+    }
+    for (uuid, _, _) in rows {
+        let _ = sqlx::query("UPDATE corrections SET state = 'archived', note = 'Remplacée : un nouveau commit a été mis en ligne (brouillon sauvegardé).', updated_at = $1 WHERE uuid = $2")
+            .bind(now_str())
+            .bind(&uuid)
+            .execute(pool)
+            .await;
+    }
+    false
+}
+
+#[cfg(test)]
+mod repair_gate_tests {
+    use super::*;
+
+    #[test]
+    fn proposed_or_conflict_never_blocks() {
+        let now = chrono::Utc::now();
+        let t = now.to_rfc3339();
+        assert_eq!(repair_gate("proposed", &t, now), RepairGate::Supersede);
+        assert_eq!(repair_gate("conflict", &t, now), RepairGate::Supersede);
+    }
+
+    #[test]
+    fn testing_blocks_only_while_recent() {
+        let now = chrono::Utc::now();
+        let recent = (now - chrono::Duration::minutes(5)).to_rfc3339();
+        let stale = (now - chrono::Duration::minutes(REPAIR_TESTING_HOLD_MIN + 1)).to_rfc3339();
+        assert_eq!(repair_gate("testing", &recent, now), RepairGate::Wait);
+        assert_eq!(repair_gate("testing", &stale, now), RepairGate::Supersede);
+        assert_eq!(
+            repair_gate("testing", "garbage", now),
+            RepairGate::Supersede
+        );
+    }
 }
 
 /// Échec dû à la plateforme (délais Docker, conteneur jamais prêt sans erreur de l'app).
