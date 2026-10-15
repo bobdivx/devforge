@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import { api, type GithubMigrationReport } from '../lib/api';
 
-export type MigrationClient = Pick<typeof api, 'githubAppMigrate' | 'githubDisconnect'>;
+export type MigrationClient = Pick<typeof api, 'githubAppMigrate' | 'githubAppRetireLegacy'>;
 
 const LABEL: Record<string, string> = {
   covered: 'couvert',
@@ -25,7 +25,7 @@ export function GithubMigrationPanel({
   const [report, setReport] = useState<GithubMigrationReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [patGone, setPatGone] = useState(false);
+  const [legacyRetired, setLegacyRetired] = useState(false);
 
   async function run(dryRun: boolean) {
     if (!dryRun && !confirmFn('Relier les projets couverts à l’app et supprimer leurs webhooks par dépôt ?')) return;
@@ -40,10 +40,10 @@ export function GithubMigrationPanel({
     }
   }
 
-  async function clearPat() {
+  async function retireLegacy() {
     if (
       !confirmFn(
-        'Supprimer le jeton GitHub personnel ? L’app GitHub suffit pour les déploiements. Tu pourras coller un jeton plus tard si besoin.',
+        'Retirer le jeton personnel et couper l’ancien webhook par dépôt ? L’app GitHub suffit. Annulable via un rollback de projet.',
       )
     ) {
       return;
@@ -51,8 +51,8 @@ export function GithubMigrationPanel({
     setBusy(true);
     setError(null);
     try {
-      await client.githubDisconnect();
-      setPatGone(true);
+      await client.githubAppRetireLegacy();
+      setLegacyRetired(true);
       onPatCleared?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -62,21 +62,24 @@ export function GithubMigrationPanel({
   }
 
   const covered = report?.projects.filter((p) => p.status === 'covered').length ?? 0;
-  const showPatBanner = patRemovable && !patGone;
+  const showPatBanner = patRemovable && !legacyRetired;
   return (
     <div class="space-y-2 text-sm" data-testid="migration">
       <p class="font-medium">Migration des projets</p>
       {showPatBanner && (
         <div role="status" class="space-y-2 rounded border border-emerald-400 p-2">
-          <p>Tous les projets sont migrés : le jeton GitHub personnel n’est plus nécessaire.</p>
-          <button type="button" disabled={busy} onClick={() => void clearPat()}>
-            Supprimer le jeton
+          <p>
+            Tous les projets sont migrés : tu peux retirer le jeton personnel et couper l’ancien
+            webhook (réglage admin, pas de variable d’environnement).
+          </p>
+          <button type="button" disabled={busy} onClick={() => void retireLegacy()}>
+            Retirer le legacy
           </button>
         </div>
       )}
-      {patGone && (
+      {legacyRetired && (
         <p role="status" class="rounded border border-emerald-400 p-2">
-          Jeton personnel supprimé. Prochaine version : `DEVFORGE_LEGACY_WEBHOOK=0` pour couper l’ancien endpoint.
+          Legacy retiré : jeton effacé, ancien webhook coupé (410).
         </p>
       )}
       <div class="flex gap-2">

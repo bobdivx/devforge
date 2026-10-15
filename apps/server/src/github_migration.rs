@@ -28,6 +28,7 @@ pub fn router() -> Router<AppState> {
             "/api/v1/github-app/rotate-webhook-secret",
             post(rotate_webhook_secret),
         )
+        .route("/api/v1/github-app/retire-legacy", post(retire_legacy))
 }
 
 // ───────────────────── Rapport (pur) ─────────────────────
@@ -326,8 +327,10 @@ async fn rollback(
     .execute(&state.pool)
     .await
     .map_err(db_err)?;
+    // Rollback ⇒ réactiver l’endpoint legacy pour recevoir à nouveau les pushes.
+    let _ = set_legacy_webhook(&state.pool, true).await;
     Ok(Json(
-        json!({"ok": true, "webhook_id": hook_id, "hook_error": hook_error}),
+        json!({"ok": true, "webhook_id": hook_id, "hook_error": hook_error, "legacy_webhook": true}),
     ))
 }
 
@@ -428,9 +431,59 @@ pub fn webhook_allowed() -> bool {
     WEBHOOK_RATE.allow(chrono::Utc::now().timestamp(), webhook_rate_limit())
 }
 
-/// `DEVFORGE_LEGACY_WEBHOOK=0` ⇒ l'ancien webhook par dépôt répond `410 Gone`.
-pub fn legacy_webhook_enabled(v: Option<&str>) -> bool {
-    !matches!(v.map(str::trim), Some("0") | Some("false") | Some("off"))
+/// Ancien webhook par dépôt actif ? Réglage `instance_settings.legacy_webhook` (admin).
+pub async fn legacy_webhook_enabled(pool: &PgPool) -> bool {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT legacy_webhook FROM instance_settings WHERE id = 1")
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    row.map(|(v,)| v != 0).unwrap_or(true)
+}
+
+pub async fn set_legacy_webhook(pool: &PgPool, enabled: bool) -> Result<(), sqlx::Error> {
+    let now = now_str();
+    sqlx::query(
+        "UPDATE instance_settings SET legacy_webhook = $1, updated_at = $2 WHERE id = 1",
+    )
+    .bind(if enabled { 1i64 } else { 0i64 })
+    .bind(&now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Admin : tous les projets migrés → efface le PAT instance et coupe l’ancien webhook.
+async fn retire_legacy(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiErr> {
+    require_admin(&state, &headers).await?;
+    let (unmigrated,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM projects WHERE github_installation_id IS NULL AND git_repository ILIKE '%github.com%'",
+    )
+    .fetch_one(&state.pool)
+    .await
+    .map_err(db_err)?;
+    if unmigrated > 0 {
+        let msg = format!(
+            "{unmigrated} projet(s) GitHub encore non migrés — termine la migration d’abord"
+        );
+        return Err(err(StatusCode::CONFLICT, &msg));
+    }
+    state.configure_github("").await.map_err(|e| {
+        let msg = format!("impossible d’effacer le jeton : {e}");
+        err(StatusCode::INTERNAL_SERVER_ERROR, &msg)
+    })?;
+    set_legacy_webhook(&state.pool, false)
+        .await
+        .map_err(db_err)?;
+    Ok(Json(json!({
+        "ok": true,
+        "pat_cleared": true,
+        "legacy_webhook": false,
+    })))
 }
 
 #[cfg(test)]
