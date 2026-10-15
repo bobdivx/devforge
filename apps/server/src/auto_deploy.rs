@@ -166,8 +166,10 @@ pub(crate) async fn deploy_project(
     target_sha: Option<&str>,
 ) {
     // Une correction de Rustine est en cours en local : pas de remise à zéro du dossier de travail.
-    if crate::correction::has_open_repair(&state.pool, &project.uuid).await {
-        tracing::info!(project = %project.name, "auto-deploy: correction en cours, déploiement reporté");
+    // Seule une réparation en cours de test récente retient le commit ; une réparation
+    // « prête » jamais appliquée ne bloque plus l'auto-deploy (incident du 14/10/2026).
+    if crate::correction::gate_deploy_on_repair(&state.pool, &project.uuid).await {
+        tracing::warn!(project = %project.name, "auto-deploy: réparation en test, déploiement reporté");
         return;
     }
     let dep_uuid = new_uuid();
