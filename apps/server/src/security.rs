@@ -49,6 +49,17 @@ pub fn cors_layer() -> CorsLayer {
         ])
 }
 
+pub async fn security_headers(req: Request<Body>, next: Next) -> Response<Body> {
+    let mut res = next.run(req).await;
+
+    // Ajout des headers de sécurité standards
+    res.headers_mut().insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    res.headers_mut().insert("x-frame-options", HeaderValue::from_static("SAMEORIGIN"));
+    res.headers_mut().insert(header::STRICT_TRANSPORT_SECURITY, HeaderValue::from_static("max-age=31536000; includeSubDomains"));
+
+    res
+}
+
 /// HTML / routes app : pas de cache (évite page blanche après MAJ Flatpak).
 /// Assets fingerprinted `/_astro/*` : cache long.
 pub async fn static_cache_headers(req: Request<Body>, next: Next) -> Response<Body> {
