@@ -2362,32 +2362,36 @@ pub async fn handle_push(
 }
 
 fn verify_github_sig(secret: &str, body: &[u8], signature_header: &str) -> bool {
-    use sha2::{Digest, Sha256};
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
     let Some(hex_sig) = signature_header.strip_prefix("sha256=") else {
         return false;
     };
-    let key = secret.as_bytes();
-    let mut key_buf = key.to_vec();
-    if key_buf.len() > 64 {
-        key_buf = Sha256::digest(&key_buf).to_vec();
+
+    if hex_sig.len() != 64 || !hex_sig.is_ascii() {
+        return false;
     }
-    key_buf.resize(64, 0);
-    let mut ipad = [0u8; 64];
-    let mut opad = [0u8; 64];
-    for i in 0..64 {
-        ipad[i] = key_buf[i] ^ 0x36;
-        opad[i] = key_buf[i] ^ 0x5c;
-    }
-    let mut inner = Sha256::new();
-    inner.update(ipad);
-    inner.update(body);
-    let mid = inner.finalize();
-    let mut outer = Sha256::new();
-    outer.update(opad);
-    outer.update(mid);
-    let result = outer.finalize();
-    let expected: String = result.iter().map(|b| format!("{b:02x}")).collect();
-    expected.eq_ignore_ascii_case(hex_sig)
+
+    let Ok(sig_bytes) = hex_sig
+        .as_bytes()
+        .chunks(2)
+        .map(|chunk| {
+            // chunk is exactly length 2, ASCII characters
+            let s = std::str::from_utf8(chunk).unwrap_or("");
+            u8::from_str_radix(s, 16)
+        })
+        .collect::<Result<Vec<u8>, _>>()
+    else {
+        return false;
+    };
+
+    // Use constant-time comparison via `verify_slice` to prevent timing attacks.
+    let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(secret.as_bytes()) else {
+        return false;
+    };
+    mac.update(body);
+    mac.verify_slice(&sig_bytes).is_ok()
 }
 
 fn insecure_webhooks_allowed() -> bool {
