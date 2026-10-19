@@ -1210,6 +1210,13 @@ async fn run_agent_now(
     Ok(Json(json!({"ok": true, "data": row})))
 }
 
+fn serialize_redacted_json_str<S: serde::Serializer>(
+    raw: &str,
+    ser: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    ser.serialize_str(&devforge_shared::redact::redact_json_str(raw))
+}
+
 #[derive(sqlx::FromRow, serde::Serialize)]
 struct AgentMessageRow {
     uuid: String,
@@ -1217,6 +1224,8 @@ struct AgentMessageRow {
     agent_uuid: String,
     role: String,
     content: String,
+    /// Stored tool results may predate redaction: masked on the way out.
+    #[serde(serialize_with = "serialize_redacted_json_str")]
     tool_calls_json: String,
     provider: String,
     created_at: String,

@@ -55,7 +55,15 @@ impl Tool for McpListServersTool {
         json!({"type":"object","properties":{}})
     }
     async fn execute(&self, _arguments: Value) -> Result<Value> {
-        let servers = self.mcp.clients.list().await;
+        // public_view: key names, masked placeholders and has_value flags only.
+        let servers: Vec<Value> = self
+            .mcp
+            .clients
+            .list()
+            .await
+            .iter()
+            .map(|s| s.public_view())
+            .collect();
         Ok(json!({
             "ok": true,
             "servers": servers,

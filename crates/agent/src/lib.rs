@@ -115,7 +115,10 @@ impl ToolRegistry {
             .tools
             .get(name)
             .ok_or_else(|| DevForgeError::NotFound(format!("Unknown tool: {name}")))?;
-        tool.execute(arguments).await
+        // Single choke point for agent loops, the MCP endpoint and internal
+        // callers: tool results never carry secrets in clear.
+        let result = tool.execute(arguments).await?;
+        Ok(devforge_shared::redact::redact_json(&result))
     }
 
     pub fn has(&self, name: &str) -> bool {

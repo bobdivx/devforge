@@ -195,10 +195,20 @@ async fn upsert_mcp_server(
 
     let preset = catalog_id.as_deref().and_then(devforge_mcp::find_preset);
 
+    use devforge_shared::redact::is_masked_placeholder;
+    // Masked placeholders sent back by a client (`***`, `ghp_…abcd`) are
+    // dropped here so the stored values below are kept.
+    fields.retain(|_, v| !is_masked_placeholder(v));
     let mut secrets = body.secrets.unwrap_or_default();
+    secrets.retain(|_, v| !is_masked_placeholder(v));
     let mut meta = body.meta.unwrap_or_default();
+    meta.retain(|_, v| !is_masked_placeholder(v));
+    let headers_sent = body.headers.is_some();
     let mut headers_map = body.headers.unwrap_or_default();
     let mut url = body.url.unwrap_or_default();
+    if is_masked_placeholder(&url) {
+        url = String::new();
+    }
     let mut name = body.name.unwrap_or_default();
 
     if let Some(ref p) = preset {
@@ -256,19 +266,49 @@ async fn upsert_mcp_server(
     }
 
     let existing_id = body.id.clone().unwrap_or_default();
+    let mut oauth = (String::new(), String::new(), String::new(), String::new());
     if !existing_id.is_empty() {
         if let Some(prev) = state.mcp.clients.get(&existing_id).await {
+            if !prev.workspace_uuid.is_empty() && prev.workspace_uuid != ws {
+                return Err(ApiError::not_found("mcp server"));
+            }
             for (k, v) in prev.secrets {
                 secrets.entry(k).or_insert(v);
             }
             for (k, v) in prev.meta {
                 meta.entry(k).or_insert(v);
             }
+            // Headers: keep the stored set when none is sent; a masked value
+            // keeps the stored one; a placeholder for an unknown header is dropped.
+            if headers_sent {
+                headers_map = headers_map
+                    .into_iter()
+                    .filter_map(|(k, v)| {
+                        if is_masked_placeholder(&v) {
+                            prev.headers.get(&k).map(|p| (k, p.clone()))
+                        } else {
+                            Some((k, v))
+                        }
+                    })
+                    .collect();
+            } else {
+                for (k, v) in prev.headers {
+                    headers_map.entry(k).or_insert(v);
+                }
+            }
             if url.trim().is_empty() {
                 url = prev.url;
             }
+            // Editing a server must not disconnect its OAuth session.
+            oauth = (
+                prev.oauth_access_token,
+                prev.oauth_refresh_token,
+                prev.oauth_expires_at,
+                prev.oauth_scopes,
+            );
         }
     }
+    headers_map.retain(|_, v| !is_masked_placeholder(v));
 
     if !url.is_empty() {
         if let Some(tok) = secrets
@@ -303,10 +343,10 @@ async fn upsert_mcp_server(
             meta,
             secrets,
             workspace_uuid: ws,
-            oauth_access_token: String::new(),
-            oauth_refresh_token: String::new(),
-            oauth_expires_at: String::new(),
-            oauth_scopes: String::new(),
+            oauth_access_token: oauth.0,
+            oauth_refresh_token: oauth.1,
+            oauth_expires_at: oauth.2,
+            oauth_scopes: oauth.3,
         })
         .await;
 
