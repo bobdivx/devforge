@@ -239,6 +239,26 @@ pub struct DeployResult {
     pub logs: String,
 }
 
+/// Default limit for an image build (docker build / compose up / nixpacks): 60 min.
+/// Large Rust images take longer than the former 15 min on a NAS.
+const DEFAULT_DOCKER_BUILD_TIMEOUT_SECS: u64 = 3600;
+
+/// Image build timeout in seconds, overridable with `DEVFORGE_DOCKER_BUILD_TIMEOUT_SECS`
+/// (accepted range 300..=14400, otherwise the default).
+fn docker_build_timeout_secs() -> u64 {
+    parse_docker_build_timeout(
+        std::env::var("DEVFORGE_DOCKER_BUILD_TIMEOUT_SECS")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn parse_docker_build_timeout(raw: Option<&str>) -> u64 {
+    raw.and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| (300..=14_400).contains(v))
+        .unwrap_or(DEFAULT_DOCKER_BUILD_TIMEOUT_SECS)
+}
+
 fn data_dir_base() -> std::path::PathBuf {
     if let Ok(v) = std::env::var("DEVFORGE_DATA_DIR") {
         return std::path::PathBuf::from(v);
@@ -958,7 +978,11 @@ impl DeployFacade {
                         .unwrap_or("/docker-compose.yaml")
                         .trim_start_matches('/');
                     let cmd = docker::docker_compose_up(compose);
-                    match self.executor.exec(server, &build_dir, &cmd, 900).await {
+                    match self
+                        .executor
+                        .exec(server, &build_dir, &cmd, docker_build_timeout_secs())
+                        .await
+                    {
                         Ok(r) => {
                             logs.push_str(&format!(
                                 "[compose] exit={} {}\n",
@@ -990,7 +1014,11 @@ impl DeployFacade {
                     } else {
                         docker::docker_build_from_content(&image, &df)
                     };
-                    match self.executor.exec(server, &build_dir, &cmd, 900).await {
+                    match self
+                        .executor
+                        .exec(server, &build_dir, &cmd, docker_build_timeout_secs())
+                        .await
+                    {
                         Ok(r) => {
                             logs.push_str(&format!(
                                 "[static-build] exit={} {}\n",
@@ -1057,7 +1085,11 @@ impl DeployFacade {
                         (cmd, label.to_string(), build_dir.clone())
                     };
                     logs.push_str(&format!("[dockerfile] {label}\n"));
-                    match self.executor.exec(server, &exec_cwd, &cmd, 900).await {
+                    match self
+                        .executor
+                        .exec(server, &exec_cwd, &cmd, docker_build_timeout_secs())
+                        .await
+                    {
                         Ok(r) => {
                             logs.push_str(&format!(
                                 "[docker-build] exit={} {}\n",
@@ -1100,7 +1132,16 @@ impl DeployFacade {
                             .collect::<Vec<_>>()
                             .join(",")
                     ));
-                    match self.executor.exec(server, &build_dir, &nix, 1800).await {
+                    match self
+                        .executor
+                        .exec(
+                            server,
+                            &build_dir,
+                            &nix,
+                            docker_build_timeout_secs().max(1800),
+                        )
+                        .await
+                    {
                         Ok(r) if r.ok => {
                             logs.push_str(&format!("[nixpacks-docker] {}\n", trim_out(&r.output)));
                             self.docker_restart_container(
@@ -1124,7 +1165,11 @@ impl DeployFacade {
                             ));
                             let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
                             logs.push_str(&format!("[fallback] {label}\n"));
-                            match self.executor.exec(server, &build_dir, &cmd, 900).await {
+                            match self
+                                .executor
+                                .exec(server, &build_dir, &cmd, docker_build_timeout_secs())
+                                .await
+                            {
                                 Ok(r2) => {
                                     logs.push_str(&format!(
                                         "[docker-build] exit={} {}\n",
@@ -1158,7 +1203,11 @@ impl DeployFacade {
                             logs.push_str(&format!("[nixpacks-docker] error: {e}\n"));
                             let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
                             logs.push_str(&format!("[fallback] {label}\n"));
-                            match self.executor.exec(server, &build_dir, &cmd, 900).await {
+                            match self
+                                .executor
+                                .exec(server, &build_dir, &cmd, docker_build_timeout_secs())
+                                .await
+                            {
                                 Ok(r2) => {
                                     logs.push_str(&format!(
                                         "[docker-build] exit={} {}\n",
@@ -1247,7 +1296,11 @@ impl DeployFacade {
         );
         let df = docker::nitro_node_dockerfile(port);
         let cmd = docker::docker_build_from_content(image, &df);
-        match self.executor.exec(server, build_dir, &cmd, 900).await {
+        match self
+            .executor
+            .exec(server, build_dir, &cmd, docker_build_timeout_secs())
+            .await
+        {
             Ok(r) => {
                 logs.push_str(&format!(
                     "[nitro-build] exit={} {}\n",
@@ -2314,5 +2367,28 @@ mod conflict_marker_tests {
         assert!(conflict_marker_message(0, "").is_none());
         // `head` peut renvoyer 0 même sans résultat : seul un vrai marqueur compte.
         assert!(conflict_marker_message(0, "fatal: not a git repository").is_none());
+    }
+}
+
+#[cfg(test)]
+mod docker_build_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn default_is_one_hour() {
+        assert_eq!(parse_docker_build_timeout(None), 3600);
+        assert_eq!(parse_docker_build_timeout(Some("abc")), 3600);
+    }
+
+    #[test]
+    fn override_within_range() {
+        assert_eq!(parse_docker_build_timeout(Some("5400")), 5400);
+        assert_eq!(parse_docker_build_timeout(Some(" 300 ")), 300);
+    }
+
+    #[test]
+    fn out_of_range_falls_back() {
+        assert_eq!(parse_docker_build_timeout(Some("10")), 3600);
+        assert_eq!(parse_docker_build_timeout(Some("999999")), 3600);
     }
 }
