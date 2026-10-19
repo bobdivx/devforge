@@ -184,7 +184,9 @@ impl RemoteExecutor for LocalShellExecutor {
         }
         let output = tokio::time::timeout(Duration::from_secs(timeout_secs.max(5)), cmd.output())
             .await
-            .map_err(|_| DevForgeError::Message("local exec timeout".into()))?
+            .map_err(|_| {
+                DevForgeError::Message(format!("local exec timeout ({}s)", timeout_secs.max(5)))
+            })?
             .map_err(|e| DevForgeError::Message(format!("local spawn failed: {e}")))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
