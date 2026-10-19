@@ -464,13 +464,24 @@ pub async fn remove_fqdn(state: &AppState, fqdn: &str) {
 }
 
 /// Retourne une entrée par FQDN synchronisé : `{ fqdn, ok, error? }`.
+/// `(server_id, production_url)` of a project, `None` if it does not exist.
+async fn project_dns_row(
+    pool: &sqlx::PgPool,
+    project_uuid: &str,
+) -> Option<(Option<String>, Option<String>)> {
+    sqlx::query_as("SELECT server_id, production_url FROM projects WHERE uuid = $1")
+        .bind(project_uuid)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| tracing::warn!(project_uuid, error = %e, "sync DNS: lecture projet"))
+        .ok()
+        .flatten()
+}
+
 pub async fn sync_project(state: &AppState, project_uuid: &str) -> Vec<Value> {
-    let row: Option<(Option<String>, Option<String>)> =
-        sqlx::query_as("SELECT server_id, production_url FROM projects WHERE uuid = $1")
-            .fetch_optional(&state.pool)
-            .await
-            .ok()
-            .flatten();
+    // Sans `.bind`, la requête échouait toujours : aucun domaine (alias www
+    // compris) n'était jamais poussé chez le provider DNS après un ajout.
+    let row = project_dns_row(&state.pool, project_uuid).await;
     let Some((server_id, production_url)) = row else {
         return vec![];
     };
@@ -985,5 +996,39 @@ pub async fn ping_configured(state: &AppState) -> Result<(), String> {
             porkbun_verify_zone(&c).await.map_err(|e| e.to_string())
         }
         _ => Err("Choisis Cloudflare ou Porkbun".into()),
+    }
+}
+
+#[cfg(test)]
+mod project_dns_row_tests {
+    use super::project_dns_row;
+
+    #[tokio::test]
+    async fn reads_the_requested_project() {
+        let pool = devforge_database::ephemeral_pg().await;
+        sqlx::query(
+            "CREATE TABLE projects (uuid TEXT PRIMARY KEY, server_id TEXT NULL, production_url TEXT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO projects (uuid, server_id, production_url) VALUES \
+             ('p1', NULL, 'https://popcornn.app'), ('p2', 'node_x', 'https://other.example')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let row = project_dns_row(&pool, "p1").await;
+        assert_eq!(row, Some((None, Some("https://popcornn.app".to_string()))));
+        let row = project_dns_row(&pool, "p2").await;
+        assert_eq!(
+            row,
+            Some((
+                Some("node_x".to_string()),
+                Some("https://other.example".to_string())
+            ))
+        );
+        assert_eq!(project_dns_row(&pool, "missing").await, None);
     }
 }
