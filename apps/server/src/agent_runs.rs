@@ -358,6 +358,7 @@ pub async fn recent_history(pool: &PgPool, agent_uuid: &str) -> Vec<(String, Str
     hist.into_iter()
         .map(|(role, content, tools)| {
             let content = if role == "assistant" {
+                let tools = devforge_shared::redact::redact_json_str(&tools);
                 assistant_content_with_tools(&content, &tools)
             } else {
                 content

@@ -60,49 +60,50 @@ pub struct McpServerConfig {
 }
 
 impl McpServerConfig {
+    /// Agent/API view: never returns secrets, header values, OAuth tokens or
+    /// credentials embedded in the URL; only key names, masked placeholders
+    /// (`ghp_…abcd` / `***`) and `has_value` flags.
     pub fn public_view(&self) -> Value {
-        // Masquer les valeurs des secrets (critique : ne jamais renvoyer Bearer/tokens en clair)
-        let masked_secrets: HashMap<String, String> = self
+        use devforge_shared::redact;
+        let secrets_masked: HashMap<String, String> = self
             .secrets
             .iter()
-            .map(|(k, v)| {
-                let hint = if v.len() > 8 {
-                    format!("{}••••{}", &v[..4], &v[v.len() - 4..])
-                } else if v.len() > 4 {
-                    format!("{}••••", &v[..2])
-                } else {
-                    "••••".into()
-                };
-                (k.clone(), hint)
-            })
+            .map(|(k, v)| (k.clone(), redact::mask_secret(v)))
             .collect();
-
-        // Masquer Authorization header (contient souvent Bearer tokens)
-        let masked_headers: HashMap<String, String> = self
-            .headers
+        let meta: serde_json::Map<String, Value> = self
+            .meta
             .iter()
             .map(|(k, v)| {
-                if k.to_ascii_lowercase() == "authorization" {
-                    (k.clone(), "Bearer ••••".into())
+                let shown = if redact::is_sensitive_key(k) {
+                    redact::mask_secret(v)
                 } else {
-                    (k.clone(), v.clone())
-                }
+                    redact::redact_str(v)
+                };
+                (k.clone(), Value::String(shown))
             })
             .collect();
+        let mut secret_keys: Vec<String> = self.secrets.keys().cloned().collect();
+        secret_keys.sort();
+        let mut header_keys: Vec<String> = self.headers.keys().cloned().collect();
+        header_keys.sort();
 
         json!({
             "id": self.id,
             "name": self.name,
-            "url": self.url,
+            "url": redact::redact_url(&self.url),
             "enabled": self.enabled,
             "catalog_id": self.catalog_id,
-            "meta": self.meta,
+            "meta": meta,
             "workspace_uuid": self.workspace_uuid,
             "has_secrets": !self.secrets.is_empty(),
-            "secret_keys": self.secrets.keys().cloned().collect::<Vec<_>>(),
-            "secrets_masked": masked_secrets,
-            "headers": masked_headers,
+            "secret_keys": secret_keys,
+            "secrets": redact::masked_map(&self.secrets),
+            "secrets_masked": secrets_masked,
+            "header_keys": header_keys,
+            "headers": redact::masked_map(&self.headers),
             "oauth_connected": !self.oauth_access_token.is_empty(),
+            "oauth_access_token": { "has_value": !self.oauth_access_token.is_empty() },
+            "oauth_refresh_token": { "has_value": !self.oauth_refresh_token.is_empty() },
             "oauth_expires_at": self.oauth_expires_at,
             "oauth_scopes": self.oauth_scopes,
         })
@@ -360,5 +361,56 @@ impl McpFacade {
             server: McpServerFacade::new(),
             clients: McpClientRegistry::new(Arc::new(HttpMcpRemoteClient::new())),
         }
+    }
+}
+
+#[cfg(test)]
+mod public_view_tests {
+    use super::*;
+
+    #[test]
+    fn public_view_never_contains_secrets() {
+        let tok = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        let mut cfg = McpServerConfig {
+            id: "mcp_1".into(),
+            name: "GitHub".into(),
+            url: format!("https://mcp.example.com/sse?token={tok}"),
+            enabled: true,
+            headers: HashMap::new(),
+            catalog_id: Some("github".into()),
+            meta: HashMap::new(),
+            secrets: HashMap::new(),
+            workspace_uuid: "ws".into(),
+            oauth_access_token: "oauth-access-abcdefghijklmnop".into(),
+            oauth_refresh_token: "oauth-refresh-abcdefghijklmnop".into(),
+            oauth_expires_at: "2026-10-19T00:00:00Z".into(),
+            oauth_scopes: "repo".into(),
+        };
+        cfg.headers
+            .insert("Authorization".into(), format!("Bearer {tok}"));
+        cfg.headers
+            .insert("X-Api-Key".into(), "custom-header-secret".into());
+        cfg.secrets.insert("api_token".into(), tok.into());
+        cfg.meta.insert("org".into(), "acme".into());
+        cfg.meta
+            .insert("client_secret".into(), "meta-secret-value".into());
+        let v = cfg.public_view();
+        let s = v.to_string();
+        for leaked in [
+            tok,
+            "custom-header-secret",
+            "oauth-access-abcdefghijklmnop",
+            "oauth-refresh-abcdefghijklmnop",
+            "meta-secret-value",
+        ] {
+            assert!(!s.contains(leaked), "{leaked} leaked: {s}");
+        }
+        assert_eq!(v["url"], "https://mcp.example.com/sse?token=***");
+        assert_eq!(v["secrets"]["api_token"]["has_value"], true);
+        assert_eq!(v["headers"]["X-Api-Key"]["has_value"], true);
+        assert_eq!(v["secret_keys"][0], "api_token");
+        assert_eq!(v["meta"]["org"], "acme");
+        assert_eq!(v["oauth_connected"], true);
+        assert_eq!(v["oauth_refresh_token"]["has_value"], true);
     }
 }

@@ -856,7 +856,7 @@ async fn save_onboarding(
     }
     if let Some(v) = body.github_token {
         let t = v.trim().to_string();
-        if !t.is_empty() {
+        if !t.is_empty() && !devforge_shared::redact::is_masked_placeholder(&t) {
             state.configure_github(&t).await.map_err(|e| {
                 (
                     axum::http::StatusCode::BAD_REQUEST,

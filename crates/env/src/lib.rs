@@ -19,11 +19,27 @@ pub struct EnvVar {
 
 impl EnvVar {
     /// Never leak secret values into agent/tool logs.
+    /// Non-secret values are shown unless their name is sensitive
+    /// (`*_TOKEN`, `*_SECRET`, `*_PASSWORD`…) or they carry a credential
+    /// (token-shaped value, `user:pass@` / `?token=` in a URL).
     pub fn public_view(&self) -> Value {
+        use devforge_shared::redact;
+        let value = if self.secret {
+            if self.value.is_empty() {
+                String::new()
+            } else {
+                "********".to_string()
+            }
+        } else if redact::is_sensitive_key(&self.key) {
+            redact::mask_secret(&self.value)
+        } else {
+            redact::redact_str(&self.value)
+        };
         json!({
             "key": self.key,
             "secret": self.secret,
-            "value": if self.secret { "********" } else { self.value.as_str() }
+            "value": value,
+            "has_value": !self.value.is_empty(),
         })
     }
 }
@@ -159,6 +175,11 @@ pub fn env_vars_needing_write(
     let mut stats = EnvMergeStats::default();
     let mut to_write = Vec::new();
     for var in incoming {
+        // A masked placeholder (`***`, `ghp_…abcd`) never replaces a stored value.
+        if devforge_shared::redact::is_masked_placeholder(&var.value) {
+            stats.unchanged += 1;
+            continue;
+        }
         match map.get(var.key.as_str()) {
             None => {
                 stats.imported += 1;
@@ -317,7 +338,20 @@ impl EnvFacade {
         self.store.get(project_uuid, key).await
     }
 
-    pub async fn upsert(&self, project_uuid: &str, var: EnvVar) -> Result<Value> {
+    /// A masked placeholder sent back by a client (`********`, `ghp_…abcd`)
+    /// keeps the stored value; only the flags are updated.
+    pub async fn upsert(&self, project_uuid: &str, mut var: EnvVar) -> Result<Value> {
+        if devforge_shared::redact::is_masked_placeholder(&var.value) {
+            match self.store.get(project_uuid, &var.key).await? {
+                Some(prev) => var.value = prev.value,
+                None => {
+                    return Err(DevForgeError::Message(format!(
+                        "{}: valeur masquée reçue, donne la vraie valeur",
+                        var.key
+                    )))
+                }
+            }
+        }
         Ok(self.store.upsert(project_uuid, var).await?.public_view())
     }
 
@@ -364,6 +398,52 @@ impl EnvFacade {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn var(key: &str, value: &str, secret: bool) -> EnvVar {
+        EnvVar {
+            key: key.into(),
+            value: value.into(),
+            secret,
+            preview_allowed: false,
+        }
+    }
+
+    #[test]
+    fn public_view_masks_sensitive_values() {
+        let v = var("APP_URL", "https://app.example.com", false).public_view();
+        assert_eq!(v["value"], "https://app.example.com");
+        assert_eq!(v["has_value"], true);
+        let v = var("STRIPE_SECRET", "plain-flag-but-sensitive", false).public_view();
+        assert!(!v.to_string().contains("plain-flag-but-sensitive"));
+        let v = var("DB", "postgres://app:hunter2@db:5432/app", false).public_view();
+        assert_eq!(v["value"], "postgres://app:***@db:5432/app");
+        let v = var("ANY", "x", true).public_view();
+        assert_eq!(v["value"], "********");
+    }
+
+    #[tokio::test]
+    async fn placeholder_upsert_keeps_stored_secret() {
+        let env = EnvFacade::new(Arc::new(MemoryEnvStore::new()));
+        env.upsert("p", var("TOKEN", "real-secret-value", true))
+            .await
+            .unwrap();
+        env.upsert("p", var("TOKEN", "********", false))
+            .await
+            .unwrap();
+        let stored = env.get("p", "TOKEN").await.unwrap().unwrap();
+        assert_eq!(stored.value, "real-secret-value");
+        assert!(!stored.secret);
+        assert!(env.upsert("p", var("NEW", "***", true)).await.is_err());
+        let stats = env
+            .merge_vars("p", vec![var("TOKEN", "real…alue", true)], true)
+            .await
+            .unwrap();
+        assert_eq!(stats.updated, 0);
+        assert_eq!(
+            env.get("p", "TOKEN").await.unwrap().unwrap().value,
+            "real-secret-value"
+        );
+    }
 
     #[test]
     fn parses_dotenv() {

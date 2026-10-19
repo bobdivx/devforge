@@ -269,7 +269,7 @@ async fn project_list_card(state: &AppState, project: &Project, github_sync: boo
         "name": project.name,
         "slug": project.slug,
         "status": project.status,
-        "git_repository": project.git_repository,
+        "git_repository": project.git_repository.as_deref().map(devforge_shared::redact::redact_url),
         "git_branch": project.git_branch,
         "build_pack": project.build_pack,
         "port": project.port,
@@ -288,6 +288,18 @@ async fn project_list_card(state: &AppState, project: &Project, github_sync: boo
         crate::group_routes::write_group_fields(obj, membership.as_ref());
     }
     card
+}
+
+/// Project payloads: credentials embedded in URLs (`https://token@github.com/…`)
+/// are masked. `update_project` keeps the stored URL when it gets one back.
+fn redact_project_json(v: &mut Value) {
+    if let Some(obj) = v.as_object_mut() {
+        for key in ["git_repository", "production_url"] {
+            if let Some(Value::String(u)) = obj.get_mut(key) {
+                *u = devforge_shared::redact::redact_url(u);
+            }
+        }
+    }
 }
 
 fn empty_to_none(v: Option<String>) -> Option<String> {
@@ -683,6 +695,7 @@ async fn get_project(
     // Sync GitHub uniquement si ?live=1 ; sinon placeholder Postgres (rafraîchi via /git).
     let card = project_list_card(&state, &project, q.live).await;
     let mut project_json = serde_json::to_value(&project).unwrap_or_else(|_| json!({}));
+    redact_project_json(&mut project_json);
     if let Some(obj) = project_json.as_object_mut() {
         if let Some(sync) = card.get("sync") {
             obj.insert("sync".into(), sync.clone());
@@ -741,9 +754,18 @@ async fn update_project(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(uuid): Path<String>,
-    Json(body): Json<UpdateProject>,
+    Json(mut body): Json<UpdateProject>,
 ) -> Result<Json<Value>, ApiError> {
     let (user, _ws, existing) = auth_project(&state, &headers, &uuid).await?;
+    // A URL masked by redact_project_json and sent back keeps the stored one.
+    for field in [&mut body.git_repository, &mut body.production_url] {
+        if field
+            .as_deref()
+            .is_some_and(devforge_shared::redact::is_masked_placeholder)
+        {
+            *field = None;
+        }
+    }
     let previous_production_url = existing.production_url.clone();
     let now = now_str();
     let is_static = body
@@ -939,6 +961,7 @@ async fn update_project(
     }
 
     let mut data = serde_json::to_value(&project).unwrap_or_else(|_| json!({}));
+    redact_project_json(&mut data);
     if let Some(obj) = data.as_object_mut() {
         let membership = crate::group_routes::membership(&state.pool, &project.uuid).await;
         crate::group_routes::write_group_fields(obj, membership.as_ref());

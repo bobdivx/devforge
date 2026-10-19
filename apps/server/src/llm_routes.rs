@@ -147,23 +147,13 @@ struct ProviderRow {
 }
 
 fn present(row: &ProviderRow) -> Value {
-    let masked = if row.api_key.is_empty() {
-        String::new()
-    } else if row.api_key.len() <= 8 {
-        "••••".into()
-    } else {
-        format!(
-            "{}…{}",
-            &row.api_key[..4.min(row.api_key.len())],
-            &row.api_key[row.api_key.len().saturating_sub(4)..]
-        )
-    };
+    let masked = devforge_shared::redact::mask_secret(&row.api_key);
     json!({
         "id": row.id,
         "catalog_id": row.catalog_id,
         "name": row.name,
         "provider": row.provider,
-        "base_url": row.base_url,
+        "base_url": devforge_shared::redact::redact_url(&row.base_url),
         "model": row.model,
         "is_default": row.is_default != 0,
         "enabled": row.enabled != 0,
@@ -310,6 +300,11 @@ async fn upsert_provider(
                 .and_then(|p| p.default_url.clone())
                 .unwrap_or_default()
         });
+    // A masked key / URL sent back by the UI keeps the stored value.
+    if devforge_shared::redact::is_masked_placeholder(&api_key) {
+        api_key.clear();
+    }
+    let base_url_masked = devforge_shared::redact::is_masked_placeholder(&base_url);
     let model = body
         .model
         .or_else(|| fields.get("model").cloned())
@@ -332,6 +327,9 @@ async fn upsert_provider(
         max.map(|(m,)| m + 1).unwrap_or(0)
     };
 
+    if base_url_masked && body.id.as_deref().is_none_or(str::is_empty) {
+        base_url.clear();
+    }
     let id = if let Some(existing) = body.id.filter(|s| !s.is_empty()) {
         // Preserve key if empty on update
         if api_key.trim().is_empty() {
@@ -347,6 +345,18 @@ async fn upsert_provider(
             if let Some((k,)) = stored {
                 api_key = k;
             }
+        }
+        if base_url_masked {
+            let stored: Option<(String,)> = sqlx::query_as(
+                "SELECT base_url FROM llm_providers WHERE id = $1 AND user_uuid = $2",
+            )
+            .bind(&existing)
+            .bind(&user_uuid)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten();
+            base_url = stored.map(|(u,)| u).unwrap_or_default();
         }
         if base_url.trim().is_empty() {
             if let Some(def) = preset.as_ref().and_then(|p| p.default_url.clone()) {
