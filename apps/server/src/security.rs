@@ -67,5 +67,18 @@ pub async fn static_cache_headers(req: Request<Body>, next: Next) -> Response<Bo
     if let Ok(v) = HeaderValue::from_str(value) {
         res.headers_mut().insert(header::CACHE_CONTROL, v);
     }
+    // Security headers for defense in depth
+    // Prevent Clickjacking
+    if let Ok(v) = HeaderValue::from_str("DENY") {
+        res.headers_mut().insert(header::X_FRAME_OPTIONS, v);
+    }
+    // Prevent MIME-sniffing
+    if let Ok(v) = HeaderValue::from_str("nosniff") {
+        res.headers_mut().insert(header::X_CONTENT_TYPE_OPTIONS, v);
+    }
+    // Enforce HTTPS
+    if let Ok(v) = HeaderValue::from_str("max-age=31536000; includeSubDomains") {
+        res.headers_mut().insert(header::STRICT_TRANSPORT_SECURITY, v);
+    }
     res
 }
