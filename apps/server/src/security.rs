@@ -67,5 +67,12 @@ pub async fn static_cache_headers(req: Request<Body>, next: Next) -> Response<Bo
     if let Ok(v) = HeaderValue::from_str(value) {
         res.headers_mut().insert(header::CACHE_CONTROL, v);
     }
+
+    // Default Security Headers
+    res.headers_mut().insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    res.headers_mut().insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    res.headers_mut().insert(header::STRICT_TRANSPORT_SECURITY, HeaderValue::from_static("max-age=31536000; includeSubDomains"));
+    res.headers_mut().insert(header::X_XSS_PROTECTION, HeaderValue::from_static("0"));
+
     res
 }
