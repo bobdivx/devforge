@@ -926,6 +926,10 @@ async fn run_preview_deploy(
         ),
     };
     let deploy = state.deploy.clone();
+    let (log_hook, log_flusher) = crate::deploy_queue::spawn_live_log_flusher(
+        state.pool.clone(),
+        deployment_uuid.to_string(),
+    );
     let outcome = crate::deploy_queue::run_in_node_slot(
         &state.deploy_queue,
         &state.pool,
@@ -933,10 +937,11 @@ async fn run_preview_deploy(
         deployment_uuid,
         move || {
             let deploy = deploy.clone();
-            async move { deploy.deploy(&req).await }
+            async move { deploy.deploy_with_log_hook(&req, Some(log_hook)).await }
         },
     )
     .await;
+    log_flusher.abort();
     state.deploy_queue.unregister_cancel(deployment_uuid).await;
     match outcome {
         crate::deploy_queue::SlotOutcome::Cancelled => {

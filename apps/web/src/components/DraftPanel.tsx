@@ -63,17 +63,18 @@ const ADVICE_CLASS: Record<string, string> = {
   delete: 'border-rose-500/30 bg-rose-500/10 text-rose-200',
 };
 
-/** Pastille Garder / À vérifier / Peut être supprimé. */
+/** Pastille de conseil (pas un bouton) : garder / vérifier / supprimer. */
 export function AdviceChip({ advice, class: className }: { advice?: DraftAdvice | null; class?: string }) {
   if (!advice) return null;
   return (
     <span
+      role="status"
       class={cn(
         'inline-flex max-w-full shrink-0 items-center gap-1.5 truncate rounded-full border px-2.5 py-0.5 text-xs font-medium',
         ADVICE_CLASS[advice.level] ?? ADVICE_CLASS.review,
         className,
       )}
-      title={advice.reason}
+      title={advice.reason ? `Conseil (pas une action) : ${advice.reason}` : 'Conseil automatique, pas une action'}
       data-testid="draft-advice"
     >
       <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-current" aria-hidden />
@@ -707,15 +708,19 @@ export function DraftModal({ open, onClose, uuid, name, draft, onChanged, onDepl
   );
 }
 
-/** Vue globale (page Applications) : toutes les apps avec un brouillon, pour faire le ménage vite. */
+/** Vue globale (page Applications) : brouillons locaux non publiés, avec suppression rapide. */
 export function DraftsSection({ class: className }: { class?: string }) {
+  const toast = useToast();
   const [items, setItems] = useState<import('../lib/api').DraftSummary[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     const load = () =>
       api
         .drafts()
-        .then((r) => !cancelled && setItems(r.drafts ?? []))
+        .then((r) => {
+          if (!cancelled) setItems(r.drafts ?? []);
+        })
         .catch(() => {});
     void load();
     const id = window.setInterval(() => !document.hidden && void load(), 30000);
@@ -724,34 +729,81 @@ export function DraftsSection({ class: className }: { class?: string }) {
       window.clearInterval(id);
     };
   }, []);
+  const discardOne = async (uuid: string, name: string, e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (
+      !confirm(
+        `Supprimer le brouillon de « ${name} » ?\n\nLes modifications locales non publiées sont annulées. Une sauvegarde est gardée 7 jours.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(uuid);
+    try {
+      const r = await api.draftDiscard(uuid);
+      toast.push({
+        title: `Brouillon « ${name} » supprimé`,
+        detail: `${r.files} fichier${r.files > 1 ? 's' : ''} · récupérable 7 jours`,
+        tone: 'ok',
+      });
+      setItems((prev) => prev.filter((d) => d.project_uuid !== uuid));
+    } catch (err) {
+      toast.push({
+        title: 'Suppression impossible',
+        detail: err instanceof Error ? err.message : String(err),
+        tone: 'danger',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
   if (!items.length) return null;
   return (
-    <section class={cn('mt-6', className)} aria-label="Corrections en attente">
-      <h2 class="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-muted)]">
-        <FileDiff size={14} aria-hidden />
-        Corrections en attente · {items.length}
-      </h2>
+    <section class={cn('mt-6', className)} aria-label="Brouillons locaux">
+      <div class="mb-2 space-y-1">
+        <h2 class="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-muted)]">
+          <FileDiff size={14} aria-hidden />
+          Brouillons · {items.length}
+        </h2>
+        <p class="text-xs text-[var(--color-ink-faint)]">
+          Modifications locales pas encore sur GitHub. La pastille « Conseil · … » n’est pas un bouton — utilise « Supprimer » pour jeter un brouillon.
+        </p>
+      </div>
       <ul class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {items.map((d) => (
           <li key={d.project_uuid}>
-            <a
-              href={draftHref(d.project_uuid)}
-              class="flex min-h-[56px] items-center gap-3 rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] px-3.5 py-2.5 transition hover:border-amber-500/30 hover:bg-amber-500/[0.05]"
-            >
-              <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-sm font-bold text-[var(--color-warn)]">
-                {d.project_name.slice(0, 1).toUpperCase()}
-              </span>
-              <span class="min-w-0 flex-1 leading-tight">
-                <span class="block truncate text-sm font-semibold text-[var(--color-ink)]">{d.project_name}</span>
-                <span class="block truncate text-xs text-[var(--color-ink-faint)]">
-                  {d.origin ? `${originLabel(d.origin.kind, true)} · ` : ''}
-                  {filesLabel(d.count)}
-                  {relativeFr(d.updated_at) ? ` · ${relativeFr(d.updated_at)}` : ''}
+            <div class="flex min-h-[56px] items-center gap-2 rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] px-3.5 py-2.5 transition hover:border-amber-500/30 hover:bg-amber-500/[0.05]">
+              <a
+                href={draftHref(d.project_uuid)}
+                class="flex min-w-0 flex-1 items-center gap-3"
+              >
+                <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-sm font-bold text-[var(--color-warn)]">
+                  {d.project_name.slice(0, 1).toUpperCase()}
                 </span>
-              </span>
-              <AdviceChip advice={d.advice} class="max-w-[9rem]" />
-              <ChevronRight size={16} class="shrink-0 text-[var(--color-ink-faint)]" aria-hidden />
-            </a>
+                <span class="min-w-0 flex-1 leading-tight">
+                  <span class="block truncate text-sm font-semibold text-[var(--color-ink)]">{d.project_name}</span>
+                  <span class="block truncate text-xs text-[var(--color-ink-faint)]">
+                    {d.origin ? `${originLabel(d.origin.kind, true)} · ` : ''}
+                    {filesLabel(d.count)}
+                    {relativeFr(d.updated_at) ? ` · ${relativeFr(d.updated_at)}` : ''}
+                  </span>
+                </span>
+                <AdviceChip advice={d.advice} class="max-w-[9rem]" />
+                <ChevronRight size={16} class="shrink-0 text-[var(--color-ink-faint)]" aria-hidden />
+              </a>
+              <Button
+                size="sm"
+                variant="ghost"
+                class="h-10 shrink-0 text-[var(--color-danger)] hover:bg-rose-500/10"
+                disabled={busy === d.project_uuid}
+                aria-label={`Supprimer le brouillon de ${d.project_name}`}
+                title="Supprimer ce brouillon"
+                onClick={(e) => void discardOne(d.project_uuid, d.project_name, e)}
+              >
+                {busy === d.project_uuid ? <Spinner /> : <Trash2 size={16} aria-hidden />}
+              </Button>
+            </div>
           </li>
         ))}
       </ul>

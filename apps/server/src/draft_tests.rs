@@ -484,14 +484,14 @@ fn advice_rules() {
             ..Default::default()
         })
         .label,
-        "À vérifier"
+        "Conseil · vérifier"
     );
     let fresh = advise(&AdviceInput {
         count: 3,
         age_days: Some(0),
         ..Default::default()
     });
-    assert_eq!((fresh.level, fresh.label), ("keep", "Garder"));
+    assert_eq!((fresh.level, fresh.label), ("keep", "Conseil · garder"));
     assert!(
         is_lockfile("web/package-lock.json")
             && is_lockfile("Cargo.lock")

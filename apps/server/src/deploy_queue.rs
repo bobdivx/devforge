@@ -198,7 +198,18 @@ pub async fn cancel_one_deployment(
         "Déploiement annulé par l'utilisateur"
     );
 
-    // Si plus aucun déploiement actif sur le projet, rétablir le statut projet.
+    recompute_project_status_after_deploy_change(pool, project_id).await?;
+
+    Ok(true)
+}
+
+/// Recalcule `projects.status` après cancel / dismiss / delete.
+/// Si un succès prod existe → `live` (même avec des échecs plus récents acquittés).
+pub async fn recompute_project_status_after_deploy_change(
+    pool: &PgPool,
+    project_id: i64,
+) -> Result<(), sqlx::Error> {
+    let now = now_str();
     let active: (i64,) = sqlx::query_as(
         r#"SELECT COUNT(*) FROM deployments
            WHERE project_id = $1
@@ -210,41 +221,48 @@ pub async fn cancel_one_deployment(
     .await
     .unwrap_or((0,));
 
-    if active.0 == 0 {
-        let has_success: (i64,) = sqlx::query_as(
-            r#"SELECT COUNT(*) FROM deployments
-               WHERE project_id = $1 AND environment = 'production'
-                 AND status IN ('success', 'deployed', 'ok')"#,
-        )
-        .bind(project_id)
-        .fetch_one(pool)
-        .await
-        .unwrap_or((0,));
-        let last_failed: (i64,) = sqlx::query_as(
-            r#"SELECT COUNT(*) FROM deployments
-               WHERE project_id = $1 AND environment = 'production'
-                 AND status IN ('failed', 'error')"#,
-        )
-        .bind(project_id)
-        .fetch_one(pool)
-        .await
-        .unwrap_or((0,));
-        let project_status = if has_success.0 > 0 {
-            "live"
-        } else if last_failed.0 > 0 {
-            "failed"
-        } else {
-            "idle"
-        };
-        let _ = sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
-            .bind(project_status)
+    if active.0 > 0 {
+        let _ = sqlx::query("UPDATE projects SET status = 'deploying', updated_at = $1 WHERE id = $2")
             .bind(&now)
             .bind(project_id)
             .execute(pool)
             .await;
+        return Ok(());
     }
 
-    Ok(true)
+    let has_success: (i64,) = sqlx::query_as(
+        r#"SELECT COUNT(*) FROM deployments
+           WHERE project_id = $1 AND environment = 'production'
+             AND status IN ('success', 'deployed', 'ok')"#,
+    )
+    .bind(project_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or((0,));
+    let open_failed: (i64,) = sqlx::query_as(
+        r#"SELECT COUNT(*) FROM deployments
+           WHERE project_id = $1 AND environment = 'production'
+             AND status IN ('failed', 'error')
+             AND (dismissed_at IS NULL OR dismissed_at = '')"#,
+    )
+    .bind(project_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or((0,));
+    let project_status = if has_success.0 > 0 {
+        "live"
+    } else if open_failed.0 > 0 {
+        "failed"
+    } else {
+        "idle"
+    };
+    let _ = sqlx::query("UPDATE projects SET status = $1, updated_at = $2 WHERE id = $3")
+        .bind(project_status)
+        .bind(&now)
+        .bind(project_id)
+        .execute(pool)
+        .await;
+    Ok(())
 }
 
 async fn wait_cancelled(mut rx: watch::Receiver<bool>) {
@@ -345,6 +363,53 @@ async fn mark_status(pool: &PgPool, deployment_uuid: &str, status: &str) {
         .bind(deployment_uuid)
         .execute(pool)
         .await;
+}
+
+/// Met à jour les logs d’un déploiement encore actif (poll UI live).
+/// No-op si déjà terminal (`success` / `failed` / `cancelled`).
+pub async fn set_live_logs(pool: &PgPool, deployment_uuid: &str, logs: &str) {
+    let now = now_str();
+    let _ = sqlx::query(
+        r#"UPDATE deployments
+           SET logs = $1, updated_at = $2
+           WHERE uuid = $3
+             AND status IN ('queued', 'running', 'building', 'pending', 'deploying')"#,
+    )
+    .bind(logs)
+    .bind(&now)
+    .bind(deployment_uuid)
+    .execute(pool)
+    .await;
+}
+
+/// Hook + tâche de flush debouncé (~400 ms) vers la base.
+/// Dropper le dernier `Arc` du hook ferme le canal ; la tâche sort ensuite.
+/// Appeler `abort()` sur le `JoinHandle` après `finalize` est sûr (les logs finaux
+/// sont déjà écrits par `finalize_if_active`).
+pub fn spawn_live_log_flusher(
+    pool: PgPool,
+    deployment_uuid: String,
+) -> (
+    devforge_deploy::DeployLogHook,
+    tokio::task::JoinHandle<()>,
+) {
+    let (tx, mut rx) = watch::channel(String::new());
+    let handle = tokio::spawn(async move {
+        loop {
+            if rx.changed().await.is_err() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            let logs = rx.borrow_and_update().clone();
+            if !logs.is_empty() {
+                set_live_logs(&pool, &deployment_uuid, &logs).await;
+            }
+        }
+    });
+    let hook: devforge_deploy::DeployLogHook = Arc::new(move |logs: &str| {
+        let _ = tx.send(logs.to_string());
+    });
+    (hook, handle)
 }
 
 /// Persiste le résultat seulement si le déploiement n'a pas été supersédé.
@@ -655,6 +720,7 @@ mod tests {
                 error_summary TEXT,
                 error_hint TEXT,
                 finished_at TEXT,
+                dismissed_at TEXT,
                 updated_at TEXT
             )"#,
         )
@@ -735,6 +801,7 @@ mod tests {
                 error_summary TEXT,
                 error_hint TEXT,
                 finished_at TEXT,
+                dismissed_at TEXT,
                 updated_at TEXT
             )"#,
         )
@@ -793,6 +860,7 @@ mod tests {
                 error_summary TEXT,
                 error_hint TEXT,
                 finished_at TEXT,
+                dismissed_at TEXT,
                 updated_at TEXT
             )"#,
         )
@@ -895,6 +963,7 @@ mod tests {
                 error_summary TEXT,
                 error_hint TEXT,
                 finished_at TEXT,
+                dismissed_at TEXT,
                 created_at TEXT,
                 updated_at TEXT
             )"#,
@@ -943,5 +1012,241 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(proj.0, "live");
+    }
+
+    #[tokio::test]
+    async fn recompute_live_when_failed_dismissed_and_success_exists() {
+        let pool = devforge_database::ephemeral_pg().await;
+        sqlx::query(
+            r#"CREATE TABLE projects (
+                id BIGINT PRIMARY KEY,
+                uuid TEXT NOT NULL,
+                status TEXT NOT NULL,
+                updated_at TEXT
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"CREATE TABLE deployments (
+                uuid TEXT PRIMARY KEY,
+                project_id BIGINT NOT NULL,
+                status TEXT NOT NULL,
+                environment TEXT NOT NULL DEFAULT 'production',
+                logs TEXT,
+                dismissed_at TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO projects (id, uuid, status) VALUES (7, 'starbase', 'failed')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO deployments (uuid, project_id, status, created_at) VALUES ('ok', 7, 'success', '2025-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO deployments (uuid, project_id, status, created_at) VALUES ('fail', 7, 'failed', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        recompute_project_status_after_deploy_change(&pool, 7)
+            .await
+            .unwrap();
+        let before: (String,) = sqlx::query_as("SELECT status FROM projects WHERE id = 7")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        // Succès existe → live même avec un échec non acquitté (même règle que cancel).
+        assert_eq!(before.0, "live");
+
+        sqlx::query("UPDATE projects SET status = 'failed' WHERE id = 7")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE deployments SET dismissed_at = '2026-01-02T00:00:00Z' WHERE uuid = 'fail'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        recompute_project_status_after_deploy_change(&pool, 7)
+            .await
+            .unwrap();
+        let after: (String,) = sqlx::query_as("SELECT status FROM projects WHERE id = 7")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(after.0, "live");
+    }
+
+    #[tokio::test]
+    async fn recompute_failed_without_success_keeps_failed() {
+        let pool = devforge_database::ephemeral_pg().await;
+        sqlx::query(
+            r#"CREATE TABLE projects (
+                id BIGINT PRIMARY KEY,
+                uuid TEXT NOT NULL,
+                status TEXT NOT NULL,
+                updated_at TEXT
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"CREATE TABLE deployments (
+                uuid TEXT PRIMARY KEY,
+                project_id BIGINT NOT NULL,
+                status TEXT NOT NULL,
+                environment TEXT NOT NULL DEFAULT 'production',
+                dismissed_at TEXT,
+                updated_at TEXT
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO projects (id, uuid, status) VALUES (8, 'p', 'failed')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO deployments (uuid, project_id, status) VALUES ('fail', 8, 'failed')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        recompute_project_status_after_deploy_change(&pool, 8)
+            .await
+            .unwrap();
+        let st: (String,) = sqlx::query_as("SELECT status FROM projects WHERE id = 8")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(st.0, "failed");
+
+        sqlx::query("UPDATE deployments SET dismissed_at = 'now' WHERE uuid = 'fail'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        recompute_project_status_after_deploy_change(&pool, 8)
+            .await
+            .unwrap();
+        let idle: (String,) = sqlx::query_as("SELECT status FROM projects WHERE id = 8")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(idle.0, "idle");
+    }
+
+    #[tokio::test]
+    async fn set_live_logs_updates_running_only() {
+        let pool = devforge_database::ephemeral_pg().await;
+        sqlx::query(
+            r#"CREATE TABLE deployments (
+                uuid TEXT PRIMARY KEY,
+                project_id BIGINT NOT NULL,
+                status TEXT NOT NULL,
+                logs TEXT,
+                updated_at TEXT
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO deployments (uuid, project_id, status, logs, updated_at) VALUES ('run', 1, 'running', 'start', 't0')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO deployments (uuid, project_id, status, logs, updated_at) VALUES ('ok', 1, 'success', 'done', 't0')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        set_live_logs(&pool, "run", "mid\n").await;
+        set_live_logs(&pool, "ok", "should-not-write").await;
+
+        let run: (String,) = sqlx::query_as("SELECT logs FROM deployments WHERE uuid = 'run'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(run.0, "mid\n");
+        let ok: (String,) = sqlx::query_as("SELECT logs FROM deployments WHERE uuid = 'ok'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(ok.0, "done");
+    }
+
+    #[tokio::test]
+    async fn recompute_after_delete_uses_remaining_rows() {
+        let pool = devforge_database::ephemeral_pg().await;
+        sqlx::query(
+            r#"CREATE TABLE projects (
+                id BIGINT PRIMARY KEY,
+                uuid TEXT NOT NULL,
+                status TEXT NOT NULL,
+                updated_at TEXT
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"CREATE TABLE deployments (
+                uuid TEXT PRIMARY KEY,
+                project_id BIGINT NOT NULL,
+                status TEXT NOT NULL,
+                environment TEXT NOT NULL DEFAULT 'production',
+                dismissed_at TEXT,
+                updated_at TEXT
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO projects (id, uuid, status) VALUES (9, 'p', 'failed')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO deployments (uuid, project_id, status) VALUES ('ok', 9, 'success')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO deployments (uuid, project_id, status) VALUES ('fail', 9, 'failed')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query("DELETE FROM deployments WHERE uuid = 'fail'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        recompute_project_status_after_deploy_change(&pool, 9)
+            .await
+            .unwrap();
+        let st: (String,) = sqlx::query_as("SELECT status FROM projects WHERE id = 9")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(st.0, "live");
     }
 }

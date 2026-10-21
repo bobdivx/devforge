@@ -171,6 +171,10 @@ pub struct Deployment {
     #[sqlx(default)]
     pub environment: String,
     pub finished_at: Option<String>,
+    /// Horodatage si l’échec a été ignoré (badge Échec acquitté).
+    #[serde(default)]
+    #[sqlx(default)]
+    pub dismissed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

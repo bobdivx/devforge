@@ -1143,7 +1143,7 @@ pub fn remote_insight(workdir: &Path, branch: &str, st: &DraftStatus) -> RemoteI
 pub struct Advice {
     /// `keep` | `review` | `delete`
     pub level: &'static str,
-    /// « Garder » | « À vérifier » | « Peut être supprimé »
+    /// « Conseil · garder » | « Conseil · vérifier » | « Conseil · supprimer »
     pub label: &'static str,
     /// Raison en français simple.
     pub reason: String,
@@ -1168,17 +1168,17 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 pub fn advise(i: &AdviceInput) -> Advice {
     let keep = |r: String| Advice {
         level: "keep",
-        label: "Garder",
+        label: "Conseil · garder",
         reason: r,
     };
     let review = |r: String| Advice {
         level: "review",
-        label: "À vérifier",
+        label: "Conseil · vérifier",
         reason: r,
     };
     let delete = |r: String| Advice {
         level: "delete",
-        label: "Peut être supprimé",
+        label: "Conseil · supprimer",
         reason: r,
     };
     let dup = i.insight.map(|x| x.already_on_github.len()).unwrap_or(0);

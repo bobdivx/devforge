@@ -141,6 +141,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         ("live_revision_sha", "TEXT"),
         // `production` (défaut) ou `dev` (environnement dev séparé).
         ("environment", "TEXT NOT NULL DEFAULT 'production'"),
+        // Acquittement d’un échec (badge Échec) sans supprimer la ligne.
+        ("dismissed_at", "TEXT"),
     ] {
         let sql = format!("ALTER TABLE deployments ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;

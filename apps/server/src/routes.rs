@@ -39,13 +39,20 @@ pub fn router() -> Router<AppState> {
             get(list_deployments).post(create_deployment),
         )
         .route("/api/v1/projects/{uuid}/trace", get(project_trace))
-        .route("/api/v1/deployments/{uuid}", get(get_deployment))
+        .route(
+            "/api/v1/deployments/{uuid}",
+            get(get_deployment).delete(delete_deployment),
+        )
         .route("/api/v1/deployments/{uuid}/logs", get(deployment_logs))
         .route(
             "/api/v1/deployments/{uuid}/request-repair",
             post(request_repair),
         )
         .route("/api/v1/deployments/{uuid}/cancel", post(cancel_deployment))
+        .route(
+            "/api/v1/deployments/{uuid}/dismiss",
+            post(dismiss_deployment),
+        )
         .route("/api/v1/agent/tools", get(agent_tools))
         .route("/api/v1/agent/chat", post(agent_chat))
         .route("/api/v1/agent/tools/{tool}", post(agent_execute_tool))
@@ -684,7 +691,7 @@ async fn get_project(
                     ELSE NULL
                   END AS logs,
                   error_summary, error_hint, live_revision_sha, environment,
-                  finished_at, created_at, updated_at
+                  finished_at, dismissed_at, created_at, updated_at
            FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 10"#,
     )
     .bind(project.id)
@@ -1189,7 +1196,7 @@ async fn list_deployments(
                     ELSE NULL
                   END AS logs,
                   error_summary, error_hint, live_revision_sha, environment,
-                  finished_at, created_at, updated_at
+                  finished_at, dismissed_at, created_at, updated_at
            FROM deployments WHERE project_id = $1
            ORDER BY CASE
              WHEN status IN ('queued', 'running', 'building', 'pending', 'deploying') THEN 0
@@ -1616,6 +1623,10 @@ async fn run_real_deploy_inner(
     };
     let deploy = state.deploy.clone();
     let slot_server = server_id.clone();
+    let (log_hook, log_flusher) = crate::deploy_queue::spawn_live_log_flusher(
+        state.pool.clone(),
+        deployment_uuid.to_string(),
+    );
     let outcome = crate::deploy_queue::run_in_node_slot(
         &state.deploy_queue,
         &state.pool,
@@ -1626,11 +1637,12 @@ async fn run_real_deploy_inner(
             let started = build_started.clone();
             async move {
                 started.notify_one();
-                deploy.deploy(&req).await
+                deploy.deploy_with_log_hook(&req, Some(log_hook)).await
             }
         },
     )
     .await;
+    log_flusher.abort();
     state.deploy_queue.unregister_cancel(deployment_uuid).await;
 
     match outcome {
@@ -1840,6 +1852,143 @@ fn build_repair_prompt(dep_uuid: &str, summary: &str, hint: &str, raw_logs: &str
         Cassé : une ou deux phrases sur ce qui a cassé.\n\
         Changé : une phrase sur ce que tu as changé."
     )
+}
+
+/// POST /api/v1/deployments/{uuid}/dismiss
+/// Acquitte un échec (ou annulation) : badge Échec retiré si une version live existe.
+/// Ne touche ni au conteneur ni à GitHub.
+async fn dismiss_deployment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let (_user, _ws, dep) = auth_deployment(&state, &headers, &uuid).await?;
+
+    let dismissible = matches!(
+        dep.status.as_str(),
+        "failed" | "error" | "cancelled" | "canceled"
+    );
+    if !dismissible {
+        return Err(ApiError::message(
+            "Seuls les déploiements terminés en échec ou annulés peuvent être ignorés",
+        ));
+    }
+    if dep
+        .dismissed_at
+        .as_deref()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+    {
+        return Err(ApiError::message("Ce déploiement est déjà ignoré"));
+    }
+
+    let now = crate::state::now_str();
+    sqlx::query("UPDATE deployments SET dismissed_at = $1, updated_at = $2 WHERE uuid = $3")
+        .bind(&now)
+        .bind(&now)
+        .bind(&uuid)
+        .execute(&state.pool)
+        .await
+        .map_err(ApiError::from)?;
+
+    crate::deploy_queue::recompute_project_status_after_deploy_change(&state.pool, dep.project_id)
+        .await
+        .map_err(ApiError::from)?;
+
+    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE id = $1")
+        .bind(dep.project_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(ApiError::from)?;
+    if let Some(p) = project.as_ref() {
+        crate::deploy_queue::record_event(
+            &state.pool,
+            &p.uuid,
+            "deploy",
+            "dismissed",
+            &uuid,
+            "user_dismiss",
+        )
+        .await;
+    }
+
+    let dep = sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE uuid = $1")
+        .bind(&uuid)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(ApiError::from)?;
+    let project_status = project.map(|p| p.status).unwrap_or_default();
+
+    Ok(Json(json!({
+        "data": dep,
+        "ok": true,
+        "dismissed": true,
+        "project_status": project_status,
+    })))
+}
+
+/// DELETE /api/v1/deployments/{uuid}
+/// Retire une ligne d’historique. Interdit si le déploiement est encore en cours.
+/// Ne touche ni au conteneur ni à GitHub.
+async fn delete_deployment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let (_user, _ws, dep) = auth_deployment(&state, &headers, &uuid).await?;
+
+    let in_progress = matches!(
+        dep.status.as_str(),
+        "queued" | "running" | "building" | "pending" | "deploying"
+    );
+    if in_progress {
+        return Err(ApiError::message(
+            "Impossible de supprimer un déploiement encore en cours — arrête-le d’abord",
+        ));
+    }
+
+    let project = sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE id = $1")
+        .bind(dep.project_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(ApiError::from)?;
+
+    sqlx::query("DELETE FROM deployments WHERE uuid = $1")
+        .bind(&uuid)
+        .execute(&state.pool)
+        .await
+        .map_err(ApiError::from)?;
+
+    crate::deploy_queue::recompute_project_status_after_deploy_change(&state.pool, dep.project_id)
+        .await
+        .map_err(ApiError::from)?;
+
+    if let Some(p) = project.as_ref() {
+        crate::deploy_queue::record_event(
+            &state.pool,
+            &p.uuid,
+            "deploy",
+            "deleted",
+            &uuid,
+            "user_delete",
+        )
+        .await;
+    }
+
+    let project_status = sqlx::query_as::<_, (String,)>("SELECT status FROM projects WHERE id = $1")
+        .bind(dep.project_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(ApiError::from)?
+        .map(|r| r.0)
+        .unwrap_or_default();
+
+    Ok(Json(json!({
+        "ok": true,
+        "deleted": true,
+        "uuid": uuid,
+        "project_status": project_status,
+    })))
 }
 
 /// POST /api/v1/deployments/{uuid}/cancel
@@ -4398,7 +4547,10 @@ pub(crate) async fn resolve_project_status_db(
     project: &Project,
 ) -> Result<String, ApiError> {
     let latest: Option<(String,)> = sqlx::query_as(
-        "SELECT status FROM deployments WHERE project_id = $1 AND environment = 'production' ORDER BY created_at DESC LIMIT 1",
+        r#"SELECT status FROM deployments
+           WHERE project_id = $1 AND environment = 'production'
+             AND (dismissed_at IS NULL OR dismissed_at = '')
+           ORDER BY created_at DESC LIMIT 1"#,
     )
     .bind(project.id)
     .fetch_optional(&state.pool)
@@ -4439,7 +4591,10 @@ pub(crate) async fn resolve_project_status_live(
     project: &Project,
 ) -> Result<String, ApiError> {
     let latest: Option<(String,)> = sqlx::query_as(
-        "SELECT status FROM deployments WHERE project_id = $1 AND environment = 'production' ORDER BY created_at DESC LIMIT 1",
+        r#"SELECT status FROM deployments
+           WHERE project_id = $1 AND environment = 'production'
+             AND (dismissed_at IS NULL OR dismissed_at = '')
+           ORDER BY created_at DESC LIMIT 1"#,
     )
     .bind(project.id)
     .fetch_optional(&state.pool)
