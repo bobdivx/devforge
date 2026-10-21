@@ -141,6 +141,11 @@ export type CursorWorkerStatus = {
   env_key_present?: boolean;
   /** Cursor a refusé la clé (logs du worker). */
   key_invalid?: boolean;
+  /** Clé grok_ : pas encore acceptée par le worker Cursor. */
+  key_unsupported?: boolean;
+  /** Session `cursor-agent login` active (utilisée sans clé). */
+  logged_in?: boolean;
+  auth?: 'key' | 'login' | 'none';
   enabled: boolean;
   node?: CursorWorkerNode;
   node_missing?: boolean;
@@ -1922,6 +1927,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  /** Connexion Cursor sans clé : lance `cursor-agent login`, renvoie l’URL à ouvrir. */
+  cursorWorkerLoginStart: () =>
+    request<{ ok: boolean; url: string; pending: boolean }>('/cursor-worker/login', {
+      method: 'POST',
+      body: '{}',
+    }),
+  cursorWorkerLoginStatus: () =>
+    request<{ pending: boolean; url?: string | null; logged_in: boolean }>('/cursor-worker/login'),
   cursorWorkerStart: () =>
     request<{
       ok: boolean;

@@ -61,7 +61,7 @@ export function workerSummary(
   s: Pick<
     CursorWorkerStatus,
     'running' | 'ready' | 'cli_installed' | 'api_key_set' | 'node_missing' | 'node_error'
-  > & { key_invalid?: boolean },
+  > & { key_invalid?: boolean; key_unsupported?: boolean; logged_in?: boolean },
 ): { label: string; tone: Tone; detail: string; installed: boolean } {
   if (s.node_missing) {
     return {
@@ -83,7 +83,7 @@ export function workerSummary(
     return {
       label: 'Clé KO',
       tone: 'danger',
-      detail: 'Clé API refusée par Cursor',
+      detail: s.key_unsupported ? 'Clé grok_ refusée : se connecter' : 'Clé API refusée par Cursor',
       installed: false,
     };
   }
@@ -97,7 +97,7 @@ export function workerSummary(
         }
       : { label: 'ON', tone: 'ok', detail: 'Connecté', installed: true };
   }
-  if (!s.api_key_set || !s.cli_installed) {
+  if ((!s.api_key_set && !s.logged_in) || !s.cli_installed) {
     return {
       label: 'À installer',
       tone: 'warn',
@@ -113,9 +113,97 @@ export function workerSummary(
  * enregistrée ou si Cursor a refusé la clé actuelle. Exporté pour les tests.
  */
 export function installNeeds(
-  s: (Pick<CursorWorkerStatus, 'api_key_set'> & { key_invalid?: boolean }) | null,
+  s:
+    | (Pick<CursorWorkerStatus, 'api_key_set'> & { key_invalid?: boolean; logged_in?: boolean })
+    | null,
 ): Array<'api_key'> {
-  return s && (!s.api_key_set || s.key_invalid) ? ['api_key'] : [];
+  if (!s || s.logged_in) return [];
+  return !s.api_key_set || s.key_invalid ? ['api_key'] : [];
+}
+
+/** Avertissement non bloquant (clé probablement inutilisable par le worker). */
+export function cursorKeyWarning(raw: string): string | null {
+  return raw.trim().startsWith('grok_')
+    ? 'Les clés grok_ ne sont pas encore acceptées par le worker Cursor (bug Cursor connu). Préfère « Se connecter avec Cursor ».'
+    : null;
+}
+
+/**
+ * Connexion Cursor sans clé (`cursor-agent login`) : DevForge donne le lien,
+ * l’utilisateur valide dans son navigateur, la session est gardée sur le serveur.
+ */
+function CursorLogin({ loggedIn, onLoggedIn }: { loggedIn: boolean; onLoggedIn: () => void }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(loggedIn);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => setDone(loggedIn), [loggedIn]);
+  useEffect(() => {
+    if (!url || done) return;
+    const t = setInterval(async () => {
+      try {
+        const r = await api.cursorWorkerLoginStatus();
+        if (r.logged_in) {
+          setDone(true);
+          setUrl(null);
+          onLoggedIn();
+        } else if (!r.pending) {
+          setErr('La connexion a expiré : recommence.');
+          setUrl(null);
+        }
+      } catch {
+        /* réessaie au prochain tour */
+      }
+    }, 3000);
+    return () => clearInterval(t);
+  }, [url, done]);
+
+  async function start() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api.cursorWorkerLoginStart();
+      setUrl(r.url);
+    } catch (e) {
+      setErr(String((e as Error).message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (done) {
+    return <Alert tone="ok">Connecté à Cursor : aucune clé nécessaire.</Alert>;
+  }
+  return (
+    <div class="space-y-2 rounded-xl bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-line)]">
+      <div class="text-sm font-medium text-[var(--color-ink)]">Se connecter avec Cursor</div>
+      <p class="text-xs text-[var(--color-ink-muted)]">
+        Recommandé : pas de clé à copier. Tu valides la connexion dans ton navigateur avec ton
+        compte Cursor ; la clé enregistrée est alors remplacée.
+      </p>
+      {url ? (
+        <div class="space-y-2">
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex h-11 w-full items-center justify-center rounded-xl bg-[var(--color-accent)] px-4 text-sm font-medium text-zinc-950 sm:w-auto"
+          >
+            Ouvrir la connexion Cursor
+          </a>
+          <div class="flex items-center gap-2 text-xs text-[var(--color-ink-muted)]">
+            <Spinner /> En attente de la validation dans le navigateur…
+          </div>
+        </div>
+      ) : (
+        <Button variant="secondary" disabled={busy} onClick={() => void start()}>
+          {busy ? 'Préparation…' : 'Se connecter avec Cursor'}
+        </Button>
+      )}
+      {err ? <p class="text-xs text-[var(--color-danger)]">{err}</p> : null}
+    </div>
+  );
 }
 
 const FOREIGN_KEYS: Array<[string, string]> = [
@@ -161,6 +249,7 @@ function KeyField({
   required: boolean;
 }) {
   const problem = cursorKeyProblem(value);
+  const warning = problem ? null : cursorKeyWarning(value);
   const placeholder =
     status.api_key_set && !required
       ? `${status.api_key_masked ?? '••••'} — laisser vide pour conserver`
@@ -179,6 +268,7 @@ function KeyField({
         onInput={(e) => onInput((e.target as HTMLInputElement).value)}
       />
       {problem ? <p class="text-xs text-[var(--color-danger)]">{problem}</p> : null}
+      {warning ? <p class="text-xs text-[var(--color-warn)]">{warning}</p> : null}
       {status.env_key_present ? (
         <p class="text-xs text-[var(--color-ink-muted)]">
           {status.api_key_source === 'env'
@@ -554,9 +644,11 @@ function InstallModal({
               value={
                 status.key_invalid
                   ? 'Refusée par Cursor — à remplacer'
-                  : status.api_key_set
-                    ? `${status.api_key_masked ?? 'enregistrée'}${status.api_key_source === 'env' ? ' (serveur)' : ''}`
-                    : 'À fournir ci-dessous'
+                  : status.logged_in
+                    ? 'Connexion Cursor (sans clé)'
+                    : status.api_key_set
+                      ? `${status.api_key_masked ?? 'enregistrée'}${status.api_key_source === 'env' ? ' (serveur)' : ''}`
+                      : 'À fournir ci-dessous'
               }
             />
           </div>
@@ -581,16 +673,31 @@ function InstallModal({
           ) : null}
           {status.key_invalid ? (
             <Alert tone="danger">
-              Cursor a refusé la clé enregistrée ({status.api_key_masked}). Colle une clé Cursor
-              personnelle : cursor.com/dashboard → API Keys.
+              {status.key_unsupported
+                ? `Cursor a refusé la clé grok_ (${status.api_key_masked}) : le worker ne les accepte pas encore. Connecte-toi avec Cursor ci-dessous.`
+                : `Cursor a refusé la clé enregistrée (${status.api_key_masked}). Connecte-toi avec Cursor ou colle une autre clé.`}
             </Alert>
           ) : null}
-          <KeyField
-            status={status}
-            value={apiKey}
-            onInput={setApiKey}
-            required={needs.includes('api_key')}
-          />
+          {node?.leader !== false ? (
+            <CursorLogin
+              loggedIn={!!status.logged_in}
+              onLoggedIn={() => {
+                setApiKey('');
+                onDone();
+              }}
+            />
+          ) : null}
+          {status.logged_in ? null : (
+            <div class="text-center text-xs text-[var(--color-ink-muted)]">ou</div>
+          )}
+          {status.logged_in ? null : (
+            <KeyField
+              status={status}
+              value={apiKey}
+              onInput={setApiKey}
+              required={needs.includes('api_key')}
+            />
+          )}
           {err ? <Alert tone="danger">{err}</Alert> : null}
           <p class="text-xs text-[var(--color-ink-muted)]">
             Le worker exécute les agents Cursor sur cette machine (fichiers, terminal). La
@@ -678,7 +785,7 @@ function StatusModal({
               </Button>
               <Button
                 variant="secondary"
-                disabled={!!busy || !status.cli_installed || !status.api_key_set}
+                disabled={!!busy || !status.cli_installed || (!status.api_key_set && !status.logged_in)}
                 onClick={() => void act('restart')}
               >
                 {busy === 'restart' ? 'Relance…' : status.running ? 'Relancer' : 'Démarrer'}
@@ -708,7 +815,13 @@ function StatusModal({
             />
             <Row
               label="Clé API"
-              value={status.api_key_set ? status.api_key_masked || 'enregistrée' : 'manquante'}
+              value={
+                status.api_key_set
+                  ? status.api_key_masked || 'enregistrée'
+                  : status.logged_in
+                    ? 'Connexion Cursor (sans clé)'
+                    : 'manquante'
+              }
             />
             <Row label="Démarrage auto" value={status.enabled ? 'Oui' : 'Non'} />
           </div>
