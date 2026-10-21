@@ -2,6 +2,34 @@
 
 use serde_json::{Map, Value};
 
+/// Rotation des logs des conteneurs lancés par DevForge : `(max-size Mo, max-file)`.
+/// `None` = options du démon Docker inchangées. Réglée depuis l'admin
+/// (Nettoyage Docker) ; appliquée aux prochains `docker run`.
+static CONTAINER_LOG_ROTATION: std::sync::RwLock<Option<(u32, u32)>> = std::sync::RwLock::new(None);
+
+pub fn set_container_log_rotation(rotation: Option<(u32, u32)>) {
+    if let Ok(mut g) = CONTAINER_LOG_ROTATION.write() {
+        *g = rotation.filter(|(size, files)| *size > 0 && *files > 0);
+    }
+}
+
+pub fn container_log_rotation() -> Option<(u32, u32)> {
+    CONTAINER_LOG_ROTATION.read().ok().and_then(|g| *g)
+}
+
+/// Arguments `--log-opt` (drivers `json-file` / `local`).
+pub fn log_rotation_args(rotation: Option<(u32, u32)>) -> Vec<String> {
+    match rotation {
+        Some((size, files)) if size > 0 && files > 0 => vec![
+            "--log-opt".into(),
+            format!("max-size={size}m"),
+            "--log-opt".into(),
+            format!("max-file={files}"),
+        ],
+        _ => Vec::new(),
+    }
+}
+
 pub fn docker_build(workdir: &str, image: &str, dockerfile: &str) -> String {
     format!(
         "docker build -f {} -t {} {}",
@@ -142,6 +170,7 @@ pub fn docker_run_ex(
         "--restart".into(),
         "unless-stopped".into(),
     ];
+    args.extend(log_rotation_args(container_log_rotation()));
     if gpu_nvidia {
         args.push("--gpus".into());
         args.push("all".into());
@@ -1439,7 +1468,7 @@ pub fn classify_ready_probe(out: &str) -> ReadyProbe {
     }
 }
 
-fn shell_escape(s: &str) -> String {
+pub(crate) fn shell_escape(s: &str) -> String {
     if s.chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '='))
     {
@@ -1451,6 +1480,17 @@ fn shell_escape(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn log_rotation_args_only_when_configured() {
+        assert!(super::log_rotation_args(None).is_empty());
+        assert!(super::log_rotation_args(Some((0, 3))).is_empty());
+        assert_eq!(
+            super::log_rotation_args(Some((10, 3))),
+            vec!["--log-opt", "max-size=10m", "--log-opt", "max-file=3"]
+        );
+    }
+
     #[test]
     fn acme_email_validation_and_traefik_command() {
         assert!(is_valid_acme_email("bobdivx@gmail.com"));
