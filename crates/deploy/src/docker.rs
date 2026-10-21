@@ -12,6 +12,7 @@ pub fn docker_build(workdir: &str, image: &str, dockerfile: &str) -> String {
 }
 
 pub fn docker_run(name: &str, image: &str, ports: &[(u16, u16)], env_file: Option<&str>) -> String {
+    let listen = ports.first().map(|(_, c)| *c);
     docker_run_ex(
         name,
         image,
@@ -23,6 +24,7 @@ pub fn docker_run(name: &str, image: &str, ports: &[(u16, u16)], env_file: Optio
         false,
         &[],
         &crate::runtime::RunTune::default(),
+        listen,
     )
 }
 
@@ -128,6 +130,8 @@ pub fn docker_run_ex(
     gpu_dri: bool,
     volumes: &[String],
     tune: &crate::runtime::RunTune,
+    // Port d’écoute (Traefik / healthcheck). Forcé via `-e` après `--env-file`.
+    listen_port: Option<u16>,
 ) -> String {
     let mut args = vec![
         "docker".into(),
@@ -192,6 +196,14 @@ pub fn docker_run_ex(
     if let Some(ef) = env_file {
         args.push("--env-file".into());
         args.push(shell_escape(ef));
+    }
+    // Après --env-file : `-e` gagne. Astro/Next écoutent localhost sinon → healthcheck code=000.
+    args.push("-e".into());
+    args.push("HOST=0.0.0.0".into());
+    let port = listen_port.or_else(|| ports.first().map(|(_, c)| *c));
+    if let Some(p) = port {
+        args.push("-e".into());
+        args.push(format!("PORT={p}"));
     }
     for volume in volumes {
         args.push("-v".into());
@@ -1695,7 +1707,19 @@ mod tests {
             }),
             network_alias: None,
         };
-        let cmd = docker_run_ex("app", "img", &[], None, None, None, true, false, &[], &tune);
+        let cmd = docker_run_ex(
+            "app",
+            "img",
+            &[],
+            None,
+            None,
+            None,
+            true,
+            false,
+            &[],
+            &tune,
+            Some(3000),
+        );
         assert!(cmd.contains("-p 4240:4240"));
         assert!(cmd.contains("-p 4240:4240/udp"));
         assert!(cmd.contains("--memory 20g"));
@@ -1703,6 +1727,8 @@ mod tests {
         assert!(cmd.contains("--gpus all"));
         assert!(cmd.contains("--health-cmd"));
         assert!(cmd.contains("--health-start-period 2m"));
+        assert!(cmd.contains("-e HOST=0.0.0.0"));
+        assert!(cmd.contains("-e PORT=3000"));
     }
 
     #[test]
@@ -1734,10 +1760,13 @@ mod tests {
             false,
             &volumes,
             &crate::runtime::RunTune::default(),
+            Some(3000),
         );
         assert!(cmd.contains("-v /media/Docker/AppData/popcorn:/app/.data"));
         assert!(cmd.contains("-v /media/Media/Popcornn/media:/app/downloads"));
         assert!(cmd.contains("-v /var/run/docker.sock:/var/run/docker.sock"));
+        assert!(cmd.contains("-e HOST=0.0.0.0"));
+        assert!(cmd.contains("-e PORT=3000"));
     }
 
     #[test]
@@ -1769,6 +1798,7 @@ mod tests {
             true,
             &[],
             &crate::runtime::RunTune::default(),
+            None,
         );
         assert!(cmd.contains("--gpus all"));
         assert!(cmd.contains("--device /dev/dri"));
@@ -1783,6 +1813,7 @@ mod tests {
             false,
             &[],
             &crate::runtime::RunTune::default(),
+            None,
         );
         assert!(!plain.contains("--gpus"));
         assert!(!plain.contains("--device"));
