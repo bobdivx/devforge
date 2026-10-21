@@ -3,6 +3,11 @@
 //! Lance `agent worker … start` avec un `--worker-dir` par checkout projet,
 //! pour que Cursor / Grok Bot exécutent les tool calls sur la machine
 //! qui contient déjà tous les repos.
+//!
+//! Installation « un bouton » : DevForge installe lui-même le CLI Cursor dans
+//! son dossier de données (`<data>/cursor-worker/home`, persistant), sur le
+//! leader (processus enfant) ou sur un nœud worker (scripts via l'executor du
+//! cluster). Seule la clé API personnelle Cursor reste à fournir.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -11,6 +16,15 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const STATE_DIR_NAME: &str = "cursor-worker";
+
+/// Adresse locale des sondes `/healthz` / `/readyz` du worker.
+pub const MANAGEMENT_ADDR: &str = "127.0.0.1:47917";
+
+/// Le CLI accepte au plus 20 `--worker-dir`.
+pub const MAX_WORKER_DIRS: usize = 20;
+
+/// Script officiel d'installation du CLI Cursor.
+pub const INSTALL_URL: &str = "https://cursor.com/install";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerDir {
@@ -31,6 +45,8 @@ pub struct WorkerSettings {
     pub api_key_sealed: String,
     pub binary: String,
     pub extra_dirs: String,
+    /// Nœud cible (`''` ou `default` = leader).
+    pub node_id: String,
 }
 
 impl Default for WorkerSettings {
@@ -41,6 +57,7 @@ impl Default for WorkerSettings {
             api_key_sealed: String::new(),
             binary: String::new(),
             extra_dirs: String::new(),
+            node_id: String::new(),
         }
     }
 }
@@ -74,17 +91,33 @@ fn registered_path() -> PathBuf {
     state_dir().join("registered.json")
 }
 
+/// HOME dédié au CLI installé par DevForge (persistant dans le volume data).
+pub fn managed_home() -> PathBuf {
+    state_dir().join("home")
+}
+
+/// Binaire `agent` installé par DevForge.
+pub fn managed_binary() -> PathBuf {
+    managed_home().join(".local").join("bin").join("agent")
+}
+
+/// Dossier vide servi quand aucun checkout Git n'existe encore.
+pub fn fallback_workspace() -> PathBuf {
+    state_dir().join("workspace")
+}
+
 fn ensure_state_dir() -> Result<(), String> {
     std::fs::create_dir_all(state_dir()).map_err(|e| e.to_string())
 }
 
 pub async fn load_settings(pool: &PgPool) -> WorkerSettings {
-    let row: Option<(i64, String, String, String, String)> = sqlx::query_as(
+    let row: Option<(i64, String, String, String, String, String)> = sqlx::query_as(
         r#"SELECT COALESCE(cursor_worker_enabled, 0),
                   COALESCE(cursor_worker_name, ''),
                   COALESCE(cursor_worker_api_key, ''),
                   COALESCE(cursor_worker_binary, ''),
-                  COALESCE(cursor_worker_extra_dirs, '')
+                  COALESCE(cursor_worker_extra_dirs, ''),
+                  COALESCE(cursor_worker_node, '')
            FROM instance_settings WHERE id = 1"#,
     )
     .fetch_optional(pool)
@@ -92,12 +125,13 @@ pub async fn load_settings(pool: &PgPool) -> WorkerSettings {
     .ok()
     .flatten();
     match row {
-        Some((en, name, key, bin, extra)) => WorkerSettings {
+        Some((en, name, key, bin, extra, node)) => WorkerSettings {
             enabled: en != 0,
             name,
             api_key_sealed: key,
             binary: bin,
             extra_dirs: extra,
+            node_id: node,
         },
         None => WorkerSettings::default(),
     }
@@ -109,6 +143,35 @@ pub fn resolve_worker_name(settings: &WorkerSettings) -> String {
         return n.to_string();
     }
     hostname_fallback()
+}
+
+/// Nom annoncé : réglage explicite, sinon nom du nœud (slug), sinon hostname.
+pub fn resolve_worker_name_for_node(settings: &WorkerSettings, node_name: &str) -> String {
+    let n = settings.name.trim();
+    if !n.is_empty() {
+        return n.to_string();
+    }
+    let slug = slug_name(node_name);
+    if !slug.is_empty() {
+        return slug;
+    }
+    hostname_fallback()
+}
+
+/// `ZimaCube (NAS)` → `zimacube-nas`.
+pub fn slug_name(raw: &str) -> String {
+    let mut out = String::new();
+    let mut dash = false;
+    for c in raw.trim().chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            dash = false;
+        } else if !out.is_empty() && !dash {
+            out.push('-');
+            dash = true;
+        }
+    }
+    out.trim_end_matches('-').chars().take(48).collect()
 }
 
 fn hostname_fallback() -> String {
@@ -127,6 +190,34 @@ pub fn api_key_plain(settings: &WorkerSettings) -> String {
     crate::secret_box::open_compat(raw)
 }
 
+/// Clé effective : réglage DevForge, sinon `CURSOR_API_KEY` du serveur.
+/// Retourne (clé, source) — source ∈ `settings` | `env`.
+pub fn effective_api_key(settings: &WorkerSettings) -> Option<(String, &'static str)> {
+    let stored = api_key_plain(settings);
+    if !stored.trim().is_empty() {
+        return Some((stored.trim().to_string(), "settings"));
+    }
+    std::env::var("CURSOR_API_KEY")
+        .ok()
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+        .map(|k| (k, "env"))
+}
+
+/// Forme minimale d'une clé utilisateur Cursor (anti faute de frappe).
+pub fn validate_api_key(raw: &str) -> Result<String, String> {
+    let k = raw.trim();
+    if k.is_empty() {
+        return Err("Clé API Cursor vide.".into());
+    }
+    if k.len() < 16 || k.chars().any(char::is_whitespace) {
+        return Err(
+            "Clé API Cursor invalide (copie-la depuis Cursor → Dashboard → API Keys).".into(),
+        );
+    }
+    Ok(k.to_string())
+}
+
 pub fn mask_key(plain: &str) -> String {
     let t = plain.trim();
     if t.is_empty() {
@@ -138,7 +229,7 @@ pub fn mask_key(plain: &str) -> String {
     format!("{}…{}", &t[..4], &t[t.len().saturating_sub(4)..])
 }
 
-/// Résout le binaire `agent` (chemin custom ou PATH).
+/// Résout le binaire `agent` (chemin custom, PATH, puis installation DevForge).
 pub fn resolve_agent_binary(settings: &WorkerSettings) -> Option<PathBuf> {
     let custom = settings.binary.trim();
     if !custom.is_empty() {
@@ -148,16 +239,47 @@ pub fn resolve_agent_binary(settings: &WorkerSettings) -> Option<PathBuf> {
         }
         return None;
     }
-    which_agent()
+    which_agent().or_else(|| {
+        let p = managed_binary();
+        p.is_file().then_some(p)
+    })
+}
+
+/// Installe le CLI Cursor localement (leader) dans [`managed_home`].
+pub async fn install_cli_local() -> Result<String, String> {
+    ensure_state_dir()?;
+    std::fs::create_dir_all(managed_home()).map_err(|e| e.to_string())?;
+    let script = install_script(&ScriptBase::Literal(state_dir().display().to_string()));
+    let mut cmd = tokio::process::Command::new("sh");
+    cmd.arg("-c")
+        .arg(&script)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let out = tokio::time::timeout(std::time::Duration::from_secs(300), cmd.output())
+        .await
+        .map_err(|_| "Installation du CLI Cursor : délai dépassé (5 min).".to_string())?
+        .map_err(|e| format!("Installation du CLI Cursor : {e}"))?;
+    let text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    if !out.status.success() {
+        return Err(format!(
+            "Installation du CLI Cursor échouée.\n{}",
+            tail_lines(&text, 20)
+        ));
+    }
+    Ok(text)
 }
 
 fn which_agent() -> Option<PathBuf> {
     #[cfg(windows)]
     let cmd = Command::new("where").arg("agent").output();
     #[cfg(not(windows))]
-    let cmd = Command::new("sh")
-        .args(["-c", "command -v agent"])
-        .output();
+    let cmd = Command::new("sh").args(["-c", "command -v agent"]).output();
     let Ok(out) = cmd else {
         return None;
     };
@@ -198,11 +320,7 @@ pub async fn list_project_workdirs(pool: &PgPool) -> Result<Vec<WorkerDir>, Stri
         let p = Path::new(&path);
         let exists = p.is_dir();
         let has_git = exists && (p.join(".git").exists());
-        let git_remote = if has_git {
-            read_git_remote(p)
-        } else {
-            None
-        };
+        let git_remote = if has_git { read_git_remote(p) } else { None };
         let eligible = exists && has_git;
         dirs.push(WorkerDir {
             project_uuid: uuid,
@@ -219,7 +337,13 @@ pub async fn list_project_workdirs(pool: &PgPool) -> Result<Vec<WorkerDir>, Stri
 
 fn read_git_remote(workdir: &Path) -> Option<String> {
     let out = Command::new("git")
-        .args(["-C", &workdir.to_string_lossy(), "remote", "get-url", "origin"])
+        .args([
+            "-C",
+            &workdir.to_string_lossy(),
+            "remote",
+            "get-url",
+            "origin",
+        ])
         .output()
         .ok()?;
     if !out.status.success() {
@@ -254,7 +378,10 @@ pub fn eligible_paths(dirs: &[WorkerDir], extra_raw: &str) -> Vec<String> {
 }
 
 /// Construit les arguments CLI (sans le binaire) pour tests / démarrage.
-pub fn build_worker_args(name: &str, workdirs: &[String], api_key: &str) -> Result<Vec<String>, String> {
+///
+/// La clé API n'est jamais passée en argument (visible dans `ps`) : elle est
+/// fournie via `CURSOR_API_KEY` dans l'environnement du process.
+pub fn build_worker_args(name: &str, workdirs: &[String]) -> Result<Vec<String>, String> {
     if workdirs.is_empty() {
         return Err(
             "Aucun workdir Git éligible. Clone les repos projets ou ajoute des chemins extra."
@@ -267,17 +394,235 @@ pub fn build_worker_args(name: &str, workdirs: &[String], api_key: &str) -> Resu
         args.push("--name".into());
         args.push(name.to_string());
     }
-    for dir in workdirs {
+    for dir in workdirs.iter().take(MAX_WORKER_DIRS) {
         args.push("--worker-dir".into());
         args.push(dir.clone());
     }
+    args.push("--management-addr".into());
+    args.push(MANAGEMENT_ADDR.into());
     args.push("start".into());
-    let key = api_key.trim();
-    if !key.is_empty() {
-        args.push("--api-key".into());
-        args.push(key.to_string());
-    }
     Ok(args)
+}
+
+/// Workdirs effectifs : repos éligibles, sinon un espace vide géré par DevForge
+/// (le worker démarre quand même et les repos s'ajoutent au prochain relancement).
+pub fn workdirs_or_fallback(paths: &[String]) -> Vec<String> {
+    if !paths.is_empty() {
+        return paths.iter().take(MAX_WORKER_DIRS).cloned().collect();
+    }
+    let ws = fallback_workspace();
+    let _ = std::fs::create_dir_all(&ws);
+    vec![ws.display().to_string()]
+}
+
+// ───────────────────────── Scripts nœud (executor) ─────────────────────────
+
+/// Racine d'état du worker dans un script shell.
+#[derive(Debug, Clone)]
+pub enum ScriptBase {
+    /// Chemin connu côté leader (quoté).
+    Literal(String),
+    /// Nœud distant : `${DEVFORGE_DATA_DIR:-/data}/cursor-worker` évalué sur place.
+    NodeDataDir,
+}
+
+/// Quote POSIX (`'…'`).
+pub fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+fn script_prelude(base: &ScriptBase) -> String {
+    let d = match base {
+        ScriptBase::Literal(p) => format!("D={}", shell_quote(p)),
+        ScriptBase::NodeDataDir => {
+            format!("D=\"${{DEVFORGE_DATA_DIR:-/data}}/{STATE_DIR_NAME}\"")
+        }
+    };
+    format!(
+        "{d}\nmkdir -p \"$D/home\" || exit 2\nexport HOME=\"$D/home\"\nexport PATH=\"$HOME/.local/bin:$PATH\"\nPIDF=\"$D/worker.pid\"\n"
+    )
+}
+
+/// Installe le CLI si absent, puis affiche `DF_AGENT=` / `DF_VERSION=`.
+pub fn install_script(base: &ScriptBase) -> String {
+    format!(
+        r#"{prelude}if ! command -v agent >/dev/null 2>&1; then
+  command -v curl >/dev/null 2>&1 || {{ echo "curl absent sur ce nœud"; exit 3; }}
+  curl -fsSL {url} | bash >"$D/install.log" 2>&1 || {{ tail -n 20 "$D/install.log"; exit 4; }}
+fi
+command -v agent >/dev/null 2>&1 || {{ echo "CLI agent introuvable après installation"; tail -n 20 "$D/install.log" 2>/dev/null; exit 5; }}
+echo "DF_AGENT=$(command -v agent)"
+echo "DF_VERSION=$(agent --version 2>/dev/null | head -n 1)"
+"#,
+        prelude = script_prelude(base),
+        url = INSTALL_URL,
+    )
+}
+
+/// Arrête le worker du nœud (pid file).
+pub fn stop_script(base: &ScriptBase) -> String {
+    format!(
+        r#"{prelude}if [ -f "$PIDF" ]; then
+  P=$(cat "$PIDF" 2>/dev/null)
+  if [ -n "$P" ] && kill -0 "$P" 2>/dev/null; then
+    kill -TERM "$P" 2>/dev/null; sleep 1
+    kill -0 "$P" 2>/dev/null && kill -KILL "$P" 2>/dev/null
+    echo "DF_STOPPED=$P"
+  fi
+  rm -f "$PIDF"
+fi
+echo "DF_RUNNING=0"
+"#,
+        prelude = script_prelude(base)
+    )
+}
+
+/// Démarre le worker en arrière-plan sur le nœud et vérifie qu'il tient.
+///
+/// `candidates` : chemins projets ; seuls ceux avec `.git` sont servis
+/// (sinon un espace vide). La clé est passée via l'environnement, jamais
+/// écrite sur disque ni affichée.
+pub fn start_script(base: &ScriptBase, name: &str, candidates: &[String], api_key: &str) -> String {
+    let dirs: Vec<String> = candidates.iter().map(|c| shell_quote(c)).collect();
+    format!(
+        r#"{stop}set --
+N=0
+for d in {dirs}; do
+  [ -n "$d" ] && [ -d "$d/.git" ] || continue
+  [ "$N" -ge {max} ] && break
+  set -- "$@" --worker-dir "$d"
+  N=$((N+1))
+  echo "DF_DIR=$d"
+done
+if [ "$N" -eq 0 ]; then
+  mkdir -p "$D/workspace"
+  set -- --worker-dir "$D/workspace"
+fi
+command -v agent >/dev/null 2>&1 || {{ echo "CLI agent absent"; exit 5; }}
+SETSID=""
+command -v setsid >/dev/null 2>&1 && SETSID="setsid"
+CURSOR_API_KEY={key} $SETSID nohup agent worker --name {name} "$@" --management-addr {mgmt} start </dev/null >"$D/worker.out" 2>"$D/worker.err" &
+echo $! >"$PIDF"
+sleep 4
+P=$(cat "$PIDF")
+if kill -0 "$P" 2>/dev/null; then
+  echo "DF_RUNNING=1"
+  echo "DF_PID=$P"
+else
+  rm -f "$PIDF"
+  echo "DF_RUNNING=0"
+  echo "DF_LOGS_BEGIN"
+  tail -n 30 "$D/worker.err" 2>/dev/null
+  tail -n 10 "$D/worker.out" 2>/dev/null
+  exit 6
+fi
+"#,
+        stop = stop_script(base).replace("echo \"DF_RUNNING=0\"\n", ""),
+        dirs = if dirs.is_empty() {
+            "''".to_string()
+        } else {
+            dirs.join(" ")
+        },
+        max = MAX_WORKER_DIRS,
+        key = shell_quote(api_key),
+        name = shell_quote(name),
+        mgmt = MANAGEMENT_ADDR,
+    )
+}
+
+/// État du worker sur le nœud (process, CLI, sonde `/readyz`, logs).
+pub fn status_script(base: &ScriptBase) -> String {
+    format!(
+        r#"{prelude}if command -v agent >/dev/null 2>&1; then
+  echo "DF_AGENT=$(command -v agent)"
+  echo "DF_VERSION=$(agent --version 2>/dev/null | head -n 1)"
+fi
+P=$(cat "$PIDF" 2>/dev/null)
+if [ -n "$P" ] && kill -0 "$P" 2>/dev/null; then
+  echo "DF_RUNNING=1"
+  echo "DF_PID=$P"
+  if command -v curl >/dev/null 2>&1 && curl -fsS -m 3 http://{mgmt}/readyz >/dev/null 2>&1; then
+    echo "DF_READY=1"
+  else
+    echo "DF_READY=0"
+  fi
+else
+  echo "DF_RUNNING=0"
+fi
+echo "DF_LOGS_BEGIN"
+tail -n 20 "$D/worker.err" 2>/dev/null
+tail -n 10 "$D/worker.out" 2>/dev/null
+"#,
+        prelude = script_prelude(base),
+        mgmt = MANAGEMENT_ADDR,
+    )
+}
+
+/// Sortie `DF_KEY=value` des scripts → (clés, dossiers servis, logs).
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct ScriptReport {
+    pub agent: Option<String>,
+    pub version: Option<String>,
+    pub running: bool,
+    pub pid: Option<u32>,
+    pub ready: Option<bool>,
+    pub dirs: Vec<String>,
+    pub logs: String,
+}
+
+pub fn parse_script_output(out: &str) -> ScriptReport {
+    let mut r = ScriptReport::default();
+    let mut logs = Vec::new();
+    let mut in_logs = false;
+    for line in out.lines() {
+        if in_logs {
+            logs.push(line);
+            continue;
+        }
+        if line.trim() == "DF_LOGS_BEGIN" {
+            in_logs = true;
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else {
+            logs.push(line);
+            continue;
+        };
+        let v = v.trim();
+        match k.trim() {
+            "DF_AGENT" if !v.is_empty() => r.agent = Some(v.to_string()),
+            "DF_VERSION" if !v.is_empty() => r.version = Some(v.to_string()),
+            "DF_RUNNING" => r.running = v == "1",
+            "DF_PID" => r.pid = v.parse().ok(),
+            "DF_READY" => r.ready = Some(v == "1"),
+            "DF_DIR" => r.dirs.push(v.to_string()),
+            "DF_STOPPED" | "DF_AGENT" | "DF_VERSION" => {}
+            _ => logs.push(line),
+        }
+    }
+    r.logs = logs.join("\n").trim().to_string();
+    r
+}
+
+pub fn tail_lines(s: &str, n: usize) -> String {
+    let lines: Vec<&str> = s.lines().collect();
+    lines[lines.len().saturating_sub(n)..].join("\n")
+}
+
+/// Sonde `/readyz` du worker local (leader).
+pub async fn probe_ready_local() -> bool {
+    let url = format!("http://{MANAGEMENT_ADDR}/readyz");
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+    else {
+        return false;
+    };
+    client
+        .get(url)
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
 }
 
 pub fn read_pid() -> Option<u32> {
@@ -411,31 +756,38 @@ fn save_registered(paths: &[String]) -> Result<(), String> {
     std::fs::write(registered_path(), raw).map_err(|e| e.to_string())
 }
 
-pub fn start(settings: &WorkerSettings, workdirs: &[String]) -> Result<Value, String> {
+/// Démarre avec un nom déjà résolu (nom du nœud par défaut).
+pub fn start_named(
+    settings: &WorkerSettings,
+    bin: &Path,
+    name: &str,
+    workdirs: &[String],
+) -> Result<Value, String> {
     if is_running() {
         return Err("Worker déjà en cours — arrête-le avant de relancer.".into());
     }
-    let bin = resolve_agent_binary(settings).ok_or_else(|| {
-        "CLI Cursor introuvable (`agent`). Installe-le sur la machine : curl https://cursor.com/install -fsS | bash — ou indique le chemin du binaire.".to_string()
-    })?;
-    let name = resolve_worker_name(settings);
-    let api_key = api_key_plain(settings);
-    if api_key.trim().is_empty() {
+    let Some((api_key, _)) = effective_api_key(settings) else {
         return Err(
             "Clé API Cursor manquante. Dashboard Cursor → API Keys (clé personnelle), puis enregistre-la ici."
                 .into(),
         );
-    }
-    let args = build_worker_args(&name, workdirs, &api_key)?;
+    };
     ensure_state_dir()?;
+    let workdirs = workdirs_or_fallback(workdirs);
+    let args = build_worker_args(name, &workdirs)?;
     let out = std::fs::File::create(out_path()).map_err(|e| e.to_string())?;
     let err = std::fs::File::create(err_path()).map_err(|e| e.to_string())?;
 
-    let mut cmd = Command::new(&bin);
+    let mut cmd = Command::new(bin);
     cmd.args(&args)
+        .env("CURSOR_API_KEY", &api_key)
         .stdin(Stdio::null())
         .stdout(Stdio::from(out))
         .stderr(Stdio::from(err));
+    if bin.starts_with(managed_home()) {
+        // Config / sessions du CLI dans le volume persistant.
+        cmd.env("HOME", managed_home());
+    }
 
     #[cfg(windows)]
     {
@@ -450,7 +802,7 @@ pub fn start(settings: &WorkerSettings, workdirs: &[String]) -> Result<Value, St
         .map_err(|e| format!("Échec démarrage `{}`: {e}", bin.display()))?;
     let pid = child.id();
     std::fs::write(pid_path(), pid.to_string()).map_err(|e| e.to_string())?;
-    save_registered(workdirs)?;
+    save_registered(&workdirs)?;
 
     let _ = std::thread::Builder::new()
         .name("cursor-worker-reap".into())
@@ -481,13 +833,19 @@ pub fn start(settings: &WorkerSettings, workdirs: &[String]) -> Result<Value, St
     }))
 }
 
-pub fn restart(settings: &WorkerSettings, workdirs: &[String]) -> Result<Value, String> {
+pub fn restart_named(
+    settings: &WorkerSettings,
+    bin: &Path,
+    name: &str,
+    workdirs: &[String],
+) -> Result<Value, String> {
     let _ = stop();
     std::thread::sleep(std::time::Duration::from_millis(300));
-    start(settings, workdirs)
+    start_named(settings, bin, name, workdirs)
 }
 
-pub async fn status_json(pool: &PgPool) -> Result<Value, String> {
+/// Statut du worker local (leader). `node_name` sert au nom par défaut.
+pub async fn status_json(pool: &PgPool, node_name: &str) -> Result<Value, String> {
     let settings = load_settings(pool).await;
     let dirs = list_project_workdirs(pool).await?;
     let eligible = eligible_paths(&dirs, &settings.extra_dirs);
@@ -495,25 +853,34 @@ pub async fn status_json(pool: &PgPool) -> Result<Value, String> {
     let version = bin.as_ref().and_then(|p| agent_version(p));
     let running = is_running();
     let pid = read_pid().filter(|_| running);
-    let plain = api_key_plain(&settings);
-    let name = resolve_worker_name(&settings);
+    let ready = if running {
+        Some(probe_ready_local().await)
+    } else {
+        None
+    };
+    let key = effective_api_key(&settings);
+    let name = resolve_worker_name_for_node(&settings, node_name);
 
     Ok(json!({
         "ok": true,
         "running": running,
+        "ready": ready,
         "pid": pid,
         "name": name,
         "cli_installed": bin.is_some(),
+        "cli_managed": bin.as_ref().is_some_and(|p| p.starts_with(managed_home())),
         "cli_path": bin.as_ref().map(|p| p.display().to_string()),
         "cli_version": version,
-        "api_key_set": !plain.is_empty(),
-        "api_key_masked": if plain.is_empty() { Value::Null } else { json!(mask_key(&plain)) },
+        "api_key_set": key.is_some(),
+        "api_key_source": key.as_ref().map(|(_, s)| *s),
+        "api_key_masked": key.as_ref().map(|(k, _)| mask_key(k)),
         "enabled": settings.enabled,
         "settings": {
             "name": settings.name,
             "binary": settings.binary,
             "extra_dirs": settings.extra_dirs,
             "enabled": settings.enabled,
+            "node_id": settings.node_id,
         },
         "workdirs": dirs,
         "eligible_count": eligible.len(),
@@ -524,26 +891,32 @@ pub async fn status_json(pool: &PgPool) -> Result<Value, String> {
         } else {
             String::new()
         },
-        "hint": if bin.is_none() {
-            "Installe le CLI Cursor sur cette machine : curl https://cursor.com/install -fsS | bash"
-        } else if plain.is_empty() {
-            "Ajoute une clé API personnelle Cursor (Dashboard → API Keys)."
-        } else if eligible.is_empty() {
-            "Aucun checkout Git prêt. Les workdirs projets doivent exister avec un dépôt .git."
-        } else if !running {
-            "Prêt à démarrer. Les agents Cursor / Grok Bot pourront cibler cette machine (My Machines)."
-        } else {
-            "Worker connecté. Dans cursor.com/agents ou Grok Bot, choisis cette machine (worker=<name>)."
-        },
+        "hint": status_hint(bin.is_some(), key.is_some(), running, ready),
     }))
 }
 
-/// Au boot : si auto-start activé, lance le worker après un délai.
-pub fn spawn_autostart(pool: PgPool) {
+/// Phrase d'état unique (sans commande à taper).
+pub fn status_hint(cli: bool, key: bool, running: bool, ready: Option<bool>) -> &'static str {
+    if !key {
+        "Il manque ta clé API Cursor : clique « Installer le worker Cursor »."
+    } else if !cli {
+        "Le CLI Cursor sera installé automatiquement par « Installer le worker Cursor »."
+    } else if !running {
+        "Worker arrêté. « Installer le worker Cursor » le (ré)installe et le démarre."
+    } else if ready == Some(false) {
+        "Worker démarré, connexion à Cursor en cours."
+    } else {
+        "Worker connecté : choisis cette machine dans Cursor (My Machines) ou Grok Bot (worker=<nom>)."
+    }
+}
+
+/// Au boot : si auto-start activé et worker sur le leader, lance le worker
+/// après un délai (le cas « nœud distant » est géré par les routes).
+pub fn spawn_autostart(pool: PgPool, node_name: String) {
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(20)).await;
         let settings = load_settings(&pool).await;
-        if !settings.enabled {
+        if !settings.enabled || !is_leader_target(&settings.node_id) {
             return;
         }
         if is_running() {
@@ -558,55 +931,23 @@ pub fn spawn_autostart(pool: PgPool) {
             }
         };
         let paths = eligible_paths(&dirs, &settings.extra_dirs);
-        match start(&settings, &paths) {
-            Ok(v) => tracing::info!(?v, "cursor-worker autostart ok"),
-            Err(e) => tracing::warn!(error = %e, "cursor-worker autostart"),
+        let Some(bin) = resolve_agent_binary(&settings) else {
+            tracing::warn!("cursor-worker autostart: CLI absent");
+            return;
+        };
+        let name = resolve_worker_name_for_node(&settings, &node_name);
+        match start_named(&settings, &bin, &name, &paths) {
+            Ok(v) => tracing::info!(name = ?v.get("name"), "cursor-worker autostart ok"),
+            Err(e) => tracing::warn!(error = %tail_lines(&e, 3), "cursor-worker autostart"),
         }
     });
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn build_args_multi_dirs() {
-        let args = build_worker_args(
-            "demeter",
-            &[
-                "/data/devforge/applications/a".into(),
-                "/data/devforge/applications/b".into(),
-            ],
-            "key_test",
-        )
-        .unwrap();
-        assert_eq!(args[0], "worker");
-        assert!(args.contains(&"--name".into()));
-        assert!(args.contains(&"demeter".into()));
-        let dir_flags = args.iter().filter(|a| *a == "--worker-dir").count();
-        assert_eq!(dir_flags, 2);
-        assert!(args.contains(&"start".into()));
-        assert!(args.contains(&"--api-key".into()));
-        assert!(args.contains(&"key_test".into()));
-    }
-
-    #[test]
-    fn build_args_rejects_empty() {
-        assert!(build_worker_args("x", &[], "k").is_err());
-    }
-
-    #[test]
-    fn parse_extra_dirs_mixed() {
-        let v = parse_extra_dirs("/a\n# comment\n/b, /c ; /d");
-        assert_eq!(v, vec!["/a", "/b", "/c", "/d"]);
-    }
-
-    #[test]
-    fn mask_key_short_and_long() {
-        assert_eq!(mask_key(""), "");
-        assert_eq!(mask_key("abcd"), "••••");
-        let m = mask_key("abcdefghijklmnop");
-        assert!(m.starts_with("abcd"));
-        assert!(m.ends_with("mnop"));
-    }
+/// `''`, `default` ou `local` = leader (ce serveur).
+pub fn is_leader_target(node_id: &str) -> bool {
+    matches!(node_id.trim(), "" | "default" | "local")
 }
+
+#[cfg(test)]
+#[path = "cursor_worker_tests.rs"]
+mod tests;

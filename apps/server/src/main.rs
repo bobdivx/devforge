@@ -359,7 +359,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     update_routes::spawn_auto_update(state.clone());
-    cursor_worker::spawn_autostart(state.pool.clone());
+    cursor_worker_routes::spawn_autostart(state.clone());
 
     // Advertise agent tools on the local MCP server surface.
     state

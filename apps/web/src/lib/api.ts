@@ -116,6 +116,71 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return res.json() as Promise<T>;
 }
+export type CursorWorkerNode = {
+  id: string;
+  name: string;
+  leader: boolean;
+  online: boolean;
+};
+
+export type CursorWorkerStatus = {
+  ok: boolean;
+  running: boolean;
+  /** Sonde /readyz du worker (connecté à Cursor). */
+  ready?: boolean | null;
+  pid?: number | null;
+  name: string;
+  cli_installed: boolean;
+  cli_managed?: boolean;
+  cli_path?: string | null;
+  cli_version?: string | null;
+  api_key_set: boolean;
+  api_key_source?: 'settings' | 'env' | null;
+  api_key_masked?: string | null;
+  enabled: boolean;
+  node?: CursorWorkerNode;
+  node_missing?: boolean;
+  node_error?: string | null;
+  nodes?: CursorWorkerNode[];
+  settings: {
+    name: string;
+    binary: string;
+    extra_dirs: string;
+    enabled: boolean;
+    node_id?: string;
+  };
+  workdirs: Array<{
+    project_uuid: string;
+    project_name: string;
+    path: string;
+    exists: boolean;
+    has_git: boolean;
+    git_remote?: string | null;
+    eligible: boolean;
+  }>;
+  /** null pour un nœud distant (compté au démarrage). */
+  eligible_count: number | null;
+  eligible_paths?: string[];
+  registered_paths?: string[];
+  logs_tail: string;
+  hint: string;
+};
+
+export type CursorWorkerInstallStep = {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+};
+
+export type CursorWorkerInstallResult = {
+  ok: boolean;
+  name: string;
+  node: CursorWorkerNode;
+  steps: CursorWorkerInstallStep[];
+  message: string;
+};
+
 /** Mémoire durable des agents (P3). */
 export type MemoryScope = 'user' | 'project' | 'agent';
 export type MemoryTier = 'profile' | 'log' | 'note';
@@ -1845,39 +1910,13 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  cursorWorkerStatus: () =>
-    request<{
-      ok: boolean;
-      running: boolean;
-      pid?: number | null;
-      name: string;
-      cli_installed: boolean;
-      cli_path?: string | null;
-      cli_version?: string | null;
-      api_key_set: boolean;
-      api_key_masked?: string | null;
-      enabled: boolean;
-      settings: {
-        name: string;
-        binary: string;
-        extra_dirs: string;
-        enabled: boolean;
-      };
-      workdirs: Array<{
-        project_uuid: string;
-        project_name: string;
-        path: string;
-        exists: boolean;
-        has_git: boolean;
-        git_remote?: string | null;
-        eligible: boolean;
-      }>;
-      eligible_count: number;
-      eligible_paths: string[];
-      registered_paths: string[];
-      logs_tail: string;
-      hint: string;
-    }>('/cursor-worker/status'),
+  cursorWorkerStatus: () => request<CursorWorkerStatus>('/cursor-worker/status'),
+  /** Installation 1 clic : CLI + démarrage + vérification sur le nœud choisi. */
+  cursorWorkerInstall: (body: { api_key?: string; node_id?: string }) =>
+    request<CursorWorkerInstallResult>('/cursor-worker/install', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   cursorWorkerStart: () =>
     request<{
       ok: boolean;
@@ -1921,6 +1960,7 @@ export const api = {
     name?: string;
     binary?: string;
     extra_dirs?: string;
+    node_id?: string;
     api_key?: string;
   }) =>
     request<{
