@@ -361,10 +361,16 @@ const DB_KEYS: &[&str] = &[
 /// 1. toutes les variables du projet (même runtime que la prod : sans elles,
 ///    l'app ne démarre pas) ;
 /// 2. `PREVIEW_<CLÉ>` remplace `<CLÉ>` (et n'est pas transmise telle quelle) ;
-/// 3. les URI de redirection OAuth/OIDC (`*_REDIRECT_URI` / `*_REDIRECT_URL`)
-///    non surchargées pointent vers l'hôte de la preview (même chemin) ;
+/// 3. les URI de redirection OAuth/OIDC (`*_REDIRECT_URI` / `*_REDIRECT_URL`) et
+///    les URL qui visent l'hôte de prod (`AUTH_URL`, `NEXTAUTH_URL`…), non
+///    surchargées, pointent vers l'hôte de la preview (même chemin) ;
 /// 4. `DEVFORGE_PREVIEW*` fixées par DevForge.
-pub fn build_preview_env(rows: &[(String, String)], pr: i64, url: &str) -> Vec<(String, String)> {
+pub fn build_preview_env(
+    rows: &[(String, String)],
+    pr: i64,
+    url: &str,
+    prod_host: Option<&str>,
+) -> Vec<(String, String)> {
     use std::collections::BTreeMap;
     let mut base: BTreeMap<String, String> = BTreeMap::new();
     let mut overrides: BTreeMap<String, String> = BTreeMap::new();
@@ -383,7 +389,13 @@ pub fn build_preview_env(rows: &[(String, String)], pr: i64, url: &str) -> Vec<(
     }
     let preview_host = crate::routes::fqdn_from_url(url);
     for (k, v) in base.iter_mut() {
-        if overrides.contains_key(k) || !is_redirect_uri_key(k) {
+        if overrides.contains_key(k) {
+            continue;
+        }
+        let targets_prod = prod_host.is_some_and(|h| {
+            crate::routes::fqdn_from_url(v.trim()).is_some_and(|vh| vh.split(':').next() == Some(h))
+        });
+        if !is_redirect_uri_key(k) && !targets_prod {
             continue;
         }
         if let Some(host) = preview_host.as_deref() {
@@ -442,10 +454,11 @@ pub fn preview_shared_db_keys(rows: &[(String, String)]) -> Vec<String> {
 /// Env runtime de la preview (voir [`build_preview_env`]), au format `--env-file`.
 pub async fn load_preview_env_file(
     pool: &sqlx::PgPool,
-    project_uuid: &str,
+    project: &Project,
     pr: i64,
     url: &str,
 ) -> Option<String> {
+    let project_uuid = project.uuid.as_str();
     let rows: Vec<(String, String)> = match sqlx::query_as(
         "SELECT key, value FROM project_env_vars WHERE project_uuid = $1 ORDER BY key",
     )
@@ -468,7 +481,11 @@ pub async fn load_preview_env_file(
             "preview: base de prod partagée (définir PREVIEW_<clé> pour l'isoler)"
         );
     }
-    let env = build_preview_env(&rows, pr, url);
+    let prod_host = project
+        .production_url
+        .as_deref()
+        .and_then(crate::routes::fqdn_from_url);
+    let env = build_preview_env(&rows, pr, url, prod_host.as_deref());
     Some(devforge_env::serialize_docker_env_file(&env))
 }
 
@@ -852,7 +869,7 @@ async fn run_preview_deploy(
             .map(|(t,)| crate::secret_box::open_compat(&t))
             .filter(|t| !t.trim().is_empty());
     let deploy_tok = crate::github_auth::deploy_token(state, &project.uuid, pat).await;
-    let env_file = load_preview_env_file(&state.pool, &project.uuid, pr, url).await;
+    let env_file = load_preview_env_file(&state.pool, project, pr, url).await;
     let current = project
         .server_id
         .clone()

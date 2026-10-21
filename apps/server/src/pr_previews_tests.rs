@@ -252,7 +252,7 @@ fn preview_env_carries_project_vars_like_prod() {
         ("OIDC_CLIENT_ID", "vigie"),
         ("OIDC_CLIENT_SECRET", "s3cret"),
     ]);
-    let env = build_preview_env(&rows, 6, PV_URL);
+    let env = build_preview_env(&rows, 6, PV_URL, Some("vigie.jeser.app"));
     assert_eq!(
         env_get(&env, "TURSO_DATABASE_URL"),
         Some("libsql://prod.turso.io")
@@ -279,7 +279,7 @@ fn preview_overrides_replace_prod_values() {
         ("PREVIEW_TURSO_AUTH_TOKEN", "preview-token"),
         ("PREVIEW_ONLY_FLAG", "on"),
     ]);
-    let env = build_preview_env(&rows, 6, PV_URL);
+    let env = build_preview_env(&rows, 6, PV_URL, Some("vigie.jeser.app"));
     assert_eq!(
         env_get(&env, "TURSO_DATABASE_URL"),
         Some("libsql://preview.turso.io")
@@ -313,7 +313,7 @@ fn preview_redirect_uris_point_to_preview_host() {
         ("NOT_A_REDIRECT", "https://vigie.jeser.app/keep"),
         ("WEIRD_REDIRECT_URI", "not a url"),
     ]);
-    let env = build_preview_env(&rows, 6, PV_URL);
+    let env = build_preview_env(&rows, 6, PV_URL, Some("vigie.jeser.app"));
     assert_eq!(
         env_get(&env, "OIDC_REDIRECT_URI"),
         Some("https://pr-6-vigie.jeser.app/api/auth/callback?x=1")
@@ -322,17 +322,35 @@ fn preview_redirect_uris_point_to_preview_host() {
         env_get(&env, "AUTH_POCKET_ID_REDIRECT_URL"),
         Some("https://pr-6-vigie.jeser.app/cb")
     );
+    // URL visant l'hôte de prod : réécrite aussi ; un autre hôte est conservé.
     assert_eq!(
         env_get(&env, "NOT_A_REDIRECT"),
-        Some("https://vigie.jeser.app/keep")
+        Some("https://pr-6-vigie.jeser.app/keep")
     );
+    let other = env_rows(&[
+        ("AUTH_URL", "https://vigie.jeser.app"),
+        ("OIDC_ISSUER", "https://id.jeser.app"),
+        ("NEXTAUTH_URL", "https://vigie.jeser.app/"),
+    ]);
+    let env2 = build_preview_env(&other, 6, PV_URL, Some("vigie.jeser.app"));
+    assert_eq!(
+        env_get(&env2, "AUTH_URL"),
+        Some("https://pr-6-vigie.jeser.app")
+    );
+    assert_eq!(
+        env_get(&env2, "NEXTAUTH_URL"),
+        Some("https://pr-6-vigie.jeser.app/")
+    );
+    assert_eq!(env_get(&env2, "OIDC_ISSUER"), Some("https://id.jeser.app"));
+    let env3 = build_preview_env(&other, 6, PV_URL, None);
+    assert_eq!(env_get(&env3, "AUTH_URL"), Some("https://vigie.jeser.app"));
     assert_eq!(env_get(&env, "WEIRD_REDIRECT_URI"), Some("not a url"));
     // Un override explicite gagne sur la réécriture.
     let rows = env_rows(&[
         ("OIDC_REDIRECT_URI", "https://vigie.jeser.app/cb"),
         ("PREVIEW_OIDC_REDIRECT_URI", "https://fixed.example.com/cb"),
     ]);
-    let env = build_preview_env(&rows, 6, PV_URL);
+    let env = build_preview_env(&rows, 6, PV_URL, Some("vigie.jeser.app"));
     assert_eq!(
         env_get(&env, "OIDC_REDIRECT_URI"),
         Some("https://fixed.example.com/cb")
@@ -345,7 +363,7 @@ fn preview_env_cannot_spoof_devforge_markers() {
         ("DEVFORGE_PREVIEW", "0"),
         ("PREVIEW_DEVFORGE_PREVIEW_PR", "999"),
     ]);
-    let env = build_preview_env(&rows, 6, PV_URL);
+    let env = build_preview_env(&rows, 6, PV_URL, Some("vigie.jeser.app"));
     let markers: Vec<_> = env
         .iter()
         .filter(|(k, _)| k.starts_with("DEVFORGE_PREVIEW"))
