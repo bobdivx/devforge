@@ -24,7 +24,7 @@ Facades derrière traits ; runtime réel activé via env (sinon stubs).
 
 ## Worker Cursor (My Machines)
 
-Admin → **Worker Cursor** (`/app/admin?tab=cursor-worker`) : lance le CLI `agent worker start` avec un `--worker-dir` par checkout projet (`.git` présent). API `/api/v1/cursor-worker/*`. Autostart via `cursor_worker_enabled`.
+Admin → **Worker Cursor** (`/app/admin?tab=cursor-worker`) : bouton unique « Installer le worker Cursor » (`POST /api/v1/cursor-worker/install`) — DevForge installe le CLI Cursor dans `<data>/cursor-worker/home` s'il manque, démarre `agent worker start` avec un `--worker-dir` par checkout projet (`.git` présent, max 20 ; sinon un espace vide), puis vérifie le process et la sonde `/readyz`. Nœud : leader par défaut (processus enfant), ou un nœud worker via l'executor du cluster. Seule la clé API personnelle Cursor est demandée si elle n'est pas déjà enregistrée (ou `CURSOR_API_KEY` côté serveur) ; elle est passée par l'environnement, jamais en argument. Nom, binaire et dossiers en plus : modale « Avancé ». Autostart via `cursor_worker_enabled` (activé par l'installation).
 
 ## Base de données DevForge (métadonnées)
 

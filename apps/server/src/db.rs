@@ -491,6 +491,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         ("cursor_worker_api_key", "TEXT NOT NULL DEFAULT ''"),
         ("cursor_worker_binary", "TEXT NOT NULL DEFAULT ''"),
         ("cursor_worker_extra_dirs", "TEXT NOT NULL DEFAULT ''"),
+        // Nœud qui héberge le worker ('' = leader / ce serveur).
+        ("cursor_worker_node", "TEXT NOT NULL DEFAULT ''"),
     ] {
         let sql = format!("ALTER TABLE instance_settings ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;

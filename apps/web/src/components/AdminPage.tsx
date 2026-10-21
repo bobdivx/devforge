@@ -217,8 +217,9 @@ function AdminHub() {
   const [features, setFeatures] = useState<BetaFeatures | null>(null);
   const [cursorWorker, setCursorWorker] = useState<{
     running: boolean;
-    eligible: number;
-    cli: boolean;
+    eligible: number | null;
+    installed: boolean;
+    node: string;
   } | null>(null);
   const [dockerGc, setDockerGc] = useState<{
     enabled: boolean;
@@ -288,8 +289,9 @@ function AdminHub() {
       if (cursorRes.status === 'fulfilled') {
         setCursorWorker({
           running: !!cursorRes.value.running,
-          eligible: cursorRes.value.eligible_count ?? 0,
-          cli: !!cursorRes.value.cli_installed,
+          eligible: cursorRes.value.eligible_count ?? null,
+          installed: !!cursorRes.value.cli_installed && !!cursorRes.value.api_key_set,
+          node: cursorRes.value.node?.name ?? '',
         });
       }
       if (pgRes.status === 'fulfilled') {
@@ -497,12 +499,17 @@ function AdminHub() {
           ? tileStatus('1/2', 'warn', '1 active')
           : tileStatus('Off', 'neutral', 'Masquées');
 
+  const cursorWhere = cursorWorker
+    ? [cursorWorker.node, cursorWorker.eligible != null ? `${cursorWorker.eligible} repo(s)` : '']
+        .filter(Boolean)
+        .join(' · ')
+    : '';
   const cursorTile = cursorWorker
     ? cursorWorker.running
-      ? tileStatus('ON', 'ok', `${cursorWorker.eligible} repo(s)`)
-      : !cursorWorker.cli
-        ? tileStatus('CLI', 'warn', 'À installer')
-        : tileStatus('Off', 'neutral', `${cursorWorker.eligible} repo(s)`)
+      ? tileStatus('ON', 'ok', cursorWhere)
+      : !cursorWorker.installed
+        ? tileStatus('Off', 'warn', 'Un clic pour installer')
+        : tileStatus('Off', 'neutral', cursorWhere)
     : null;
 
   const gcTile = !dockerGc
