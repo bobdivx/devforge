@@ -1845,6 +1845,98 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  cursorWorkerStatus: () =>
+    request<{
+      ok: boolean;
+      running: boolean;
+      pid?: number | null;
+      name: string;
+      cli_installed: boolean;
+      cli_path?: string | null;
+      cli_version?: string | null;
+      api_key_set: boolean;
+      api_key_masked?: string | null;
+      enabled: boolean;
+      settings: {
+        name: string;
+        binary: string;
+        extra_dirs: string;
+        enabled: boolean;
+      };
+      workdirs: Array<{
+        project_uuid: string;
+        project_name: string;
+        path: string;
+        exists: boolean;
+        has_git: boolean;
+        git_remote?: string | null;
+        eligible: boolean;
+      }>;
+      eligible_count: number;
+      eligible_paths: string[];
+      registered_paths: string[];
+      logs_tail: string;
+      hint: string;
+    }>('/cursor-worker/status'),
+  cursorWorkerStart: () =>
+    request<{
+      ok: boolean;
+      running: boolean;
+      pid?: number;
+      name?: string;
+      workdirs_count?: number;
+      message?: string;
+      error?: string;
+    }>('/cursor-worker/start', { method: 'POST', body: '{}' }),
+  cursorWorkerStop: () =>
+    request<{
+      ok: boolean;
+      running: boolean;
+      message?: string;
+      error?: string;
+    }>('/cursor-worker/stop', { method: 'POST', body: '{}' }),
+  cursorWorkerRestart: () =>
+    request<{
+      ok: boolean;
+      running: boolean;
+      pid?: number;
+      name?: string;
+      workdirs_count?: number;
+      message?: string;
+      error?: string;
+    }>('/cursor-worker/restart', { method: 'POST', body: '{}' }),
+  cursorWorkerSettings: () =>
+    request<{
+      ok: boolean;
+      enabled: boolean;
+      name: string;
+      binary: string;
+      extra_dirs: string;
+      resolved_name: string;
+      api_key_set: boolean;
+      api_key_masked?: string | null;
+    }>('/cursor-worker/settings'),
+  cursorWorkerPatchSettings: (body: {
+    enabled?: boolean;
+    name?: string;
+    binary?: string;
+    extra_dirs?: string;
+    api_key?: string;
+  }) =>
+    request<{
+      ok: boolean;
+      enabled: boolean;
+      name: string;
+      binary: string;
+      extra_dirs: string;
+      resolved_name: string;
+      api_key_set: boolean;
+      api_key_masked?: string | null;
+    }>('/cursor-worker/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+
   ssoGet: () =>
     request<{
       ok: boolean;

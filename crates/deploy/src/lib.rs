@@ -1788,6 +1788,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             extras.gpu_dri,
             &extras.volumes,
             &tune,
+            Some(container_port),
         );
 
         let new_started = match self
@@ -2032,6 +2033,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
                 false,
                 &[],
                 &crate::runtime::RunTune::for_sidecar(side),
+                None,
             );
             let cmd = format!(
                 "docker network create {net} >/dev/null 2>&1 || true; docker rm -f {cname} >/dev/null 2>&1 || true; {run}",

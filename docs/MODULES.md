@@ -22,6 +22,10 @@ Facades derrière traits ; runtime réel activé via env (sinon stubs).
 | `mcp` | Serveur MCP + client HTTP + catalogue (Turso, Slack…) + lien DB→projet | **OK** |
 | `cluster` | Nœuds leader/worker, invitations UX, exec HTTP | **OK** |
 
+## Worker Cursor (My Machines)
+
+Admin → **Worker Cursor** (`/app/admin?tab=cursor-worker`) : lance le CLI `agent worker start` avec un `--worker-dir` par checkout projet (`.git` présent). API `/api/v1/cursor-worker/*`. Autostart via `cursor_worker_enabled`.
+
 ## Base de données DevForge (métadonnées)
 
 **Défaut : PostgreSQL** (conteneur `devforge-pg`, `127.0.0.1:5433`). Un ancien `DATABASE_URL=sqlite:…` est importé une fois dans cette base. Un `DATABASE_URL=postgres://…` externe est utilisé tel quel.

@@ -609,6 +609,14 @@ pub fn platform_failure(summary: &str, logs: &str) -> Option<&'static str> {
         ]
         .iter()
         .any(|k| s.contains(k));
+        // Bind localhost (Astro/Next sans HOST=0.0.0.0) : corrigeable côté app / env, pas « plateforme ».
+        // Log monoligne « listening on http://localhost » = host localhost ; le format multi-ligne
+        // Astro avec 0.0.0.0 contient aussi « network: ».
+        let localhost_bind = s.contains("listening on http://localhost")
+            && !s.contains("network:");
+        if localhost_bind {
+            return None;
+        }
         if !app_error {
             return Some("Le conteneur n’a pas répondu à temps, sans erreur de l’app : problème probable de la plateforme DevForge.");
         }
@@ -1423,6 +1431,12 @@ mod tests {
         assert!(platform_failure("wait_container_ready 90s", "listening").is_some());
         assert!(platform_failure("wait_container_ready", "Error: Cannot find module x").is_none());
         assert!(platform_failure("npm ci failed", "").is_none());
+        // Bind localhost = problème app/env, pas plateforme (laisse Rustine / Coordinateur agir).
+        assert!(platform_failure(
+            "wait_container_ready timeout",
+            "Server listening on http://localhost:4321\ncode=000"
+        )
+        .is_none());
     }
 
     #[test]
