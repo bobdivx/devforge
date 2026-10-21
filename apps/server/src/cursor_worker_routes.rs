@@ -246,6 +246,7 @@ async fn status(State(state): State<AppState>, headers: HeaderMap) -> Result<Jso
         Err(e) => (Default::default(), Some(e)),
     };
     let cli = rep.agent.is_some();
+    let key_invalid = key.is_some() && cursor_worker::logs_show_invalid_key(&rep.logs);
     Ok(Json(json!({
         "ok": true,
         "running": rep.running,
@@ -266,8 +267,14 @@ async fn status(State(state): State<AppState>, headers: HeaderMap) -> Result<Jso
         "node_error": err,
         "workdirs": [],
         "eligible_count": Value::Null,
+        "env_key_present": cursor_worker::env_key_present(),
+        "key_invalid": key_invalid,
         "logs_tail": rep.logs,
-        "hint": cursor_worker::status_hint(cli, key.is_some(), rep.running, rep.ready),
+        "hint": if key_invalid {
+            cursor_worker::INVALID_KEY_HINT
+        } else {
+            cursor_worker::status_hint(cli, key.is_some(), rep.running, rep.ready)
+        },
     })))
 }
 
@@ -340,6 +347,21 @@ async fn install(
         let k = cursor_worker::validate_api_key(k).map_err(map_err)?;
         settings.api_key_sealed = crate::secret_box::seal_compat(&k);
     }
+    // Une clé déjà stockée mais d'un autre fournisseur ne doit pas repartir.
+    if let Some((stored, _)) = cursor_worker::effective_api_key(&settings) {
+        if let Some(provider) = cursor_worker::foreign_key_provider(&stored) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "ok": false,
+                    "code": "api_key_invalid",
+                    "error": format!(
+                        "La clé enregistrée est une clé {provider}, pas une clé Cursor. Colle une clé Cursor (cursor.com/dashboard → API Keys)."
+                    ),
+                })),
+            ));
+        }
+    }
     let Some((api_key, _)) = cursor_worker::effective_api_key(&settings) else {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -390,16 +412,23 @@ async fn install(
         install_remote(&state, &settings, &node, &name, &api_key, &mut steps).await
     };
     let ok = result.is_ok();
+    let key_invalid = match &result {
+        Err(e) => cursor_worker::logs_show_invalid_key(e),
+        Ok(()) => false,
+    };
     if let Err(e) = result {
         tracing::warn!(node = %node.name, error = %cursor_worker::tail_lines(&e, 3), "cursor-worker install");
     }
     Ok(Json(json!({
         "ok": ok,
+        "key_invalid": key_invalid,
         "node": node.to_json(),
         "name": name,
         "steps": steps,
         "message": if ok {
             format!("Worker « {name} » installé et démarré sur {}", node.name)
+        } else if key_invalid {
+            cursor_worker::INVALID_KEY_HINT.to_string()
         } else {
             "Installation interrompue — voir le détail des étapes.".to_string()
         },
@@ -743,6 +772,7 @@ fn settings_response(s: &WorkerSettings) -> Value {
         "api_key_set": key.is_some(),
         "api_key_source": key.as_ref().map(|(_, src)| *src),
         "api_key_masked": key.as_ref().map(|(k, _)| cursor_worker::mask_key(k)),
+        "env_key_present": cursor_worker::env_key_present(),
     })
 }
 
@@ -800,6 +830,7 @@ async fn patch_settings(
         .map(|s| s.trim().to_string())
         .unwrap_or(current.node_id);
 
+    let key_changed = body.api_key.is_some();
     let api_key_sealed = match body.api_key {
         None => current.api_key_sealed,
         Some(k) => {
@@ -838,6 +869,11 @@ async fn patch_settings(
             Json(json!({"error": e.to_string()})),
         )
     })?;
+
+    if key_changed && cursor_worker::is_leader_target(&node_id) {
+        // L'erreur « clé invalide » de l'ancienne clé ne doit plus s'afficher.
+        cursor_worker::clear_logs_if_stopped();
+    }
 
     let s = WorkerSettings {
         enabled,
