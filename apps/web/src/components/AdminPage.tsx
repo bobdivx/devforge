@@ -9,6 +9,7 @@ import { BackupSettingsPanel } from './BackupSettingsPanel';
 import { PostgresAdminPanel } from './PostgresAdminPanel';
 import { SsoSettingsPanel } from './SsoSettingsPanel';
 import { UpdateSettingsPanel } from './UpdateSettingsPanel';
+import { CursorWorkerSettingsPanel } from './CursorWorkerSettingsPanel';
 import {
   Alert,
   Badge,
@@ -70,7 +71,8 @@ type AdminSection =
   | 'backup'
   | 'update'
   | 'domaine'
-  | 'cluster';
+  | 'cluster'
+  | 'cursor-worker';
 
 const SECTION_TITLES: Record<Exclude<AdminSection, 'hub'>, string> = {
   workspaces: 'Workspaces',
@@ -84,6 +86,7 @@ const SECTION_TITLES: Record<Exclude<AdminSection, 'hub'>, string> = {
   update: 'Mise à jour',
   domaine: 'Domaine principal',
   cluster: 'Cluster',
+  'cursor-worker': 'Worker Cursor',
 };
 
 const ADMIN_TABS: AdminSection[] = [
@@ -98,6 +101,7 @@ const ADMIN_TABS: AdminSection[] = [
   'update',
   'domaine',
   'cluster',
+  'cursor-worker',
 ];
 
 type BetaFeatures = {
@@ -207,6 +211,11 @@ function AdminHub() {
   const [dns, setDns] = useState<{ configured: boolean; zone: string } | null>(null);
   const [wildcard, setWildcard] = useState<string | null>(null);
   const [features, setFeatures] = useState<BetaFeatures | null>(null);
+  const [cursorWorker, setCursorWorker] = useState<{
+    running: boolean;
+    eligible: number;
+    cli: boolean;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -228,6 +237,7 @@ function AdminHub() {
         api.backupS3Get(),
         api.dnsSettings(),
         api.bootstrap(),
+        api.cursorWorkerStatus(),
       ]);
       const [proxyRes, healthRes, adminRes] = await core;
       if (cancelled) return;
@@ -237,14 +247,31 @@ function AdminHub() {
       if (adminRes.status === 'fulfilled') setStats(adminRes.value.stats);
       setLoading(false);
 
-      const [clusterRes, pgRes, sshRes, runnersRes, ssoRes, autoRes, s3Res, dnsRes, bootRes] =
-        await rest;
+      const [
+        clusterRes,
+        pgRes,
+        sshRes,
+        runnersRes,
+        ssoRes,
+        autoRes,
+        s3Res,
+        dnsRes,
+        bootRes,
+        cursorRes,
+      ] = await rest;
       if (cancelled) return;
       if (clusterRes.status === 'fulfilled') {
         setNodes(clusterRes.value.nodes);
         setClusterFlags({
           fenced: !!clusterRes.value.writes_fenced,
           interim: !!clusterRes.value.acting_leader,
+        });
+      }
+      if (cursorRes.status === 'fulfilled') {
+        setCursorWorker({
+          running: !!cursorRes.value.running,
+          eligible: cursorRes.value.eligible_count ?? 0,
+          cli: !!cursorRes.value.cli_installed,
         });
       }
       if (pgRes.status === 'fulfilled') {
@@ -452,6 +479,14 @@ function AdminHub() {
           ? tileStatus('1/2', 'warn', '1 active')
           : tileStatus('Off', 'neutral', 'Masquées');
 
+  const cursorTile = cursorWorker
+    ? cursorWorker.running
+      ? tileStatus('ON', 'ok', `${cursorWorker.eligible} repo(s)`)
+      : !cursorWorker.cli
+        ? tileStatus('CLI', 'warn', 'À installer')
+        : tileStatus('Off', 'neutral', `${cursorWorker.eligible} repo(s)`)
+    : null;
+
   return (
     <HubGrid>
       <HubTile
@@ -562,7 +597,16 @@ function AdminHub() {
         badge={beta?.badge}
         subtitle={beta?.subtitle}
       />
-      <AcmeEmailTile index={12} />
+      <HubTile
+        index={12}
+        href="/app/admin?tab=cursor-worker"
+        title="Worker Cursor"
+        description="Cloud Agents / Grok Bot sur tous les repos locaux"
+        icon={<HubIcon name="brain" />}
+        badge={cursorTile?.badge}
+        subtitle={cursorTile?.subtitle}
+      />
+      <AcmeEmailTile index={13} />
     </HubGrid>
   );
 }
@@ -1193,6 +1237,7 @@ function AdminPageInner() {
         {section === 'backup' && <BackupSettingsPanel isAdmin />}
         {section === 'update' && <UpdateSettingsPanel isAdmin />}
         {section === 'cluster' && <ClusterPanel />}
+        {section === 'cursor-worker' && <CursorWorkerSettingsPanel isAdmin />}
       </FadeIn>
     </AppShell>
   );

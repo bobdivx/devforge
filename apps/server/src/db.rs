@@ -485,6 +485,12 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         // Ancien webhook par dépôt (`/api/v1/webhooks/github`) : 1 = actif, 0 = 410 Gone.
         // Piloté depuis Réglages › GitHub (pas de variable d’environnement).
         ("legacy_webhook", "BIGINT NOT NULL DEFAULT 1"),
+        // Worker Cursor Self-Hosted (My Machines) — CLI `agent worker start`.
+        ("cursor_worker_enabled", "BIGINT NOT NULL DEFAULT 0"),
+        ("cursor_worker_name", "TEXT NOT NULL DEFAULT ''"),
+        ("cursor_worker_api_key", "TEXT NOT NULL DEFAULT ''"),
+        ("cursor_worker_binary", "TEXT NOT NULL DEFAULT ''"),
+        ("cursor_worker_extra_dirs", "TEXT NOT NULL DEFAULT ''"),
     ] {
         let sql = format!("ALTER TABLE instance_settings ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;

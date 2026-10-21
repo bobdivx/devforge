@@ -16,6 +16,8 @@ mod cluster_store;
 mod control_pg;
 mod correction;
 mod cron_routes;
+mod cursor_worker;
+mod cursor_worker_routes;
 mod db;
 mod deploy_queue;
 mod detect_svc;
@@ -354,6 +356,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     update_routes::spawn_auto_update(state.clone());
+    cursor_worker::spawn_autostart(state.pool.clone());
 
     // Advertise agent tools on the local MCP server surface.
     state
@@ -399,6 +402,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(mobile_routes::router())
         .merge(android_routes::router())
         .merge(cluster_routes::router())
+        .merge(cursor_worker_routes::router())
         .merge(worker::exec_route())
         .route("/", get(auth_routes::marketing_home))
         .route("/index.html", get(auth_routes::marketing_home))
