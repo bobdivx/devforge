@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { installNeeds, workerSummary } from './CursorWorkerSettingsPanel';
+import { cursorKeyProblem, installNeeds, workerSummary } from './CursorWorkerSettingsPanel';
 
 const base = {
   running: false,
@@ -32,5 +32,21 @@ describe('installNeeds', () => {
     expect(installNeeds({ api_key_set: false })).toEqual(['api_key']);
     expect(installNeeds({ api_key_set: true })).toEqual([]);
     expect(installNeeds(null)).toEqual([]);
+  });
+});
+
+describe('invalid / foreign keys', () => {
+  it('flags a key refused by Cursor and asks for a new one', () => {
+    const s = { ...base, cli_installed: true, api_key_set: true, key_invalid: true };
+    expect(workerSummary(s)).toMatchObject({ label: 'Clé KO', tone: 'danger', installed: false });
+    expect(installNeeds({ api_key_set: true, key_invalid: true })).toEqual(['api_key']);
+  });
+  it('rejects keys from other providers client-side', () => {
+    expect(cursorKeyProblem('xai-abcdefghijklmnopqrstuvwxyz')).toMatch(/xAI.*pas une clé Cursor/);
+    expect(cursorKeyProblem('xai-abcdefghijklmnopqrstuvwxyz')).toMatch(/cursor\.com\/dashboard/);
+    expect(cursorKeyProblem('sk-proj-abcdefghijklmnop')).toMatch(/OpenAI/);
+    expect(cursorKeyProblem('short')).toMatch(/trop courte/);
+    expect(cursorKeyProblem('key_0123456789abcdef')).toBeNull();
+    expect(cursorKeyProblem('')).toBeNull();
   });
 });

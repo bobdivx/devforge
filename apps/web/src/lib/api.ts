@@ -137,6 +137,10 @@ export type CursorWorkerStatus = {
   api_key_set: boolean;
   api_key_source?: 'settings' | 'env' | null;
   api_key_masked?: string | null;
+  /** Une variable CURSOR_API_KEY existe côté serveur (jamais la valeur). */
+  env_key_present?: boolean;
+  /** Cursor a refusé la clé (logs du worker). */
+  key_invalid?: boolean;
   enabled: boolean;
   node?: CursorWorkerNode;
   node_missing?: boolean;
@@ -175,6 +179,7 @@ export type CursorWorkerInstallStep = {
 
 export type CursorWorkerInstallResult = {
   ok: boolean;
+  key_invalid?: boolean;
   name: string;
   node: CursorWorkerNode;
   steps: CursorWorkerInstallStep[];

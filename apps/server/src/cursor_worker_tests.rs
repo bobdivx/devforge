@@ -213,3 +213,33 @@ fn scripts_run_end_to_end_with_fake_agent() {
     assert!(!parse_script_output(&String::from_utf8_lossy(&out.stdout)).running);
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn rejects_keys_from_other_providers() {
+    let e = validate_api_key("xai-0123456789abcdefghijklmnop").unwrap_err();
+    assert!(e.contains("xAI"), "{e}");
+    assert!(e.contains("cursor.com/dashboard"), "{e}");
+    assert_eq!(
+        foreign_key_provider("sk-ant-api03-xxxxxxxxxxxx"),
+        Some("Anthropic")
+    );
+    assert_eq!(
+        foreign_key_provider("sk-proj-xxxxxxxxxxxxxxxx"),
+        Some("OpenAI")
+    );
+    assert_eq!(foreign_key_provider("key_0123456789abcdef"), None);
+    assert!(validate_api_key("key_0123456789abcdef").is_ok());
+}
+
+#[test]
+fn detects_invalid_key_in_worker_logs() {
+    let logs = "—— worker.err ——\n\u{1b}[33m⚠ Warning: The provided API key is invalid.\u{1b}[0m\nThe API key was loaded from the CURSOR_API_KEY environment variable.";
+    assert!(logs_show_invalid_key(logs));
+    assert!(!logs_show_invalid_key("Starting worker...\nconnected"));
+    assert!(!logs_show_invalid_key(""));
+}
+
+#[test]
+fn invalid_key_hint_points_to_cursor_dashboard() {
+    assert!(INVALID_KEY_HINT.contains("cursor.com/dashboard"));
+}

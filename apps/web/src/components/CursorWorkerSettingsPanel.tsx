@@ -57,30 +57,137 @@ function pill(label: string, tone: Tone, detail?: string) {
 }
 
 /** État résumé du worker (tuile + bouton principal). Exporté pour les tests. */
-export function workerSummary(s: Pick<
-  CursorWorkerStatus,
-  'running' | 'ready' | 'cli_installed' | 'api_key_set' | 'node_missing' | 'node_error'
->): { label: string; tone: Tone; detail: string; installed: boolean } {
+export function workerSummary(
+  s: Pick<
+    CursorWorkerStatus,
+    'running' | 'ready' | 'cli_installed' | 'api_key_set' | 'node_missing' | 'node_error'
+  > & { key_invalid?: boolean },
+): { label: string; tone: Tone; detail: string; installed: boolean } {
   if (s.node_missing) {
-    return { label: 'Nœud ?', tone: 'danger', detail: 'Nœud introuvable', installed: false };
+    return {
+      label: 'Nœud ?',
+      tone: 'danger',
+      detail: 'Nœud introuvable',
+      installed: false,
+    };
   }
   if (s.node_error) {
-    return { label: 'KO', tone: 'danger', detail: 'Nœud injoignable', installed: false };
+    return {
+      label: 'KO',
+      tone: 'danger',
+      detail: 'Nœud injoignable',
+      installed: false,
+    };
+  }
+  if (s.key_invalid) {
+    return {
+      label: 'Clé KO',
+      tone: 'danger',
+      detail: 'Clé API refusée par Cursor',
+      installed: false,
+    };
   }
   if (s.running) {
     return s.ready === false
-      ? { label: 'Connexion', tone: 'accent', detail: 'Connexion à Cursor…', installed: true }
+      ? {
+          label: 'Connexion',
+          tone: 'accent',
+          detail: 'Connexion à Cursor…',
+          installed: true,
+        }
       : { label: 'ON', tone: 'ok', detail: 'Connecté', installed: true };
   }
   if (!s.api_key_set || !s.cli_installed) {
-    return { label: 'À installer', tone: 'warn', detail: 'Un clic pour installer', installed: false };
+    return {
+      label: 'À installer',
+      tone: 'warn',
+      detail: 'Un clic pour installer',
+      installed: false,
+    };
   }
   return { label: 'Off', tone: 'neutral', detail: 'Arrêté', installed: true };
 }
 
-/** Champs demandés à l’utilisateur avant l’installation. Exporté pour les tests. */
-export function installNeeds(s: Pick<CursorWorkerStatus, 'api_key_set'> | null): Array<'api_key'> {
-  return s && !s.api_key_set ? ['api_key'] : [];
+/**
+ * Champs obligatoires avant l’installation : la clé seulement si aucune n’est
+ * enregistrée ou si Cursor a refusé la clé actuelle. Exporté pour les tests.
+ */
+export function installNeeds(
+  s: (Pick<CursorWorkerStatus, 'api_key_set'> & { key_invalid?: boolean }) | null,
+): Array<'api_key'> {
+  return s && (!s.api_key_set || s.key_invalid) ? ['api_key'] : [];
+}
+
+const FOREIGN_KEYS: Array<[string, string]> = [
+  ['xai-', 'xAI'],
+  ['sk-ant-', 'Anthropic'],
+  ['sk-or-', 'OpenRouter'],
+  ['sk-', 'OpenAI'],
+  ['gsk_', 'Groq'],
+  ['AIza', 'Google'],
+  ['ghp_', 'GitHub'],
+  ['gho_', 'GitHub'],
+  ['github_pat_', 'GitHub'],
+  ['hf_', 'Hugging Face'],
+];
+
+/** Problème évident d’une clé saisie (vide = pas de problème). Exporté pour les tests. */
+export function cursorKeyProblem(raw: string): string | null {
+  const k = raw.trim();
+  if (!k) return null;
+  const foreign = FOREIGN_KEYS.find(([p]) => k.startsWith(p));
+  if (foreign) {
+    return `Ceci est une clé ${foreign[1]}, pas une clé Cursor. Crée-la sur cursor.com/dashboard → API Keys.`;
+  }
+  if (/\s/.test(k)) return 'La clé ne doit pas contenir d’espace.';
+  if (k.length < 16)
+    return 'Clé trop courte : copie la clé complète depuis cursor.com/dashboard → API Keys.';
+  return null;
+}
+
+const KEY_HINT =
+  'Clé Cursor personnelle : cursor.com/dashboard → API Keys (pas une clé xAI / OpenAI).';
+
+/** Champ masqué unique pour la clé : une saisie remplace la clé stockée, vide = conserver. */
+function KeyField({
+  status,
+  value,
+  onInput,
+  required,
+}: {
+  status: CursorWorkerStatus;
+  value: string;
+  onInput: (v: string) => void;
+  required: boolean;
+}) {
+  const problem = cursorKeyProblem(value);
+  const placeholder =
+    status.api_key_set && !required
+      ? `${status.api_key_masked ?? '••••'} — laisser vide pour conserver`
+      : 'key_…';
+  return (
+    <div class="space-y-1.5">
+      <Input
+        label="Clé API Cursor"
+        type="password"
+        name="cursor-api-key"
+        value={value}
+        placeholder={placeholder}
+        autocomplete="new-password"
+        spellcheck={false}
+        hint={problem ? undefined : KEY_HINT}
+        onInput={(e) => onInput((e.target as HTMLInputElement).value)}
+      />
+      {problem ? <p class="text-xs text-[var(--color-danger)]">{problem}</p> : null}
+      {status.env_key_present ? (
+        <p class="text-xs text-[var(--color-ink-muted)]">
+          {status.api_key_source === 'env'
+            ? 'La clé actuelle vient de la variable CURSOR_API_KEY du serveur ; en saisir une ici la remplace.'
+            : 'Une variable CURSOR_API_KEY existe aussi sur le serveur : la clé enregistrée ici est prioritaire.'}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 function Row({ label, value }: { label: string; value: ComponentChildren }) {
@@ -157,7 +264,9 @@ export function CursorWorkerSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
           status.eligible_count > 0 ? 'ok' : 'warn',
           status.eligible_count > 0 ? 'dépôt(s) servis' : 'Aucun dépôt cloné',
         );
-  const adv = pill('Auto', 'neutral', 'Tout est rempli automatiquement');
+  const adv = status.key_invalid
+    ? pill('Clé', 'danger', 'Clé API refusée : la remplacer')
+    : pill('Auto', 'neutral', 'Clé API, nom, dossiers');
 
   async function toggleAuto() {
     setBusy(true);
@@ -169,7 +278,11 @@ export function CursorWorkerSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
       });
       await load();
     } catch (e) {
-      toast.push({ title: 'Échec', detail: String((e as Error).message || e), tone: 'danger' });
+      toast.push({
+        title: 'Échec',
+        detail: String((e as Error).message || e),
+        tone: 'danger',
+      });
     } finally {
       setBusy(false);
     }
@@ -284,6 +397,8 @@ function InstallModal({
   const [result, setResult] = useState<CursorWorkerInstallResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const needs = installNeeds(status);
+  const keyProblem = cursorKeyProblem(apiKey);
+  const retryKey = !!result && !result.ok && !!result.key_invalid;
 
   useEffect(() => {
     if (!open) return;
@@ -295,7 +410,11 @@ function InstallModal({
   }, [open]);
 
   const node = nodes.find((n) => n.id === nodeId) ?? nodes.find((n) => n.leader);
-  const canRun = !running && (!needs.includes('api_key') || apiKey.trim().length >= 16) && node?.online !== false;
+  const canRun =
+    !running &&
+    !keyProblem &&
+    (!(needs.includes('api_key') || retryKey) || apiKey.trim().length > 0) &&
+    node?.online !== false;
 
   async function run() {
     setRunning(true);
@@ -331,7 +450,16 @@ function InstallModal({
       fullOnMobile
       footer={
         <div class="flex flex-wrap justify-end gap-2">
-          {result ? (
+          {result && retryKey ? (
+            <>
+              <Button variant="ghost" disabled={running} onClick={onClose}>
+                Fermer
+              </Button>
+              <Button variant="primary" disabled={!canRun} onClick={() => void run()}>
+                {running ? 'Installation…' : 'Réessayer avec cette clé'}
+              </Button>
+            </>
+          ) : result ? (
             <Button variant="primary" onClick={onClose}>
               Fermer
             </Button>
@@ -353,7 +481,10 @@ function InstallModal({
           <Alert tone={result.ok ? 'ok' : 'danger'}>{result.message}</Alert>
           <ol class="space-y-2">
             {result.steps.map((s) => (
-              <li key={s.id} class="rounded-xl bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-line)]">
+              <li
+                key={s.id}
+                class="rounded-xl bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-line)]"
+              >
                 <div class="flex items-center justify-between gap-2 text-sm">
                   <span class="font-medium text-[var(--color-ink)]">{s.label}</span>
                   <Badge tone={s.ok ? 'ok' : 'danger'}>{s.ok ? 'OK' : 'Échec'}</Badge>
@@ -366,6 +497,9 @@ function InstallModal({
               </li>
             ))}
           </ol>
+          {retryKey ? (
+            <KeyField status={status} value={apiKey} onInput={setApiKey} required />
+          ) : null}
           {result.ok ? (
             <p class="text-xs text-[var(--color-ink-muted)]">
               Dans Cursor (My Machines) ou Grok Bot, choisis la machine{' '}
@@ -418,9 +552,11 @@ function InstallModal({
             <Row
               label="Clé API"
               value={
-                status.api_key_set
-                  ? `${status.api_key_masked ?? 'enregistrée'}${status.api_key_source === 'env' ? ' (serveur)' : ''}`
-                  : 'À fournir ci-dessous'
+                status.key_invalid
+                  ? 'Refusée par Cursor — à remplacer'
+                  : status.api_key_set
+                    ? `${status.api_key_masked ?? 'enregistrée'}${status.api_key_source === 'env' ? ' (serveur)' : ''}`
+                    : 'À fournir ci-dessous'
               }
             />
           </div>
@@ -443,17 +579,18 @@ function InstallModal({
               </span>
             </label>
           ) : null}
-          {needs.includes('api_key') ? (
-            <Input
-              label="Clé API Cursor (personnelle)"
-              type="password"
-              value={apiKey}
-              placeholder="key_…"
-              autocomplete="off"
-              hint="Cursor → Dashboard → API Keys. Seule information impossible à deviner ; stockée chiffrée."
-              onInput={(e) => setApiKey((e.target as HTMLInputElement).value)}
-            />
+          {status.key_invalid ? (
+            <Alert tone="danger">
+              Cursor a refusé la clé enregistrée ({status.api_key_masked}). Colle une clé Cursor
+              personnelle : cursor.com/dashboard → API Keys.
+            </Alert>
           ) : null}
+          <KeyField
+            status={status}
+            value={apiKey}
+            onInput={setApiKey}
+            required={needs.includes('api_key')}
+          />
           {err ? <Alert tone="danger">{err}</Alert> : null}
           <p class="text-xs text-[var(--color-ink-muted)]">
             Le worker exécute les agents Cursor sur cette machine (fichiers, terminal). La
@@ -500,7 +637,11 @@ function StatusModal({
       setConfirmStop(false);
       onChanged();
     } catch (e) {
-      toast.push({ title: 'Échec', detail: String((e as Error).message || e), tone: 'danger' });
+      toast.push({
+        title: 'Échec',
+        detail: String((e as Error).message || e),
+        tone: 'danger',
+      });
       onChanged();
     } finally {
       setBusy(null);
@@ -528,7 +669,11 @@ function StatusModal({
             </>
           ) : (
             <>
-              <Button variant="ghost" disabled={!!busy || !status.running} onClick={() => setConfirmStop(true)}>
+              <Button
+                variant="ghost"
+                disabled={!!busy || !status.running}
+                onClick={() => setConfirmStop(true)}
+              >
                 Arrêter…
               </Button>
               <Button
@@ -648,16 +793,36 @@ function AdvancedModal({
   const [extraDirs, setExtraDirs] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     if (!open) return;
+    setConfirmDelete(false);
     setName(status.settings?.name || '');
     setBinary(status.settings?.binary || '');
     setExtraDirs(status.settings?.extra_dirs || '');
     setApiKey('');
   }, [open]);
 
+  async function deleteKey() {
+    setBusy(true);
+    try {
+      await api.cursorWorkerPatchSettings({ api_key: '' });
+      toast.push({ title: 'Clé API supprimée', tone: 'ok' });
+      onSaved();
+    } catch (e) {
+      toast.push({
+        title: 'Échec',
+        detail: String((e as Error).message || e),
+        tone: 'danger',
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function save() {
+    if (cursorKeyProblem(apiKey)) return;
     setBusy(true);
     try {
       await api.cursorWorkerPatchSettings({
@@ -668,12 +833,20 @@ function AdvancedModal({
       });
       toast.push({
         title: 'Réglages enregistrés',
-        detail: status.running ? 'Relance le worker pour les appliquer.' : undefined,
+        detail: apiKey.trim()
+          ? 'Clé remplacée. Clique « Réinstaller le worker Cursor » pour l’utiliser.'
+          : status.running
+            ? 'Relance le worker pour les appliquer.'
+            : undefined,
         tone: 'ok',
       });
       onSaved();
     } catch (e) {
-      toast.push({ title: 'Échec', detail: String((e as Error).message || e), tone: 'danger' });
+      toast.push({
+        title: 'Échec',
+        detail: String((e as Error).message || e),
+        tone: 'danger',
+      });
     } finally {
       setBusy(false);
     }
@@ -688,52 +861,77 @@ function AdvancedModal({
       size="md"
       fullOnMobile
       footer={
-        <div class="flex flex-wrap justify-end gap-2">
-          <Button variant="ghost" disabled={busy} onClick={onClose}>
-            Annuler
-          </Button>
-          <Button variant="primary" disabled={busy} onClick={() => void save()}>
-            {busy ? 'Enregistrement…' : 'Enregistrer'}
-          </Button>
-        </div>
+        confirmDelete ? (
+          <div class="flex flex-wrap justify-end gap-2">
+            <Button variant="ghost" disabled={busy} onClick={() => setConfirmDelete(false)}>
+              Retour
+            </Button>
+            <Button variant="danger" disabled={busy} onClick={() => void deleteKey()}>
+              {busy ? 'Suppression…' : 'Supprimer la clé'}
+            </Button>
+          </div>
+        ) : (
+          <div class="flex flex-wrap justify-end gap-2">
+            <Button variant="ghost" disabled={busy} onClick={onClose}>
+              Annuler
+            </Button>
+            <Button
+              variant="primary"
+              disabled={busy || !!cursorKeyProblem(apiKey)}
+              onClick={() => void save()}
+            >
+              {busy ? 'Enregistrement…' : 'Enregistrer'}
+            </Button>
+          </div>
+        )
       }
     >
-      <div class="space-y-4">
-        <Input
-          label="Nom de la machine"
-          value={name}
-          placeholder={`${status.name} (auto)`}
-          hint="Vide = nom du nœud."
-          onInput={(e) => setName((e.target as HTMLInputElement).value)}
-        />
-        <Input
-          label={`Remplacer la clé API Cursor${status.api_key_set ? ` (${status.api_key_masked})` : ''}`}
-          type="password"
-          value={apiKey}
-          placeholder="laisser vide pour conserver"
-          autocomplete="off"
-          onInput={(e) => setApiKey((e.target as HTMLInputElement).value)}
-        />
-        <Input
-          label="Chemin du binaire agent"
-          value={binary}
-          placeholder={status.cli_path ? `${status.cli_path} (auto)` : 'auto'}
-          hint="Vide = installé et trouvé automatiquement."
-          onInput={(e) => setBinary((e.target as HTMLInputElement).value)}
-        />
-        <label class="flex min-w-0 w-full flex-col gap-1.5 text-sm">
-          <span class="font-medium text-[var(--color-ink)]">Dossiers en plus (un par ligne)</span>
-          <textarea
-            class="min-h-[88px] w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 font-mono text-base text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]/50 focus:ring-2 focus:ring-[var(--color-accent-soft)] sm:text-sm"
-            value={extraDirs}
-            placeholder="/chemin/vers/autre-depot"
-            onInput={(e) => setExtraDirs((e.target as HTMLTextAreaElement).value)}
+      {confirmDelete ? (
+        <p class="text-sm text-[var(--color-ink-muted)]">
+          La clé {status.api_key_masked} sera effacée de DevForge. Le worker ne pourra plus démarrer
+          tant qu’une nouvelle clé n’est pas saisie.
+        </p>
+      ) : (
+        <div class="space-y-4">
+          <Input
+            label="Nom de la machine"
+            value={name}
+            placeholder={`${status.name} (auto)`}
+            hint="Vide = nom du nœud."
+            onInput={(e) => setName((e.target as HTMLInputElement).value)}
           />
-          <span class="text-xs text-[var(--color-ink-muted)]">
-            Dépôts Git hors projets DevForge. Vide = uniquement les projets.
-          </span>
-        </label>
-      </div>
+          <KeyField status={status} value={apiKey} onInput={setApiKey} required={false} />
+          {status.api_key_set && status.api_key_source === 'settings' ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => setConfirmDelete(true)}
+            >
+              Supprimer la clé enregistrée…
+            </Button>
+          ) : null}
+          <Input
+            label="Chemin du binaire agent"
+            value={binary}
+            placeholder={status.cli_path ? `${status.cli_path} (auto)` : 'auto'}
+            hint="Vide = installé et trouvé automatiquement."
+            onInput={(e) => setBinary((e.target as HTMLInputElement).value)}
+          />
+          <label class="flex min-w-0 w-full flex-col gap-1.5 text-sm">
+            <span class="font-medium text-[var(--color-ink)]">Dossiers en plus (un par ligne)</span>
+            <textarea
+              class="min-h-[88px] w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 font-mono text-base text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]/50 focus:ring-2 focus:ring-[var(--color-accent-soft)] sm:text-sm"
+              value={extraDirs}
+              placeholder="/chemin/vers/autre-depot"
+              onInput={(e) => setExtraDirs((e.target as HTMLTextAreaElement).value)}
+            />
+            <span class="text-xs text-[var(--color-ink-muted)]">
+              Dépôts Git hors projets DevForge. Vide = uniquement les projets.
+            </span>
+          </label>
+        </div>
+      )}
     </Modal>
   );
 }

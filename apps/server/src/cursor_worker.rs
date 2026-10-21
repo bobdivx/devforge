@@ -204,18 +204,73 @@ pub fn effective_api_key(settings: &WorkerSettings) -> Option<(String, &'static 
         .map(|k| (k, "env"))
 }
 
+/// Préfixes de clés d'autres fournisseurs (collées par erreur à la place
+/// d'une clé Cursor).
+const FOREIGN_KEY_PREFIXES: &[(&str, &str)] = &[
+    ("xai-", "xAI"),
+    ("sk-ant-", "Anthropic"),
+    ("sk-or-", "OpenRouter"),
+    ("sk-", "OpenAI"),
+    ("gsk_", "Groq"),
+    ("AIza", "Google"),
+    ("ghp_", "GitHub"),
+    ("gho_", "GitHub"),
+    ("github_pat_", "GitHub"),
+    ("hf_", "Hugging Face"),
+];
+
+/// Fournisseur reconnu si la clé n'est manifestement pas une clé Cursor.
+pub fn foreign_key_provider(raw: &str) -> Option<&'static str> {
+    let k = raw.trim();
+    FOREIGN_KEY_PREFIXES
+        .iter()
+        .find(|(p, _)| k.starts_with(p))
+        .map(|(_, name)| *name)
+}
+
 /// Forme minimale d'une clé utilisateur Cursor (anti faute de frappe).
 pub fn validate_api_key(raw: &str) -> Result<String, String> {
     let k = raw.trim();
     if k.is_empty() {
         return Err("Clé API Cursor vide.".into());
     }
+    if let Some(provider) = foreign_key_provider(k) {
+        return Err(format!(
+            "Ceci est une clé {provider}, pas une clé Cursor. Crée une clé sur cursor.com/dashboard → API Keys."
+        ));
+    }
     if k.len() < 16 || k.chars().any(char::is_whitespace) {
         return Err(
-            "Clé API Cursor invalide (copie-la depuis Cursor → Dashboard → API Keys).".into(),
+            "Clé API Cursor invalide (copie-la depuis cursor.com/dashboard → API Keys).".into(),
         );
     }
     Ok(k.to_string())
+}
+
+/// Le CLI a refusé la clé (logs du worker).
+pub fn logs_show_invalid_key(logs: &str) -> bool {
+    let l = logs.to_lowercase();
+    l.contains("api key is invalid")
+        || l.contains("invalid api key")
+        || l.contains("api key was loaded from")
+        || l.contains("unauthenticated")
+}
+
+/// Une variable `CURSOR_API_KEY` non vide existe côté serveur (jamais la valeur).
+pub fn env_key_present() -> bool {
+    std::env::var("CURSOR_API_KEY")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+}
+
+/// Efface les logs d'un worker arrêté (après changement de clé, pour ne
+/// plus afficher l'erreur de l'ancienne clé).
+pub fn clear_logs_if_stopped() {
+    if is_running() {
+        return;
+    }
+    let _ = std::fs::remove_file(out_path());
+    let _ = std::fs::remove_file(err_path());
 }
 
 pub fn mask_key(plain: &str) -> String {
@@ -860,6 +915,12 @@ pub async fn status_json(pool: &PgPool, node_name: &str) -> Result<Value, String
     };
     let key = effective_api_key(&settings);
     let name = resolve_worker_name_for_node(&settings, node_name);
+    let logs = if running || err_path().is_file() || out_path().is_file() {
+        read_logs_tail(30)
+    } else {
+        String::new()
+    };
+    let key_invalid = key.is_some() && logs_show_invalid_key(&logs);
 
     Ok(json!({
         "ok": true,
@@ -886,14 +947,20 @@ pub async fn status_json(pool: &PgPool, node_name: &str) -> Result<Value, String
         "eligible_count": eligible.len(),
         "eligible_paths": eligible,
         "registered_paths": load_registered(),
-        "logs_tail": if running || err_path().is_file() || out_path().is_file() {
-            read_logs_tail(30)
+        "env_key_present": env_key_present(),
+        "key_invalid": key_invalid,
+        "logs_tail": logs,
+        "hint": if key_invalid {
+            INVALID_KEY_HINT
         } else {
-            String::new()
+            status_hint(bin.is_some(), key.is_some(), running, ready)
         },
-        "hint": status_hint(bin.is_some(), key.is_some(), running, ready),
     }))
 }
+
+/// Message affiché quand Cursor a refusé la clé.
+pub const INVALID_KEY_HINT: &str =
+    "Cursor a refusé la clé API. Colle une clé Cursor (cursor.com/dashboard → API Keys) puis réinstalle.";
 
 /// Phrase d'état unique (sans commande à taper).
 pub fn status_hint(cli: bool, key: bool, running: bool, ready: Option<bool>) -> &'static str {
