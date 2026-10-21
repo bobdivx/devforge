@@ -24,6 +24,8 @@ mod detect_svc;
 mod dev_env;
 mod dns;
 mod dns_failover;
+mod docker_gc;
+mod docker_gc_routes;
 mod domain_catalog;
 mod draft;
 mod draft_origin;
@@ -252,6 +254,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     crate::dns::spawn_dns_loop(state.clone());
     crate::dns_failover::spawn_loop(state.clone());
+    crate::docker_gc_routes::spawn_loop(state.clone());
     routes::resume_deploy_queue(state.clone());
     run_routes::install_launcher(&state);
     routes::resume_agent_runs(state.clone());
@@ -378,6 +381,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(backup_routes::router())
         .merge(sso_routes::router())
         .merge(acme_routes::router())
+        .merge(docker_gc_routes::router())
         .merge(project_oidc_routes::router())
         .merge(dev_env::router())
         .merge(project_pg_routes::router())

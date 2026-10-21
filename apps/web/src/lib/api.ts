@@ -2006,6 +2006,24 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  dockerGcGet: () => request<DockerGcState>('/admin/docker-gc'),
+  dockerGcSave: (settings: DockerGcSettings) =>
+    request<DockerGcState & { ok: boolean }>('/admin/docker-gc', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    }),
+  dockerGcNodes: () =>
+    request<{ nodes: DockerGcNodeDisk[]; alert_percent: number }>('/admin/docker-gc/nodes'),
+  dockerGcPreview: () =>
+    request<DockerGcPreview>('/admin/docker-gc/preview', { method: 'POST', body: '{}' }),
+  dockerGcRun: () =>
+    request<{ ok: boolean; started: boolean }>('/admin/docker-gc/run', {
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+    }),
+  dockerGcRuns: (limit = 50) =>
+    request<{ runs: DockerGcRun[] }>(`/admin/docker-gc/runs?limit=${limit}`),
+
   acmeSettings: () =>
     request<AcmeSettings>('/settings/acme'),
   saveAcmeSettings: (acme_email: string) =>
@@ -2919,3 +2937,96 @@ export type AppReposResponse = {
   refresh_error?: string | null;
 };
 export type ProjectGithubLink = { ok: boolean; linked: boolean; lost: boolean; installation_id?: number; repo_id?: number | null };
+
+export type DockerGcSettings = {
+  enabled: boolean;
+  frequency_hours: number;
+  hour: number;
+  cron: string | null;
+  timezone: string;
+  retention_hours: number;
+  keep_per_project: number;
+  disk_alert_percent: number;
+  log_rotation: boolean;
+  log_max_size_mb: number;
+  log_max_files: number;
+};
+
+export type DockerGcState = {
+  settings: DockerGcSettings;
+  cron_expression: string;
+  next_run_at: string | null;
+  running?: boolean;
+  log_rotation_active?: boolean;
+  last_run?: { finished_at: string; ok: boolean; freed_bytes: number; trigger: string } | null;
+};
+
+export type DockerGcDisk = {
+  root_dir: string;
+  logging_driver: string;
+  docker_version: string;
+  total_bytes: number;
+  used_bytes: number;
+  avail_bytes: number;
+  percent: number;
+  /** Ancien cron devforge-disk-guard : present / absent / container. */
+  legacy_guard?: string;
+};
+
+export type DockerGcNodeDisk = {
+  node_id: string;
+  name: string;
+  ok: boolean;
+  error?: string;
+  alert?: boolean;
+  disk?: DockerGcDisk;
+  log_rotation_supported?: boolean;
+};
+
+export type DockerGcPreviewNode = {
+  node_id: string;
+  name: string;
+  ok: boolean;
+  error?: string;
+  disk?: DockerGcDisk;
+  images?: {
+    id: string;
+    refs: string[];
+    size: number;
+    created: string;
+    project: string | null;
+    reason: string;
+  }[];
+  images_bytes?: number;
+  kept_count?: number;
+  protected_running?: number;
+  containers_untouched?: number;
+  builders?: string[];
+  cache?: { builder: string; bytes: number }[];
+  cache_bytes?: number;
+  build_cache_total?: { size: string; reclaimable: string } | null;
+  total_bytes?: number;
+};
+
+export type DockerGcPreview = {
+  dry_run: boolean;
+  retention_hours: number;
+  keep_per_project: number;
+  nodes: DockerGcPreviewNode[];
+};
+
+export type DockerGcRun = {
+  id: number;
+  started_at: string;
+  finished_at: string;
+  trigger: 'manual' | 'schedule' | 'emergency' | string;
+  node_id: string;
+  node_name: string;
+  ok: boolean;
+  freed_bytes: number;
+  images_removed: number;
+  duration_ms: number;
+  disk_percent_before: number | null;
+  disk_percent_after: number | null;
+  errors: string[];
+};

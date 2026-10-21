@@ -10,6 +10,7 @@ import { PostgresAdminPanel } from './PostgresAdminPanel';
 import { SsoSettingsPanel } from './SsoSettingsPanel';
 import { UpdateSettingsPanel } from './UpdateSettingsPanel';
 import { CursorWorkerSettingsPanel } from './CursorWorkerSettingsPanel';
+import { DockerGcPanel, formatBytes } from './DockerGcPanel';
 import {
   Alert,
   Badge,
@@ -72,7 +73,8 @@ type AdminSection =
   | 'update'
   | 'domaine'
   | 'cluster'
-  | 'cursor-worker';
+  | 'cursor-worker'
+  | 'docker';
 
 const SECTION_TITLES: Record<Exclude<AdminSection, 'hub'>, string> = {
   workspaces: 'Workspaces',
@@ -87,6 +89,7 @@ const SECTION_TITLES: Record<Exclude<AdminSection, 'hub'>, string> = {
   domaine: 'Domaine principal',
   cluster: 'Cluster',
   'cursor-worker': 'Worker Cursor',
+  docker: 'Nettoyage Docker',
 };
 
 const ADMIN_TABS: AdminSection[] = [
@@ -102,6 +105,7 @@ const ADMIN_TABS: AdminSection[] = [
   'domaine',
   'cluster',
   'cursor-worker',
+  'docker',
 ];
 
 type BetaFeatures = {
@@ -216,6 +220,11 @@ function AdminHub() {
     eligible: number;
     cli: boolean;
   } | null>(null);
+  const [dockerGc, setDockerGc] = useState<{
+    enabled: boolean;
+    next?: string | null;
+    lastFreed?: number;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -238,6 +247,7 @@ function AdminHub() {
         api.dnsSettings(),
         api.bootstrap(),
         api.cursorWorkerStatus(),
+        api.dockerGcGet(),
       ]);
       const [proxyRes, healthRes, adminRes] = await core;
       if (cancelled) return;
@@ -258,6 +268,7 @@ function AdminHub() {
         dnsRes,
         bootRes,
         cursorRes,
+        gcRes,
       ] = await rest;
       if (cancelled) return;
       if (clusterRes.status === 'fulfilled') {
@@ -265,6 +276,13 @@ function AdminHub() {
         setClusterFlags({
           fenced: !!clusterRes.value.writes_fenced,
           interim: !!clusterRes.value.acting_leader,
+        });
+      }
+      if (gcRes.status === 'fulfilled') {
+        setDockerGc({
+          enabled: !!gcRes.value.settings?.enabled,
+          next: gcRes.value.next_run_at,
+          lastFreed: gcRes.value.last_run?.freed_bytes,
         });
       }
       if (cursorRes.status === 'fulfilled') {
@@ -487,6 +505,18 @@ function AdminHub() {
         : tileStatus('Off', 'neutral', `${cursorWorker.eligible} repo(s)`)
     : null;
 
+  const gcTile = !dockerGc
+    ? null
+    : dockerGc.enabled
+      ? tileStatus(
+          'Auto',
+          'ok',
+          dockerGc.lastFreed != null
+            ? `${formatBytes(dockerGc.lastFreed)} libérés au dernier passage`
+            : 'Chaque jour à 03:00',
+        )
+      : tileStatus('Off', 'warn', 'Nettoyage désactivé');
+
   return (
     <HubGrid>
       <HubTile
@@ -606,7 +636,16 @@ function AdminHub() {
         badge={cursorTile?.badge}
         subtitle={cursorTile?.subtitle}
       />
-      <AcmeEmailTile index={13} />
+      <HubTile
+        index={13}
+        href="/app/admin?tab=docker"
+        title="Nettoyage Docker"
+        description="Cache de build, images, disque des nœuds"
+        icon={<HubIcon name="trash" />}
+        badge={gcTile?.badge}
+        subtitle={gcTile?.subtitle}
+      />
+      <AcmeEmailTile index={14} />
     </HubGrid>
   );
 }
@@ -1238,6 +1277,7 @@ function AdminPageInner() {
         {section === 'update' && <UpdateSettingsPanel isAdmin />}
         {section === 'cluster' && <ClusterPanel />}
         {section === 'cursor-worker' && <CursorWorkerSettingsPanel isAdmin />}
+        {section === 'docker' && <DockerGcPanel />}
       </FadeIn>
     </AppShell>
   );

@@ -688,7 +688,7 @@ impl DeployFacade {
         format!("dfside-{}", app_container.trim_start_matches("df-"))
     }
 
-    fn image_name(project_uuid: &str) -> String {
+    pub fn image_name(project_uuid: &str) -> String {
         format!(
             "df-{}:latest",
             project_uuid.chars().take(12).collect::<String>()
@@ -1340,6 +1340,17 @@ impl DeployFacade {
             }
         };
 
+        if build_ok && !cfg!(windows) {
+            // Tag de rollback : `:latest` est réécrit à chaque build, ce tag garde
+            // l'image de ce déploiement (le nettoyage Docker en conserve N par projet).
+            let cmd = rollback_tag_command(&image, unix_now_secs());
+            if let Ok(r) = self.executor.exec(server, "", &cmd, 30).await {
+                if r.ok && !r.output.trim().is_empty() {
+                    logs.push_str(&format!("[image] {}\n", r.output.trim()));
+                }
+            }
+        }
+
         if !build_ok {
             logs.push_str(
                 "[fallback] image Docker non démarrée — pas de processus local (il ne crée pas de route publique)\n",
@@ -1370,7 +1381,9 @@ impl DeployFacade {
         logs: &mut LogBuffer,
         label: &str,
     ) -> Result<ExecResult> {
-        let fut = self.executor.exec(server_id, workdir, command, timeout_secs);
+        let fut = self
+            .executor
+            .exec(server_id, workdir, command, timeout_secs);
         tokio::pin!(fut);
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -2306,8 +2319,35 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
     }
 }
 
+fn unix_now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// `df-abc:latest` → tag `df-abc:r<secs>` si l'image existe (sinon rien).
+pub fn rollback_tag_command(image: &str, secs: u64) -> String {
+    let repo = image.split(':').next().unwrap_or(image);
+    let target = format!("{repo}:r{secs}");
+    format!(
+        "docker image inspect {img} >/dev/null 2>&1 && docker tag {img} {t} && echo 'tag rollback {t}' || true",
+        img = docker::shell_escape(image),
+        t = docker::shell_escape(&target),
+    )
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn rollback_tag_targets_same_repo() {
+        let cmd = rollback_tag_command("df-abc123def456:latest", 1_760_000_000);
+        assert!(cmd.contains("docker tag df-abc123def456:latest df-abc123def456:r1760000000"));
+        assert!(cmd.starts_with("docker image inspect df-abc123def456:latest"));
+        assert!(!cmd.contains(" rm"));
+    }
+
     use super::*;
 
     #[test]
