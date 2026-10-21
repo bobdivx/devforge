@@ -352,6 +352,8 @@ export type Deployment = {
   error_hint?: string | null;
   /** `production` (défaut) ou `dev`. */
   environment?: string | null;
+  /** Échec acquitté (badge Échec ignoré) — ISO ou timestamp texte. */
+  dismissed_at?: string | null;
   created_at?: string;
 };
 
@@ -863,6 +865,18 @@ export const api = {
     request<{ data: Deployment; ok?: boolean; cancelled?: boolean }>(
       `/deployments/${uuid}/cancel`,
       { method: 'POST', body: '{}' },
+    ),
+  /** Acquitte un échec : retire le badge Échec si une version live existe. */
+  dismissDeployment: (uuid: string) =>
+    request<{ data: Deployment; ok?: boolean; dismissed?: boolean; project_status?: string }>(
+      `/deployments/${uuid}/dismiss`,
+      { method: 'POST', body: '{}' },
+    ),
+  /** Retire une ligne d’historique (pas le conteneur ni GitHub). */
+  deleteDeployment: (uuid: string) =>
+    request<{ ok?: boolean; deleted?: boolean; uuid?: string; project_status?: string }>(
+      `/deployments/${uuid}`,
+      { method: 'DELETE' },
     ),
   projectAgents: (projectUuid: string) =>
     request<{ data: ProjectAgent[] }>(`/projects/${projectUuid}/agents`),

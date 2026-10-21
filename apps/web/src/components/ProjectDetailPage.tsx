@@ -38,6 +38,7 @@ import {
   Rocket,
   RotateCw,
   Square,
+  Trash2,
 } from 'lucide-preact';
 import {
   Alert,
@@ -416,6 +417,9 @@ export function ProjectDetailPage(props: Props) {
           projectUuid={uuid}
           initial={deployments}
           onRefresh={(d) => setDeployments(d)}
+          onProjectRefresh={() => {
+            void api.project(uuid).then((p) => setProject(p.data));
+          }}
         />
       )}
       {tab === 'logs' && (
@@ -488,7 +492,11 @@ function ProjectActivityStrip({
   project: Project | null;
 }) {
   const active = deployments.filter((d) => isDeployInProgress(d.status));
-  const failed = deployments.find((d) => d.status === 'failed' || d.status === 'error');
+  const failed = deployments.find(
+    (d) =>
+      (d.status === 'failed' || d.status === 'error') &&
+      !(d.dismissed_at && String(d.dismissed_at).trim()),
+  );
   const unhealthy =
     project && (project.status === 'unhealthy' || project.status === 'unrouted')
       ? project
@@ -845,9 +853,13 @@ function ProjectOverview({
 
   // Préférer un déploiement encore en cours (sinon le succès stale masque le running).
   const latest = pickCurrentDeployment(deployments);
-  // Ne remonter une erreur que si le déploiement *courant* a échoué (pas un vieux fail).
+  // Ne remonter une erreur que si le déploiement *courant* a échoué (pas un vieux fail / ignoré).
   const latestFailed =
-    latest && (latest.status === 'failed' || latest.status === 'error') ? latest : null;
+    latest &&
+    (latest.status === 'failed' || latest.status === 'error') &&
+    !(latest.dismissed_at && String(latest.dismissed_at).trim())
+      ? latest
+      : null;
 
   useEffect(() => {
     setGitSync(project.sync ?? null);
@@ -1699,16 +1711,21 @@ function DeploymentsPanel({
   projectUuid,
   initial,
   onRefresh,
+  onProjectRefresh,
 }: {
   projectUuid: string;
   initial: Deployment[];
   onRefresh: (d: Deployment[]) => void;
+  /** Après ignorer / supprimer : rafraîchir le statut projet (badge Échec). */
+  onProjectRefresh?: () => void;
 }) {
   const toast = useToast();
   const logsRef = useRef<HTMLPreElement>(null);
   const [items, setItems] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [selectedUuid, setSelectedUuid] = useState<string | null>(
     () => pickCurrentDeployment(initial)?.uuid ?? null,
   );
@@ -1730,6 +1747,12 @@ function DeploymentsPanel({
   const hiddenCount = Math.max(0, ordered.length - DEPLOYMENTS_VISIBLE_DEFAULT);
   const selected = items.find((d) => d.uuid === selectedUuid) ?? null;
   const canStop = selected ? isDeployInProgress(selected.status) : false;
+  const selectedDismissed = !!(selected?.dismissed_at && String(selected.dismissed_at).trim());
+  const canDismiss =
+    !!selected &&
+    ['failed', 'error', 'cancelled', 'canceled'].includes(selected.status) &&
+    !selectedDismissed;
+  const canDelete = !!selected && !isDeployInProgress(selected.status);
   /** Pastilles Prod/Dev dès qu'un déploiement dev existe. */
   const showEnv = items.some(isDevDeployment);
 
@@ -1830,6 +1853,61 @@ function DeploymentsPanel({
     }
   }
 
+  async function dismissSelected() {
+    if (!selected || !canDismiss) return;
+    if (
+      !confirm(
+        'Ignorer cet échec ?\n\nLe badge Échec disparaît si une version tourne encore. La version en ligne ne change pas.',
+      )
+    ) {
+      return;
+    }
+    setDismissing(true);
+    try {
+      const r = await api.dismissDeployment(selected.uuid);
+      toast.push({
+        title: 'Échec ignoré',
+        detail: r.project_status === 'live' ? 'Projet repassé en Live' : r.data.git_sha || '',
+        tone: 'ok',
+      });
+      setSelectedUuid(r.data.uuid);
+      await reload();
+      onProjectRefresh?.();
+    } catch (e) {
+      toast.push({ title: 'Ignorer KO', detail: String(e), tone: 'danger' });
+    } finally {
+      setDismissing(false);
+    }
+  }
+
+  async function deleteSelected() {
+    if (!selected || !canDelete) return;
+    if (
+      !confirm(
+        'Retirer cette ligne de l’historique ?\n\nAction non restaurable. La version en ligne et GitHub ne changent pas.',
+      )
+    ) {
+      return;
+    }
+    const removed = selected.uuid;
+    setDeleting(true);
+    try {
+      const r = await api.deleteDeployment(removed);
+      toast.push({
+        title: 'Ligne retirée',
+        detail: r.project_status === 'live' ? 'Projet repassé en Live' : shortSha(selected.git_sha) || '',
+        tone: 'ok',
+      });
+      await reload();
+      setSelectedUuid((prev) => (prev === removed ? null : prev));
+      onProjectRefresh?.();
+    } catch (e) {
+      toast.push({ title: 'Suppression KO', detail: String(e), tone: 'danger' });
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   function selectDeployment(depUuid: string) {
     setSelectedUuid(depUuid);
     if (window.matchMedia('(max-width: 767px)').matches) setSheetOpen(true);
@@ -1845,25 +1923,57 @@ function DeploymentsPanel({
           ? 'bg-[var(--color-danger)]'
           : 'bg-[var(--color-ink-faint)]');
 
-  const stopButton = canStop ? (
-    <Button
-      size="sm"
-      variant="danger"
-      class="max-lg:h-11"
-      disabled={cancelling}
-      onClick={stopSelected}
-      aria-label="Arrêter le déploiement"
-    >
-      {cancelling ? <Spinner /> : <Square size={12} strokeWidth={2.5} aria-hidden />}
-      Arrêter
-    </Button>
-  ) : null;
+  const detailActions = (
+    <div class="flex flex-wrap items-center gap-2">
+      {canStop && (
+        <Button
+          size="sm"
+          variant="danger"
+          class="max-lg:h-11"
+          disabled={cancelling}
+          onClick={stopSelected}
+          aria-label="Arrêter le déploiement"
+        >
+          {cancelling ? <Spinner /> : <Square size={12} strokeWidth={2.5} aria-hidden />}
+          Arrêter
+        </Button>
+      )}
+      {canDismiss && (
+        <Button
+          size="sm"
+          variant="secondary"
+          class="max-lg:h-11"
+          disabled={dismissing || deleting}
+          onClick={() => void dismissSelected()}
+          aria-label="Ignorer cet échec"
+          title="Enlever le badge Échec — la version en ligne ne change pas"
+        >
+          {dismissing ? <Spinner /> : null}
+          Ignorer
+        </Button>
+      )}
+      {canDelete && (
+        <Button
+          size="sm"
+          variant="ghost"
+          class="max-lg:h-11 text-[var(--color-danger)] hover:bg-rose-500/10"
+          disabled={deleting || dismissing}
+          onClick={() => void deleteSelected()}
+          aria-label="Supprimer cette ligne de l’historique"
+          title="Retirer de l’historique"
+        >
+          {deleting ? <Spinner /> : <Trash2 size={14} aria-hidden />}
+        </Button>
+      )}
+    </div>
+  );
 
   const selectedMeta = selected ? (
     <div class="min-w-0">
       <div class="flex flex-wrap items-center gap-2">
         {showEnv && <EnvBadge deployment={selected} />}
         <Badge tone={deployTone(selected.status)}>{deployStatusShort(selected.status)}</Badge>
+        {selectedDismissed && <Badge tone="neutral">Ignoré</Badge>}
         <span class="font-mono text-xs text-[var(--color-ink-muted)]">
           {shortSha(selected.git_sha) ?? '—'}
         </span>
@@ -1955,6 +2065,9 @@ function DeploymentsPanel({
                             {showEnv && <EnvBadge deployment={d} />}
                             <span class="font-mono text-xs font-medium text-white">{sha}</span>
                             <Badge tone={tone}>{d.status}</Badge>
+                            {d.dismissed_at && String(d.dismissed_at).trim() ? (
+                              <Badge tone="neutral">Ignoré</Badge>
+                            ) : null}
                             <span class="ml-auto shrink-0 text-[11px] text-[var(--color-ink-faint)]">
                               {formatWhen(d.created_at)}
                             </span>
@@ -1986,6 +2099,9 @@ function DeploymentsPanel({
                           />
                         </div>
                         <Badge tone={tone}>{d.status}</Badge>
+                        {d.dismissed_at && String(d.dismissed_at).trim() ? (
+                          <Badge tone="neutral">Ignoré</Badge>
+                        ) : null}
                         <div class="line-clamp-1 text-[11px] text-[var(--color-ink-muted)]">
                           {d.git_message || 'Sans message'}
                         </div>
@@ -2016,7 +2132,7 @@ function DeploymentsPanel({
                 <>
                   <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-line)] px-4 py-3">
                     {selectedMeta}
-                    {stopButton}
+                    {detailActions}
                   </div>
                   <pre
                     ref={logsRef}
@@ -2039,7 +2155,7 @@ function DeploymentsPanel({
         onClose={() => setSheetOpen(false)}
         title={selected ? `Déploiement ${shortSha(selected.git_sha) ?? ''}`.trim() : ''}
         meta={selectedMeta}
-        actions={stopButton}
+        actions={detailActions}
         logs={logs}
       />
     </FadeIn>

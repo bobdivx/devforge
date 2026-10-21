@@ -259,6 +259,52 @@ fn parse_docker_build_timeout(raw: Option<&str>) -> u64 {
         .unwrap_or(DEFAULT_DOCKER_BUILD_TIMEOUT_SECS)
 }
 
+/// Callback invoqué à chaque append de log (snapshot complet) — pour le live UI.
+pub type DeployLogHook = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// Buffer de logs de déploiement. Chaque `push_str` notifie le hook (si présent)
+/// pour que le serveur puisse flusher en base pendant le build.
+pub struct LogBuffer {
+    inner: String,
+    hook: Option<DeployLogHook>,
+}
+
+impl LogBuffer {
+    pub fn new(hook: Option<DeployLogHook>) -> Self {
+        Self {
+            inner: String::new(),
+            hook,
+        }
+    }
+
+    pub fn push_str(&mut self, s: &str) {
+        self.inner.push_str(s);
+        if let Some(h) = &self.hook {
+            h(&self.inner);
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.inner
+    }
+
+    pub fn into_string(self) -> String {
+        self.inner
+    }
+}
+
+impl std::fmt::Display for LogBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.inner)
+    }
+}
+
+impl AsRef<str> for LogBuffer {
+    fn as_ref(&self) -> &str {
+        &self.inner
+    }
+}
+
 fn data_dir_base() -> std::path::PathBuf {
     if let Ok(v) = std::env::var("DEVFORGE_DATA_DIR") {
         return std::path::PathBuf::from(v);
@@ -733,7 +779,16 @@ impl DeployFacade {
 
     /// Full deploy: sync git → build → start (selon build_pack).
     pub async fn deploy(&self, req: &DeployRequest) -> DeployResult {
-        let mut logs = String::new();
+        self.deploy_with_log_hook(req, None).await
+    }
+
+    /// Comme `deploy`, avec notification live des logs (flush UI pendant le build).
+    pub async fn deploy_with_log_hook(
+        &self,
+        req: &DeployRequest,
+        on_log: Option<DeployLogHook>,
+    ) -> DeployResult {
+        let mut logs = LogBuffer::new(on_log);
         let workdir = resolve_workdir(&req.workdir, &req.project_uuid);
         let server = if req.server_id.trim().is_empty() {
             "default"
@@ -759,10 +814,11 @@ impl DeployFacade {
             match self.executor.exec(server, "", &mkdir, 60).await {
                 Ok(r) => logs.push_str(&format!("[mkdir] {}\n", trim_out(&r.output))),
                 Err(e) => {
+                    logs.push_str(&format!("[error] mkdir: {e} / {fs_e}\n"));
                     return DeployResult {
                         ok: false,
                         git_sha: None,
-                        logs: format!("{logs}[error] mkdir: {e} / {fs_e}\n"),
+                        logs: logs.into_string(),
                     };
                 }
             }
@@ -803,7 +859,11 @@ impl DeployFacade {
             },
             _ => sync_cmd,
         };
-        match self.executor.exec(server, "", &sync_cmd, 600).await {
+        logs.push_str("[git] synchronisation en cours…\n");
+        match self
+            .exec_with_heartbeat(server, "", &sync_cmd, 600, &mut logs, "git")
+            .await
+        {
             Ok(r) => {
                 logs.push_str(&format!(
                     "[git] exit={} {}\n",
@@ -814,15 +874,16 @@ impl DeployFacade {
                     return DeployResult {
                         ok: false,
                         git_sha: None,
-                        logs,
+                        logs: logs.into_string(),
                     };
                 }
             }
             Err(e) => {
+                logs.push_str(&format!("[git] error: {e}\n"));
                 return DeployResult {
                     ok: false,
                     git_sha: None,
-                    logs: format!("{logs}[git] error: {e}\n"),
+                    logs: logs.into_string(),
                 };
             }
         }
@@ -852,7 +913,7 @@ impl DeployFacade {
                     return DeployResult {
                         ok: false,
                         git_sha: sha,
-                        logs,
+                        logs: logs.into_string(),
                     };
                 }
             }
@@ -916,7 +977,7 @@ impl DeployFacade {
                 return DeployResult {
                     ok: true,
                     git_sha: sha,
-                    logs,
+                    logs: logs.into_string(),
                 };
             }
             logs.push_str(
@@ -928,7 +989,7 @@ impl DeployFacade {
             return DeployResult {
                 ok: false,
                 git_sha: sha,
-                logs,
+                logs: logs.into_string(),
             };
         }
 
@@ -978,9 +1039,16 @@ impl DeployFacade {
                         .unwrap_or("/docker-compose.yaml")
                         .trim_start_matches('/');
                     let cmd = docker::docker_compose_up(compose);
+                    logs.push_str("[compose] démarrage…\n");
                     match self
-                        .executor
-                        .exec(server, &build_dir, &cmd, docker_build_timeout_secs())
+                        .exec_with_heartbeat(
+                            server,
+                            &build_dir,
+                            &cmd,
+                            docker_build_timeout_secs(),
+                            &mut logs,
+                            "compose",
+                        )
                         .await
                     {
                         Ok(r) => {
@@ -1014,9 +1082,16 @@ impl DeployFacade {
                     } else {
                         docker::docker_build_from_content(&image, &df)
                     };
+                    logs.push_str("[static-build] démarrage…\n");
                     match self
-                        .executor
-                        .exec(server, &build_dir, &cmd, docker_build_timeout_secs())
+                        .exec_with_heartbeat(
+                            server,
+                            &build_dir,
+                            &cmd,
+                            docker_build_timeout_secs(),
+                            &mut logs,
+                            "static-build",
+                        )
                         .await
                     {
                         Ok(r) => {
@@ -1085,9 +1160,16 @@ impl DeployFacade {
                         (cmd, label.to_string(), build_dir.clone())
                     };
                     logs.push_str(&format!("[dockerfile] {label}\n"));
+                    logs.push_str("[docker-build] démarrage…\n");
                     match self
-                        .executor
-                        .exec(server, &exec_cwd, &cmd, docker_build_timeout_secs())
+                        .exec_with_heartbeat(
+                            server,
+                            &exec_cwd,
+                            &cmd,
+                            docker_build_timeout_secs(),
+                            &mut logs,
+                            "docker-build",
+                        )
                         .await
                     {
                         Ok(r) => {
@@ -1132,13 +1214,15 @@ impl DeployFacade {
                             .collect::<Vec<_>>()
                             .join(",")
                     ));
+                    logs.push_str("[nixpacks-docker] build en cours…\n");
                     match self
-                        .executor
-                        .exec(
+                        .exec_with_heartbeat(
                             server,
                             &build_dir,
                             &nix,
                             docker_build_timeout_secs().max(1800),
+                            &mut logs,
+                            "nixpacks",
                         )
                         .await
                     {
@@ -1165,9 +1249,16 @@ impl DeployFacade {
                             ));
                             let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
                             logs.push_str(&format!("[fallback] {label}\n"));
+                            logs.push_str("[docker-build] démarrage…\n");
                             match self
-                                .executor
-                                .exec(server, &build_dir, &cmd, docker_build_timeout_secs())
+                                .exec_with_heartbeat(
+                                    server,
+                                    &build_dir,
+                                    &cmd,
+                                    docker_build_timeout_secs(),
+                                    &mut logs,
+                                    "docker-build",
+                                )
                                 .await
                             {
                                 Ok(r2) => {
@@ -1203,9 +1294,16 @@ impl DeployFacade {
                             logs.push_str(&format!("[nixpacks-docker] error: {e}\n"));
                             let (cmd, label) = builders::fallback_image_build_cmd(&image, port);
                             logs.push_str(&format!("[fallback] {label}\n"));
+                            logs.push_str("[docker-build] démarrage…\n");
                             match self
-                                .executor
-                                .exec(server, &build_dir, &cmd, docker_build_timeout_secs())
+                                .exec_with_heartbeat(
+                                    server,
+                                    &build_dir,
+                                    &cmd,
+                                    docker_build_timeout_secs(),
+                                    &mut logs,
+                                    "docker-build",
+                                )
                                 .await
                             {
                                 Ok(r2) => {
@@ -1257,7 +1355,37 @@ impl DeployFacade {
         DeployResult {
             ok: build_ok,
             git_sha: sha,
-            logs,
+            logs: logs.into_string(),
+        }
+    }
+
+    /// Exécute une commande longue en émettant un heartbeat dans les logs
+    /// (pour que l’UI live ne reste pas figée pendant un docker build).
+    async fn exec_with_heartbeat(
+        &self,
+        server_id: &str,
+        workdir: &str,
+        command: &str,
+        timeout_secs: u64,
+        logs: &mut LogBuffer,
+        label: &str,
+    ) -> Result<ExecResult> {
+        let fut = self.executor.exec(server_id, workdir, command, timeout_secs);
+        tokio::pin!(fut);
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        interval.tick().await; // ignore le tick immédiat
+        let started = std::time::Instant::now();
+        loop {
+            tokio::select! {
+                result = &mut fut => return result,
+                _ = interval.tick() => {
+                    logs.push_str(&format!(
+                        "[{label}] toujours en cours… ({}s)\n",
+                        started.elapsed().as_secs()
+                    ));
+                }
+            }
         }
     }
 
@@ -1288,7 +1416,7 @@ impl DeployFacade {
         name: &str,
         port: u16,
         proxy_labels: Option<&serde_json::Value>,
-        logs: &mut String,
+        logs: &mut LogBuffer,
         extras: &ContainerExtras,
     ) -> bool {
         logs.push_str(
@@ -1296,9 +1424,16 @@ impl DeployFacade {
         );
         let df = docker::nitro_node_dockerfile(port);
         let cmd = docker::docker_build_from_content(image, &df);
+        logs.push_str("[nitro-build] démarrage…\n");
         match self
-            .executor
-            .exec(server, build_dir, &cmd, docker_build_timeout_secs())
+            .exec_with_heartbeat(
+                server,
+                build_dir,
+                &cmd,
+                docker_build_timeout_secs(),
+                logs,
+                "nitro-build",
+            )
             .await
         {
             Ok(r) => {
@@ -1331,7 +1466,7 @@ impl DeployFacade {
         }
     }
 
-    async fn probe_docker(&self, server: &str, logs: &mut String) -> bool {
+    async fn probe_docker(&self, server: &str, logs: &mut LogBuffer) -> bool {
         let cmd = if cfg!(windows) {
             r#"
 $ErrorActionPreference = 'Stop'
@@ -1373,7 +1508,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         server: &str,
         build_dir: &str,
         port: u16,
-        logs: &mut String,
+        logs: &mut LogBuffer,
     ) -> bool {
         let pkg = std::path::Path::new(build_dir).join("package.json");
         if !pkg.is_file() {
@@ -1464,7 +1599,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         host_port: u16,
         container_port: u16,
         proxy_labels: Option<&serde_json::Value>,
-        logs: &mut String,
+        logs: &mut LogBuffer,
         extras: &ContainerExtras,
     ) -> bool {
         // BLUE/GREEN DEPLOY STRATEGY:
@@ -1878,7 +2013,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         app_name: &str,
         network: &str,
         extras: &ContainerExtras,
-        logs: &mut String,
+        logs: &mut LogBuffer,
     ) -> bool {
         if extras.runtime.sidecars.is_empty() {
             return true;
@@ -1947,7 +2082,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         container: &str,
         network: Option<&str>,
         port: u16,
-        logs: &mut String,
+        logs: &mut LogBuffer,
     ) -> bool {
         use docker::ReadyProbe;
         let Some(probe) = network.and_then(|n| docker::docker_http_probe(container, n, port, "/"))
@@ -2045,7 +2180,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         server: &str,
         workdir: &str,
         name: &str,
-        logs: &mut String,
+        logs: &mut LogBuffer,
     ) -> bool {
         let status_cmd = format!("docker inspect {} --format '{{{{.State.Status}}}}'", name);
         let status = self.executor.exec(server, workdir, &status_cmd, 10).await;
@@ -2344,6 +2479,27 @@ mod runtime_logs_tests {
         let cmd = docker::docker_runtime_logs("devforge-abc", 5000);
         assert!(cmd.contains("--tail 1000"));
         assert!(cmd.contains("devforge-abc"));
+    }
+}
+
+#[cfg(test)]
+mod log_buffer_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[test]
+    fn hook_receives_snapshots_on_each_append() {
+        let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen2 = seen.clone();
+        let hook: DeployLogHook = Arc::new(move |s: &str| {
+            seen2.lock().unwrap().push(s.to_string());
+        });
+        let mut buf = LogBuffer::new(Some(hook));
+        buf.push_str("a\n");
+        buf.push_str("b\n");
+        let snaps = seen.lock().unwrap().clone();
+        assert_eq!(snaps, vec!["a\n".to_string(), "a\nb\n".to_string()]);
+        assert_eq!(buf.into_string(), "a\nb\n");
     }
 }
 
