@@ -25,6 +25,10 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/cursor-worker/status", get(status))
         .route("/api/v1/cursor-worker/install", post(install))
+        .route(
+            "/api/v1/cursor-worker/login",
+            get(login_status).post(login_start),
+        )
         .route("/api/v1/cursor-worker/start", post(start))
         .route("/api/v1/cursor-worker/stop", post(stop))
         .route("/api/v1/cursor-worker/restart", post(restart))
@@ -362,16 +366,21 @@ async fn install(
             ));
         }
     }
-    let Some((api_key, _)) = cursor_worker::effective_api_key(&settings) else {
+    // Sans clé : session `cursor-agent login` (leader uniquement).
+    let api_key = cursor_worker::effective_api_key(&settings).map(|(k, _)| k);
+    let logged_in = api_key.is_none()
+        && cursor_worker::resolve_agent_binary(&settings)
+            .is_some_and(|b| cursor_worker::is_logged_in(&b));
+    if api_key.is_none() && !logged_in {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({
                 "ok": false,
                 "code": "api_key_required",
-                "error": "Clé API Cursor requise (Cursor → Dashboard → API Keys, clé personnelle).",
+                "error": "Connecte-toi avec Cursor (bouton « Se connecter avec Cursor ») ou colle une clé API Cursor.",
             })),
         ));
-    };
+    }
 
     // 2. Nœud : leader par défaut.
     let nodes = worker_nodes(&state).await;
@@ -385,6 +394,12 @@ async fn install(
         .ok_or_else(|| map_err("Aucun nœud disponible".into()))?;
     if !node.online {
         return Err(map_err(format!("Nœud {} hors ligne", node.name)));
+    }
+    if api_key.is_none() && !node.leader {
+        return Err(map_err(
+            "La connexion Cursor (sans clé) ne marche que sur ce serveur : choisis-le ou colle une clé."
+                .into(),
+        ));
     }
     let previous_node = settings.node_id.clone();
     settings.node_id = node.id.clone();
@@ -409,7 +424,15 @@ async fn install(
     let result = if node.leader {
         install_leader(&state, &settings, &name, &mut steps).await
     } else {
-        install_remote(&state, &settings, &node, &name, &api_key, &mut steps).await
+        install_remote(
+            &state,
+            &settings,
+            &node,
+            &name,
+            api_key.as_deref().unwrap_or_default(),
+            &mut steps,
+        )
+        .await
     };
     let ok = result.is_ok();
     let key_invalid = match &result {
@@ -931,4 +954,45 @@ mod tests {
         assert!(verify_step(&mut steps, true, true, "").is_ok());
         assert_eq!(steps[0]["detail"], "Connecté à Cursor");
     }
+}
+
+// ───────────────────────── Connexion Cursor (sans clé) ─────────────────────────
+
+/// Démarre `cursor-agent login` sur ce serveur (installe le CLI si besoin) et
+/// renvoie l'URL à ouvrir. La clé enregistrée est effacée : la connexion la
+/// remplace (une clé invalide ne doit pas reprendre la main).
+async fn login_start(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiErr> {
+    require_admin(&state, &headers).await?;
+    let settings = cursor_worker::load_settings(&state.pool).await;
+    let bin = match cursor_worker::resolve_agent_binary(&settings) {
+        Some(b) => b,
+        None => {
+            cursor_worker::install_cli_local().await.map_err(map_err)?;
+            cursor_worker::resolve_agent_binary(&settings)
+                .ok_or_else(|| map_err("CLI Cursor introuvable après installation".into()))?
+        }
+    };
+    let url = tokio::task::spawn_blocking(move || cursor_worker::login_start(&bin))
+        .await
+        .map_err(|e| map_err(e.to_string()))?
+        .map_err(map_err)?;
+    save_columns(&state, settings.enabled, "", "").await?;
+    cursor_worker::clear_logs_if_stopped();
+    Ok(Json(json!({ "ok": true, "url": url, "pending": true })))
+}
+
+async fn login_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiErr> {
+    require_admin(&state, &headers).await?;
+    let settings = cursor_worker::load_settings(&state.pool).await;
+    let bin = cursor_worker::resolve_agent_binary(&settings);
+    let v = tokio::task::spawn_blocking(move || cursor_worker::login_state(bin.as_deref()))
+        .await
+        .map_err(|e| map_err(e.to_string()))?;
+    Ok(Json(v))
 }

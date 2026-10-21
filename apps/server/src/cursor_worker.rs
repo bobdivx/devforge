@@ -97,8 +97,16 @@ pub fn managed_home() -> PathBuf {
 }
 
 /// Binaire `agent` installé par DevForge.
+///
+/// `cursor-agent` d'abord : `agent` peut être écrasé par un autre CLI du
+/// même nom (collision connue), `cursor-agent` pointe toujours vers Cursor.
 pub fn managed_binary() -> PathBuf {
-    managed_home().join(".local").join("bin").join("agent")
+    let bin = managed_home().join(".local").join("bin");
+    let preferred = bin.join("cursor-agent");
+    if preferred.is_file() {
+        return preferred;
+    }
+    bin.join("agent")
 }
 
 /// Dossier vide servi quand aucun checkout Git n'existe encore.
@@ -821,12 +829,14 @@ pub fn start_named(
     if is_running() {
         return Err("Worker déjà en cours — arrête-le avant de relancer.".into());
     }
-    let Some((api_key, _)) = effective_api_key(settings) else {
+    // Clé API si enregistrée, sinon session `cursor-agent login` (HOME géré).
+    let api_key = effective_api_key(settings).map(|(k, _)| k);
+    if api_key.is_none() && !is_logged_in(bin) {
         return Err(
-            "Clé API Cursor manquante. Dashboard Cursor → API Keys (clé personnelle), puis enregistre-la ici."
+            "Ni clé API Cursor ni connexion Cursor : utilise « Se connecter avec Cursor » ou colle une clé."
                 .into(),
         );
-    };
+    }
     ensure_state_dir()?;
     let workdirs = workdirs_or_fallback(workdirs);
     let args = build_worker_args(name, &workdirs)?;
@@ -835,10 +845,19 @@ pub fn start_named(
 
     let mut cmd = Command::new(bin);
     cmd.args(&args)
-        .env("CURSOR_API_KEY", &api_key)
         .stdin(Stdio::null())
         .stdout(Stdio::from(out))
         .stderr(Stdio::from(err));
+    match &api_key {
+        Some(k) => {
+            cmd.env("CURSOR_API_KEY", k);
+        }
+        None => {
+            // Session de connexion : jamais une clé héritée de l'environnement.
+            cmd.env_remove("CURSOR_API_KEY");
+            cmd.env("HOME", managed_home());
+        }
+    }
     if bin.starts_with(managed_home()) {
         // Config / sessions du CLI dans le volume persistant.
         cmd.env("HOME", managed_home());
@@ -921,6 +940,11 @@ pub async fn status_json(pool: &PgPool, node_name: &str) -> Result<Value, String
         String::new()
     };
     let key_invalid = key.is_some() && logs_show_invalid_key(&logs);
+    // Session `cursor-agent login` (utilisée quand aucune clé n'est enregistrée).
+    let logged_in = key.is_none() && bin.as_deref().is_some_and(is_logged_in);
+    let key_unsupported = key
+        .as_ref()
+        .is_some_and(|(k, _)| key_unsupported_by_worker(k));
 
     Ok(json!({
         "ok": true,
@@ -949,18 +973,162 @@ pub async fn status_json(pool: &PgPool, node_name: &str) -> Result<Value, String
         "registered_paths": load_registered(),
         "env_key_present": env_key_present(),
         "key_invalid": key_invalid,
+        "key_unsupported": key_unsupported,
+        "logged_in": logged_in,
+        "auth": if key.is_some() { "key" } else if logged_in { "login" } else { "none" },
         "logs_tail": logs,
-        "hint": if key_invalid {
+        "hint": if key_invalid && key_unsupported {
+            GROK_KEY_HINT
+        } else if key_invalid {
             INVALID_KEY_HINT
         } else {
-            status_hint(bin.is_some(), key.is_some(), running, ready)
+            status_hint(bin.is_some(), key.is_some() || logged_in, running, ready)
         },
     }))
 }
 
+// ───────────────────────── Connexion Cursor (login) ─────────────────────────
+
+fn login_out_path() -> PathBuf {
+    state_dir().join("login.out")
+}
+
+fn login_pid_path() -> PathBuf {
+    state_dir().join("login.pid")
+}
+
+/// Sortie de `cursor-agent status` → connecté ?
+pub fn parse_logged_in(status_out: &str) -> bool {
+    let l = strip_ansi(status_out).to_lowercase();
+    if l.contains("not logged in") || l.contains("not authenticated") {
+        return false;
+    }
+    l.contains("logged in") || l.contains("authenticated")
+}
+
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for n in chars.by_ref() {
+                    if n.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// URL de connexion affichée par `cursor-agent login` (NO_OPEN_BROWSER).
+pub fn parse_login_url(out: &str) -> Option<String> {
+    strip_ansi(out)
+        .split_whitespace()
+        .find(|w| w.starts_with("https://cursor.com/") || w.starts_with("https://www.cursor.com/"))
+        .map(|w| w.trim_end_matches(['.', ',', ')']).to_string())
+}
+
+/// Session CLI valide dans le HOME géré (`cursor-agent status`, sans clé).
+pub fn is_logged_in(bin: &Path) -> bool {
+    let out = Command::new(bin)
+        .arg("status")
+        .env("HOME", managed_home())
+        .env("NO_OPEN_BROWSER", "1")
+        .env_remove("CURSOR_API_KEY")
+        .stdin(Stdio::null())
+        .output();
+    match out {
+        Ok(o) => parse_logged_in(&format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        )),
+        Err(_) => false,
+    }
+}
+
+fn login_pending_pid() -> Option<u32> {
+    let raw = std::fs::read_to_string(login_pid_path()).ok()?;
+    let pid: u32 = raw.trim().parse().ok()?;
+    pid_is_alive(pid).then_some(pid)
+}
+
+/// Lance `cursor-agent login` (sans navigateur) et renvoie l'URL à ouvrir.
+/// Le process attend la validation dans le navigateur puis enregistre la
+/// session dans [`managed_home`].
+pub fn login_start(bin: &Path) -> Result<String, String> {
+    ensure_state_dir()?;
+    std::fs::create_dir_all(managed_home()).map_err(|e| e.to_string())?;
+    if let Some(pid) = login_pending_pid() {
+        let _ = kill_pid(pid);
+    }
+    let out = std::fs::File::create(login_out_path()).map_err(|e| e.to_string())?;
+    let err = out.try_clone().map_err(|e| e.to_string())?;
+    let child = Command::new(bin)
+        .arg("login")
+        .env("HOME", managed_home())
+        .env("NO_OPEN_BROWSER", "1")
+        .env_remove("CURSOR_API_KEY")
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(out))
+        .stderr(Stdio::from(err))
+        .spawn()
+        .map_err(|e| format!("Échec `cursor-agent login` : {e}"))?;
+    let pid = child.id();
+    std::fs::write(login_pid_path(), pid.to_string()).map_err(|e| e.to_string())?;
+    let _ = std::thread::Builder::new()
+        .name("cursor-login-reap".into())
+        .spawn(move || {
+            let mut child = child;
+            let _ = child.wait();
+        });
+    for _ in 0..40 {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let raw = std::fs::read_to_string(login_out_path()).unwrap_or_default();
+        if let Some(url) = parse_login_url(&raw) {
+            return Ok(url);
+        }
+        if !pid_is_alive(pid) {
+            return Err(format!(
+                "`cursor-agent login` s'est arrêté.\n{}",
+                tail_lines(&strip_ansi(&raw), 10)
+            ));
+        }
+    }
+    Err("`cursor-agent login` n'a pas donné d'URL de connexion (10 s).".into())
+}
+
+/// État de la connexion : (en attente, URL, connecté).
+pub fn login_state(bin: Option<&Path>) -> Value {
+    let pending = login_pending_pid().is_some();
+    let raw = std::fs::read_to_string(login_out_path()).unwrap_or_default();
+    let logged_in = bin.is_some_and(is_logged_in);
+    json!({
+        "pending": pending && !logged_in,
+        "url": if pending { parse_login_url(&raw) } else { None },
+        "logged_in": logged_in,
+    })
+}
+
+/// Les clés `grok_` (nouvelles clés à permissions) ne sont pas encore
+/// acceptées par la validation du worker côté Cursor (bug connu, oct. 2026).
+pub fn key_unsupported_by_worker(key: &str) -> bool {
+    key.trim().starts_with("grok_")
+}
+
+/// Clé `grok_` refusée par le worker.
+pub const GROK_KEY_HINT: &str =
+    "Les clés grok_ ne sont pas encore acceptées par le worker Cursor : utilise « Se connecter avec Cursor ».";
+
 /// Message affiché quand Cursor a refusé la clé.
 pub const INVALID_KEY_HINT: &str =
-    "Cursor a refusé la clé API. Colle une clé Cursor (cursor.com/dashboard → API Keys) puis réinstalle.";
+    "Cursor a refusé la clé API. Utilise « Se connecter avec Cursor » ou colle une autre clé Cursor.";
 
 /// Phrase d'état unique (sans commande à taper).
 pub fn status_hint(cli: bool, key: bool, running: bool, ready: Option<bool>) -> &'static str {

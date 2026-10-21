@@ -241,5 +241,59 @@ fn detects_invalid_key_in_worker_logs() {
 
 #[test]
 fn invalid_key_hint_points_to_cursor_dashboard() {
-    assert!(INVALID_KEY_HINT.contains("cursor.com/dashboard"));
+    assert!(INVALID_KEY_HINT.contains("Se connecter avec Cursor"));
+    assert!(GROK_KEY_HINT.contains("grok_"));
+}
+
+#[test]
+fn login_status_parsing() {
+    assert!(!parse_logged_in("Not logged in\n"));
+    assert!(!parse_logged_in("\u{1b}[31mNot logged in\u{1b}[0m"));
+    assert!(parse_logged_in(
+        "\u{1b}[32m✓\u{1b}[0m Logged in as someone@example.com"
+    ));
+    assert!(!parse_logged_in(""));
+}
+
+#[test]
+fn login_url_parsing() {
+    let out = "Starting login process...\nWaiting for browser authentication...\nOpen a browser and navigate to this link: https://cursor.com/loginDeepControl?challenge=abc&uuid=def&mode=login&redirectTarget=cli\n";
+    assert_eq!(
+        parse_login_url(out).as_deref(),
+        Some("https://cursor.com/loginDeepControl?challenge=abc&uuid=def&mode=login&redirectTarget=cli")
+    );
+    assert_eq!(parse_login_url("no url here"), None);
+    assert_eq!(parse_login_url("see https://evil.example.com/x"), None);
+}
+
+#[test]
+fn grok_keys_flagged_for_worker() {
+    assert!(key_unsupported_by_worker("grok_0123_abcd"));
+    assert!(!key_unsupported_by_worker("crsr_0123456789abcdef"));
+    // grok_ n'est pas rejeté (Cursor pourra le corriger), seulement signalé.
+    assert!(validate_api_key("grok_0123456789abcdef0123456789abcdef_x").is_ok());
+}
+
+/// Démarrage sans clé : exige une session `login` (faux CLI « Not logged in »).
+#[cfg(target_os = "linux")]
+#[test]
+fn start_without_key_requires_login() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("cw-login-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let fake = dir.join("cursor-agent");
+    std::fs::write(
+        &fake,
+        "#!/bin/sh\n[ \"$1\" = status ] && echo 'Not logged in'\nexit 0\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(!is_logged_in(&fake));
+    std::fs::write(
+        &fake,
+        "#!/bin/sh\n[ \"$1\" = status ] && echo 'Logged in as me@example.com'\nexit 0\n",
+    )
+    .unwrap();
+    assert!(is_logged_in(&fake));
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { cursorKeyProblem, installNeeds, workerSummary } from './CursorWorkerSettingsPanel';
+import {
+  cursorKeyProblem,
+  cursorKeyWarning,
+  installNeeds,
+  workerSummary,
+} from './CursorWorkerSettingsPanel';
 
 const base = {
   running: false,
@@ -17,7 +22,10 @@ describe('workerSummary', () => {
   });
   it('reports running / connecting / stopped', () => {
     const ok = { ...base, cli_installed: true, api_key_set: true };
-    expect(workerSummary({ ...ok, running: true, ready: true })).toMatchObject({ label: 'ON', tone: 'ok' });
+    expect(workerSummary({ ...ok, running: true, ready: true })).toMatchObject({
+      label: 'ON',
+      tone: 'ok',
+    });
     expect(workerSummary({ ...ok, running: true, ready: false })).toMatchObject({ tone: 'accent' });
     expect(workerSummary(ok)).toMatchObject({ label: 'Off', installed: true });
   });
@@ -48,5 +56,29 @@ describe('invalid / foreign keys', () => {
     expect(cursorKeyProblem('short')).toMatch(/trop courte/);
     expect(cursorKeyProblem('key_0123456789abcdef')).toBeNull();
     expect(cursorKeyProblem('')).toBeNull();
+  });
+});
+
+describe('Cursor login (no key)', () => {
+  it('does not require a key once logged in', () => {
+    expect(installNeeds({ api_key_set: false, logged_in: true })).toEqual([]);
+    const s = { ...base, cli_installed: true, logged_in: true };
+    expect(workerSummary(s)).toMatchObject({ label: 'Off', installed: true });
+  });
+  it('warns (without blocking) about grok_ keys', () => {
+    const k = 'grok_' + 'a'.repeat(32) + '_' + 'b'.repeat(64);
+    expect(cursorKeyProblem(k)).toBeNull();
+    expect(cursorKeyWarning(k)).toMatch(/Se connecter avec Cursor/);
+    expect(cursorKeyWarning('crsr_0123456789abcdef')).toBeNull();
+  });
+  it('points a refused grok_ key to the login', () => {
+    const s = {
+      ...base,
+      cli_installed: true,
+      api_key_set: true,
+      key_invalid: true,
+      key_unsupported: true,
+    };
+    expect(workerSummary(s).detail).toMatch(/grok_/);
   });
 });
