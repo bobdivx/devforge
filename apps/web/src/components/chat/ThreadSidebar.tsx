@@ -30,6 +30,7 @@ export function ThreadSidebar({ rows, selected, onSelect, error, creating, busy,
             <li key={a.uuid}>
               <button
                 type="button"
+                aria-current={on ? 'true' : undefined}
                 class={cn(
                   'flex w-full items-start gap-2 rounded-xl py-2.5 text-left transition',
                   depth > 0 ? 'pl-7 pr-3' : 'px-3',
@@ -71,6 +72,7 @@ export function TeamSidebar({ rows, selected, onSelect, error, loading }: Props 
             <li key={a.uuid}>
               <button
                 type="button"
+                aria-current={on ? 'true' : undefined}
                 class={cn(
                   'flex w-full flex-col rounded-xl py-2.5 text-left transition',
                   depth > 0 ? 'pl-7 pr-3' : 'px-3',
