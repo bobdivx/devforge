@@ -1487,6 +1487,9 @@ pub(crate) async fn run_real_deploy_at(
     deployment_uuid: &str,
     pin_sha: Option<&str>,
 ) -> DeployRunOutcome {
+    // Le déploiement fait un `reset --hard` du checkout : le brouillon en cours est
+    // d'abord sauvegardé, pour les déploiements manuels comme automatiques.
+    crate::auto_deploy_guard::backup_draft_before_reset(state, project, "deploy").await;
     let gh_lifecycle = crate::github_checks::begin(state, project, deployment_uuid, pin_sha);
     let run = run_real_deploy_inner(
         state,

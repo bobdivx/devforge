@@ -32,6 +32,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/cursor-worker/start", post(start))
         .route("/api/v1/cursor-worker/stop", post(stop))
         .route("/api/v1/cursor-worker/restart", post(restart))
+        .route("/api/v1/cursor-worker/refresh", post(refresh))
         .route(
             "/api/v1/cursor-worker/settings",
             get(get_settings).patch(patch_settings),
@@ -183,21 +184,26 @@ async fn exec_on(
     Ok(output)
 }
 
-/// Chemins candidats (projets + extra) pour un nœud distant : l'existence
-/// de `.git` est vérifiée sur place par le script.
-async fn remote_candidates(state: &AppState, settings: &WorkerSettings) -> Vec<String> {
-    let mut out: Vec<String> = cursor_worker::list_project_workdirs(&state.pool)
+/// Candidats pour un nœud distant : (checkout, branche de prod) par projet,
+/// puis les dossiers extra. L'existence de `.git` et le worktree `-cursor`
+/// sont vérifiés / créés sur place par le script.
+async fn remote_candidates(
+    state: &AppState,
+    settings: &WorkerSettings,
+) -> (Vec<(String, String)>, Vec<String>) {
+    let projects: Vec<(String, String)> = cursor_worker::list_project_workdirs(&state.pool)
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|d| d.path)
+        .map(|d| (d.source_path, d.branch))
         .collect();
+    let mut extras: Vec<String> = Vec::new();
     for extra in cursor_worker::parse_extra_dirs(&settings.extra_dirs) {
-        if !out.contains(&extra) {
-            out.push(extra);
+        if !projects.iter().any(|(p, _)| p == &extra) && !extras.contains(&extra) {
+            extras.push(extra);
         }
     }
-    out
+    (projects, extras)
 }
 
 // ───────────────────────── Statut ─────────────────────────
@@ -505,12 +511,11 @@ async fn install_leader(
     let dirs = cursor_worker::list_project_workdirs(&state.pool)
         .await
         .unwrap_or_default();
-    let paths = cursor_worker::eligible_paths(&dirs, &settings.extra_dirs);
     let s2 = settings.clone();
     let n2 = name.to_string();
     let b2 = bin.clone();
     let started =
-        tokio::task::spawn_blocking(move || cursor_worker::restart_named(&s2, &b2, &n2, &paths))
+        tokio::task::spawn_blocking(move || cursor_worker::restart_with_dirs(&s2, &b2, &n2, &dirs))
             .await
             .map_err(|e| e.to_string())
             .and_then(|r| r);
@@ -609,8 +614,8 @@ async fn install_remote(
             return Err(e);
         }
     }
-    let candidates = remote_candidates(state, settings).await;
-    let script = cursor_worker::start_script(&base, name, &candidates, api_key);
+    let (projects, extras) = remote_candidates(state, settings).await;
+    let script = cursor_worker::start_script(&base, name, &projects, &extras, api_key);
     match exec_on(state, node, &script, 60).await {
         Ok(out) => {
             let rep = cursor_worker::parse_script_output(&out);
@@ -666,21 +671,20 @@ async fn start_on(
             "CLI Cursor absent : utilise « Installer le worker Cursor ».".to_string()
         })?;
         let dirs = cursor_worker::list_project_workdirs(&state.pool).await?;
-        let paths = cursor_worker::eligible_paths(&dirs, &settings.extra_dirs);
         let s2 = settings.clone();
         return tokio::task::spawn_blocking(move || {
-            cursor_worker::restart_named(&s2, &bin, &name, &paths)
+            cursor_worker::restart_with_dirs(&s2, &bin, &name, &dirs)
         })
         .await
         .map_err(|e| e.to_string())?;
     }
     let (key, _) = cursor_worker::effective_api_key(settings)
         .ok_or_else(|| "Clé API Cursor manquante.".to_string())?;
-    let candidates = remote_candidates(state, settings).await;
+    let (projects, extras) = remote_candidates(state, settings).await;
     let out = exec_on(
         state,
         node,
-        &cursor_worker::start_script(&ScriptBase::NodeDataDir, &name, &candidates, &key),
+        &cursor_worker::start_script(&ScriptBase::NodeDataDir, &name, &projects, &extras, &key),
         60,
     )
     .await?;
@@ -691,6 +695,8 @@ async fn start_on(
         "pid": rep.pid,
         "name": name,
         "machine_names": rep.names,
+        "workdirs": rep.dirs,
+        "worktree_errors": rep.worktree_errors,
         "workdirs_count": rep.dirs.len(),
         "message": format!("Worker « {name} » démarré sur {}", node.name),
     }))
@@ -730,6 +736,69 @@ async fn restart(State(state): State<AppState>, headers: HeaderMap) -> Result<Js
         .await
         .map(Json)
         .map_err(map_err)
+}
+
+/// « Remettre à jour » : chaque worktree `-cursor` repart de `origin/<branche>`
+/// (changements non publiés sauvegardés d'abord). Leader uniquement.
+async fn refresh(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Value>, ApiErr> {
+    require_admin(&state, &headers).await?;
+    let (_, node) = target(&state).await?;
+    if !node.leader {
+        return Err(map_err(
+            "« Remettre à jour » est disponible quand le worker tourne sur ce serveur.".into(),
+        ));
+    }
+    let dirs = cursor_worker::list_project_workdirs(&state.pool)
+        .await
+        .map_err(map_err)?;
+    let data = std::path::PathBuf::from(
+        std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/data".into()),
+    );
+    let results = tokio::task::spawn_blocking(move || {
+        dirs.iter()
+            .filter(|d| d.eligible && d.worktree_ready)
+            .map(|d| {
+                // Sauvegardes à part du brouillon du projet (jamais restaurées dans le checkout).
+                let root = crate::draft::backups_root(
+                    &data,
+                    &format!(
+                        "{}{}",
+                        d.project_uuid,
+                        cursor_worker::CURSOR_WORKTREE_SUFFIX
+                    ),
+                );
+                let r = cursor_worker::refresh_cursor_worktree(
+                    std::path::Path::new(&d.path),
+                    &d.branch,
+                    &root,
+                );
+                json!({
+                    "project": d.project_name,
+                    "path": d.path,
+                    "ok": r.is_ok(),
+                    "backup": r.as_ref().ok().cloned().flatten(),
+                    "error": r.err(),
+                })
+            })
+            .collect::<Vec<Value>>()
+    })
+    .await
+    .map_err(|e| map_err(e.to_string()))?;
+    let ok = results.iter().filter(|r| r["ok"] == true).count();
+    let saved = results.iter().filter(|r| !r["backup"].is_null()).count();
+    Ok(Json(json!({
+        "ok": ok == results.len(),
+        "results": results,
+        "message": format!(
+            "{ok}/{} dossier(s) remis à jour{}",
+            results.len(),
+            if saved > 0 {
+                format!(" · {saved} sauvegarde(s) des changements en cours")
+            } else {
+                String::new()
+            }
+        ),
+    })))
 }
 
 async fn stop(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Value>, ApiErr> {
