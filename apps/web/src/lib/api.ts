@@ -116,6 +116,98 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return res.json() as Promise<T>;
 }
+export type CursorWorkerNode = {
+  id: string;
+  name: string;
+  leader: boolean;
+  online: boolean;
+};
+
+export type CursorWorkerStatus = {
+  ok: boolean;
+  running: boolean;
+  /** Sonde /readyz du worker (connecté à Cursor). */
+  ready?: boolean | null;
+  pid?: number | null;
+  name: string;
+  cli_installed: boolean;
+  cli_managed?: boolean;
+  cli_path?: string | null;
+  cli_version?: string | null;
+  api_key_set: boolean;
+  api_key_source?: 'settings' | 'env' | null;
+  api_key_masked?: string | null;
+  /** Une variable CURSOR_API_KEY existe côté serveur (jamais la valeur). */
+  env_key_present?: boolean;
+  /** Cursor a refusé la clé (logs du worker). */
+  key_invalid?: boolean;
+  /** Clé grok_ : pas encore acceptée par le worker Cursor. */
+  key_unsupported?: boolean;
+  /** Session `cursor-agent login` active (utilisée sans clé). */
+  logged_in?: boolean;
+  auth?: 'key' | 'login' | 'none';
+  enabled: boolean;
+  node?: CursorWorkerNode;
+  node_missing?: boolean;
+  node_error?: string | null;
+  nodes?: CursorWorkerNode[];
+  settings: {
+    name: string;
+    binary: string;
+    extra_dirs: string;
+    enabled: boolean;
+    node_id?: string;
+  };
+  workdirs: Array<{
+    project_uuid: string;
+    project_name: string;
+    /** Dossier servi : worktree `<workdir>-cursor` (jamais le checkout de déploiement). */
+    path: string;
+    /** Checkout du projet (remis à `origin/<branche>` par les déploiements). */
+    source_path?: string;
+    branch?: string;
+    exists: boolean;
+    has_git: boolean;
+    /** Le worktree `-cursor` existe (sinon créé au démarrage). */
+    worktree_ready?: boolean;
+    git_remote?: string | null;
+    eligible: boolean;
+    note?: string | null;
+  }>;
+  /** null pour un nœud distant (compté au démarrage). */
+  eligible_count: number | null;
+  eligible_paths?: string[];
+  registered_paths?: string[];
+  /** Process actifs (un par dépôt servi) ; null si le worker est arrêté. */
+  repos_up?: number | null;
+  /** Un process et une machine Cursor (`<nom>-<dépôt>`) par dépôt servi. */
+  repo_workers?: Array<{
+    path: string;
+    name?: string | null;
+    primary: boolean;
+    running: boolean;
+    pid: number | null;
+  }>;
+  logs_tail: string;
+  hint: string;
+};
+
+export type CursorWorkerInstallStep = {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+};
+
+export type CursorWorkerInstallResult = {
+  ok: boolean;
+  key_invalid?: boolean;
+  name: string;
+  node: CursorWorkerNode;
+  steps: CursorWorkerInstallStep[];
+  message: string;
+};
+
 /** Mémoire durable des agents (P3). */
 export type MemoryScope = 'user' | 'project' | 'agent';
 export type MemoryTier = 'profile' | 'log' | 'note';
@@ -352,6 +444,8 @@ export type Deployment = {
   error_hint?: string | null;
   /** `production` (défaut) ou `dev`. */
   environment?: string | null;
+  /** Échec acquitté (badge Échec ignoré) — ISO ou timestamp texte. */
+  dismissed_at?: string | null;
   created_at?: string;
 };
 
@@ -863,6 +957,18 @@ export const api = {
     request<{ data: Deployment; ok?: boolean; cancelled?: boolean }>(
       `/deployments/${uuid}/cancel`,
       { method: 'POST', body: '{}' },
+    ),
+  /** Acquitte un échec : retire le badge Échec si une version live existe. */
+  dismissDeployment: (uuid: string) =>
+    request<{ data: Deployment; ok?: boolean; dismissed?: boolean; project_status?: string }>(
+      `/deployments/${uuid}/dismiss`,
+      { method: 'POST', body: '{}' },
+    ),
+  /** Retire une ligne d’historique (pas le conteneur ni GitHub). */
+  deleteDeployment: (uuid: string) =>
+    request<{ ok?: boolean; deleted?: boolean; uuid?: string; project_status?: string }>(
+      `/deployments/${uuid}`,
+      { method: 'DELETE' },
     ),
   projectAgents: (projectUuid: string) =>
     request<{ data: ProjectAgent[] }>(`/projects/${projectUuid}/agents`),
@@ -1831,6 +1937,94 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  cursorWorkerStatus: () => request<CursorWorkerStatus>('/cursor-worker/status'),
+  /** Installation 1 clic : CLI + démarrage + vérification sur le nœud choisi. */
+  cursorWorkerInstall: (body: { api_key?: string; node_id?: string }) =>
+    request<CursorWorkerInstallResult>('/cursor-worker/install', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  /** Connexion Cursor sans clé : lance `cursor-agent login`, renvoie l’URL à ouvrir. */
+  cursorWorkerLoginStart: () =>
+    request<{ ok: boolean; url: string; pending: boolean }>('/cursor-worker/login', {
+      method: 'POST',
+      body: '{}',
+    }),
+  cursorWorkerLoginStatus: () =>
+    request<{ pending: boolean; url?: string | null; logged_in: boolean }>('/cursor-worker/login'),
+  cursorWorkerStart: () =>
+    request<{
+      ok: boolean;
+      running: boolean;
+      pid?: number;
+      name?: string;
+      workdirs_count?: number;
+      message?: string;
+      error?: string;
+    }>('/cursor-worker/start', { method: 'POST', body: '{}' }),
+  cursorWorkerStop: () =>
+    request<{
+      ok: boolean;
+      running: boolean;
+      message?: string;
+      error?: string;
+    }>('/cursor-worker/stop', { method: 'POST', body: '{}' }),
+  cursorWorkerRestart: () =>
+    request<{
+      ok: boolean;
+      running: boolean;
+      pid?: number;
+      name?: string;
+      workdirs_count?: number;
+      message?: string;
+      error?: string;
+    }>('/cursor-worker/restart', { method: 'POST', body: '{}' }),
+  /** « Remettre à jour » : worktrees `-cursor` sur `origin/<branche>` (sauvegarde d'abord). */
+  cursorWorkerRefresh: () =>
+    request<{
+      ok: boolean;
+      message?: string;
+      results: Array<{
+        project: string;
+        path: string;
+        ok: boolean;
+        backup?: string | null;
+        error?: string | null;
+      }>;
+    }>('/cursor-worker/refresh', { method: 'POST', body: '{}' }),
+  cursorWorkerSettings: () =>
+    request<{
+      ok: boolean;
+      enabled: boolean;
+      name: string;
+      binary: string;
+      extra_dirs: string;
+      resolved_name: string;
+      api_key_set: boolean;
+      api_key_masked?: string | null;
+    }>('/cursor-worker/settings'),
+  cursorWorkerPatchSettings: (body: {
+    enabled?: boolean;
+    name?: string;
+    binary?: string;
+    extra_dirs?: string;
+    node_id?: string;
+    api_key?: string;
+  }) =>
+    request<{
+      ok: boolean;
+      enabled: boolean;
+      name: string;
+      binary: string;
+      extra_dirs: string;
+      resolved_name: string;
+      api_key_set: boolean;
+      api_key_masked?: string | null;
+    }>('/cursor-worker/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+
   ssoGet: () =>
     request<{
       ok: boolean;
@@ -1899,6 +2093,24 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
+
+  dockerGcGet: () => request<DockerGcState>('/admin/docker-gc'),
+  dockerGcSave: (settings: DockerGcSettings) =>
+    request<DockerGcState & { ok: boolean }>('/admin/docker-gc', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    }),
+  dockerGcNodes: () =>
+    request<{ nodes: DockerGcNodeDisk[]; alert_percent: number }>('/admin/docker-gc/nodes'),
+  dockerGcPreview: () =>
+    request<DockerGcPreview>('/admin/docker-gc/preview', { method: 'POST', body: '{}' }),
+  dockerGcRun: () =>
+    request<{ ok: boolean; started: boolean }>('/admin/docker-gc/run', {
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+    }),
+  dockerGcRuns: (limit = 50) =>
+    request<{ runs: DockerGcRun[] }>(`/admin/docker-gc/runs?limit=${limit}`),
 
   acmeSettings: () =>
     request<AcmeSettings>('/settings/acme'),
@@ -2813,3 +3025,96 @@ export type AppReposResponse = {
   refresh_error?: string | null;
 };
 export type ProjectGithubLink = { ok: boolean; linked: boolean; lost: boolean; installation_id?: number; repo_id?: number | null };
+
+export type DockerGcSettings = {
+  enabled: boolean;
+  frequency_hours: number;
+  hour: number;
+  cron: string | null;
+  timezone: string;
+  retention_hours: number;
+  keep_per_project: number;
+  disk_alert_percent: number;
+  log_rotation: boolean;
+  log_max_size_mb: number;
+  log_max_files: number;
+};
+
+export type DockerGcState = {
+  settings: DockerGcSettings;
+  cron_expression: string;
+  next_run_at: string | null;
+  running?: boolean;
+  log_rotation_active?: boolean;
+  last_run?: { finished_at: string; ok: boolean; freed_bytes: number; trigger: string } | null;
+};
+
+export type DockerGcDisk = {
+  root_dir: string;
+  logging_driver: string;
+  docker_version: string;
+  total_bytes: number;
+  used_bytes: number;
+  avail_bytes: number;
+  percent: number;
+  /** Ancien cron devforge-disk-guard : present / absent / container. */
+  legacy_guard?: string;
+};
+
+export type DockerGcNodeDisk = {
+  node_id: string;
+  name: string;
+  ok: boolean;
+  error?: string;
+  alert?: boolean;
+  disk?: DockerGcDisk;
+  log_rotation_supported?: boolean;
+};
+
+export type DockerGcPreviewNode = {
+  node_id: string;
+  name: string;
+  ok: boolean;
+  error?: string;
+  disk?: DockerGcDisk;
+  images?: {
+    id: string;
+    refs: string[];
+    size: number;
+    created: string;
+    project: string | null;
+    reason: string;
+  }[];
+  images_bytes?: number;
+  kept_count?: number;
+  protected_running?: number;
+  containers_untouched?: number;
+  builders?: string[];
+  cache?: { builder: string; bytes: number }[];
+  cache_bytes?: number;
+  build_cache_total?: { size: string; reclaimable: string } | null;
+  total_bytes?: number;
+};
+
+export type DockerGcPreview = {
+  dry_run: boolean;
+  retention_hours: number;
+  keep_per_project: number;
+  nodes: DockerGcPreviewNode[];
+};
+
+export type DockerGcRun = {
+  id: number;
+  started_at: string;
+  finished_at: string;
+  trigger: 'manual' | 'schedule' | 'emergency' | string;
+  node_id: string;
+  node_name: string;
+  ok: boolean;
+  freed_bytes: number;
+  images_removed: number;
+  duration_ms: number;
+  disk_percent_before: number | null;
+  disk_percent_after: number | null;
+  errors: string[];
+};

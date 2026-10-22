@@ -8,8 +8,10 @@
 //!
 //! Sécurité :
 //! - PR de forks ignorées (code non fiable + variables du projet) : Check Run `neutral`.
-//! - Les variables d'environnement de prod ne sont PAS injectées : seules celles marquées
-//!   « preview » (`project_env_vars.preview = true`) le sont, plus `DEVFORGE_PREVIEW=1`.
+//! - Env runtime = variables du projet (comme la prod, sinon l'app ne démarre pas),
+//!   `PREVIEW_<CLÉ>` remplaçant `<CLÉ>` (ex. base de preview séparée), URI de
+//!   redirection OAuth réécrites vers l'hôte de la preview, plus `DEVFORGE_PREVIEW=1`.
+//!   Sans `PREVIEW_TURSO_DATABASE_URL` (ou autre base), la preview utilise la base de prod.
 //! - Ressources limitées (`DEVFORGE_PREVIEW_MEMORY`, défaut 1g ; `DEVFORGE_PREVIEW_CPUS`,
 //!   défaut 1), pas de ports publiés sur l'hôte, pas de volumes de la prod.
 //! - Commentaire PR unique par projet (marqueur caché), édité à chaque changement.
@@ -339,25 +341,152 @@ async fn set_status(pool: &sqlx::PgPool, project_uuid: &str, pr: i64, status: &s
     .await;
 }
 
-/// Variables marquées « preview » uniquement (jamais les secrets de prod par défaut).
+/// Préfixe des variables projet qui ne s'appliquent qu'aux previews :
+/// `PREVIEW_TURSO_DATABASE_URL` remplace `TURSO_DATABASE_URL` dans une preview
+/// (base de preview séparée), et n'est jamais injectée en prod sous son nom.
+pub const PREVIEW_OVERRIDE_PREFIX: &str = "PREVIEW_";
+
+/// Variables dont la base de données doit être isolée : sans override
+/// `PREVIEW_<clé>`, la preview partage la base de prod (avertissement).
+const DB_KEYS: &[&str] = &[
+    "TURSO_DATABASE_URL",
+    "DATABASE_URL",
+    "LIBSQL_URL",
+    "POSTGRES_URL",
+    "MONGODB_URI",
+    "REDIS_URL",
+];
+
+/// Env runtime d'une preview, construit depuis les variables du projet :
+/// 1. toutes les variables du projet (même runtime que la prod : sans elles,
+///    l'app ne démarre pas) ;
+/// 2. `PREVIEW_<CLÉ>` remplace `<CLÉ>` (et n'est pas transmise telle quelle) ;
+/// 3. les URI de redirection OAuth/OIDC (`*_REDIRECT_URI` / `*_REDIRECT_URL`) et
+///    les URL qui visent l'hôte de prod (`AUTH_URL`, `NEXTAUTH_URL`…), non
+///    surchargées, pointent vers l'hôte de la preview (même chemin) ;
+/// 4. `DEVFORGE_PREVIEW*` fixées par DevForge.
+pub fn build_preview_env(
+    rows: &[(String, String)],
+    pr: i64,
+    url: &str,
+    prod_host: Option<&str>,
+) -> Vec<(String, String)> {
+    use std::collections::BTreeMap;
+    let mut base: BTreeMap<String, String> = BTreeMap::new();
+    let mut overrides: BTreeMap<String, String> = BTreeMap::new();
+    for (k, v) in rows {
+        if k.starts_with("DEVFORGE_PREVIEW") {
+            continue;
+        }
+        match k.strip_prefix(PREVIEW_OVERRIDE_PREFIX) {
+            Some(target) if !target.is_empty() => {
+                overrides.insert(target.to_string(), v.clone());
+            }
+            _ => {
+                base.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    let preview_host = crate::routes::fqdn_from_url(url);
+    for (k, v) in base.iter_mut() {
+        if overrides.contains_key(k) {
+            continue;
+        }
+        let targets_prod = prod_host.is_some_and(|h| {
+            crate::routes::fqdn_from_url(v.trim()).is_some_and(|vh| vh.split(':').next() == Some(h))
+        });
+        if !is_redirect_uri_key(k) && !targets_prod {
+            continue;
+        }
+        if let Some(host) = preview_host.as_deref() {
+            if let Some(rewritten) = rewrite_url_host(v, host) {
+                *v = rewritten;
+            }
+        }
+    }
+    base.extend(overrides);
+    base.retain(|k, _| !k.starts_with("DEVFORGE_PREVIEW"));
+    let mut out: Vec<(String, String)> = base.into_iter().collect();
+    out.push(("DEVFORGE_PREVIEW".into(), "1".into()));
+    out.push(("DEVFORGE_PREVIEW_PR".into(), pr.to_string()));
+    out.push(("DEVFORGE_PREVIEW_URL".into(), url.to_string()));
+    out
+}
+
+fn is_redirect_uri_key(key: &str) -> bool {
+    let k = key.to_ascii_uppercase();
+    k.ends_with("REDIRECT_URI") || k.ends_with("REDIRECT_URL")
+}
+
+/// `https://prod.example.com/auth/cb?x=1` → `https://<host>/auth/cb?x=1`
+/// (schéma, chemin et requête conservés ; identifiants et port retirés).
+/// `None` si la valeur n'est pas une URL http(s).
+pub fn rewrite_url_host(value: &str, host: &str) -> Option<String> {
+    let v = value.trim();
+    let (scheme, rest) = v.split_once("://")?;
+    if !scheme.eq_ignore_ascii_case("https") && !scheme.eq_ignore_ascii_case("http") {
+        return None;
+    }
+    let cut = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    if rest[..cut].is_empty() {
+        return None;
+    }
+    // Les previews sont servies en HTTPS derrière le proxy.
+    Some(format!("https://{host}{}", &rest[cut..]))
+}
+
+/// Clés de base de données de la prod partagées par la preview faute
+/// d'override `PREVIEW_<clé>` (noms seulement).
+pub fn preview_shared_db_keys(rows: &[(String, String)]) -> Vec<String> {
+    DB_KEYS
+        .iter()
+        .filter(|k| {
+            rows.iter()
+                .any(|(rk, rv)| rk == *k && !rv.trim().is_empty())
+                && !rows.iter().any(|(rk, rv)| {
+                    rk.strip_prefix(PREVIEW_OVERRIDE_PREFIX) == Some(**k) && !rv.trim().is_empty()
+                })
+        })
+        .map(|k| k.to_string())
+        .collect()
+}
+
+/// Env runtime de la preview (voir [`build_preview_env`]), au format `--env-file`.
 pub async fn load_preview_env_file(
     pool: &sqlx::PgPool,
-    project_uuid: &str,
+    project: &Project,
     pr: i64,
     url: &str,
 ) -> Option<String> {
-    let mut rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT key, value FROM project_env_vars WHERE project_uuid = $1 AND preview = true ORDER BY key",
+    let project_uuid = project.uuid.as_str();
+    let rows: Vec<(String, String)> = match sqlx::query_as(
+        "SELECT key, value FROM project_env_vars WHERE project_uuid = $1 ORDER BY key",
     )
     .bind(project_uuid)
     .fetch_all(pool)
     .await
-    .unwrap_or_default();
-    rows.retain(|(k, _)| !k.starts_with("DEVFORGE_PREVIEW"));
-    rows.push(("DEVFORGE_PREVIEW".into(), "1".into()));
-    rows.push(("DEVFORGE_PREVIEW_PR".into(), pr.to_string()));
-    rows.push(("DEVFORGE_PREVIEW_URL".into(), url.to_string()));
-    Some(devforge_env::serialize_docker_env_file(&rows))
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(project_uuid, error = %e, "preview env: lecture des variables");
+            Vec::new()
+        }
+    };
+    let shared = preview_shared_db_keys(&rows);
+    if !shared.is_empty() {
+        tracing::warn!(
+            project_uuid,
+            pr,
+            keys = %shared.join(","),
+            "preview: base de prod partagée (définir PREVIEW_<clé> pour l'isoler)"
+        );
+    }
+    let prod_host = project
+        .production_url
+        .as_deref()
+        .and_then(crate::routes::fqdn_from_url);
+    let env = build_preview_env(&rows, pr, url, prod_host.as_deref());
+    Some(devforge_env::serialize_docker_env_file(&env))
 }
 
 /// Projets liés à l'installation et au dépôt de l'événement, previews activées.
@@ -740,7 +869,7 @@ async fn run_preview_deploy(
             .map(|(t,)| crate::secret_box::open_compat(&t))
             .filter(|t| !t.trim().is_empty());
     let deploy_tok = crate::github_auth::deploy_token(state, &project.uuid, pat).await;
-    let env_file = load_preview_env_file(&state.pool, &project.uuid, pr, url).await;
+    let env_file = load_preview_env_file(&state.pool, project, pr, url).await;
     let current = project
         .server_id
         .clone()
@@ -797,6 +926,10 @@ async fn run_preview_deploy(
         ),
     };
     let deploy = state.deploy.clone();
+    let (log_hook, log_flusher) = crate::deploy_queue::spawn_live_log_flusher(
+        state.pool.clone(),
+        deployment_uuid.to_string(),
+    );
     let outcome = crate::deploy_queue::run_in_node_slot(
         &state.deploy_queue,
         &state.pool,
@@ -804,10 +937,11 @@ async fn run_preview_deploy(
         deployment_uuid,
         move || {
             let deploy = deploy.clone();
-            async move { deploy.deploy(&req).await }
+            async move { deploy.deploy_with_log_hook(&req, Some(log_hook)).await }
         },
     )
     .await;
+    log_flusher.abort();
     state.deploy_queue.unregister_cancel(deployment_uuid).await;
     match outcome {
         crate::deploy_queue::SlotOutcome::Cancelled => {

@@ -6,3 +6,9 @@
 **Vulnerability:** The `mask_sensitive_env_key` function in `docker.rs` was not properly masking environment variables that contained sensitive keywords (like `AWS_SECRET_ACCESS_KEY`) because it only checked for exact matches or suffix matches (e.g., ends with `_SECRET`).
 **Learning:** Only matching for suffixes or exact values can leave secrets exposed when developers prefix or infix the sensitive word in the environment variable name.
 **Prevention:** Use substring matching (`contains`) for sensitive keywords to ensure all variables containing words like `SECRET` or `TOKEN` are masked.
+
+
+## 2026-10-18 - [Timing Attack in Webhook Signature Verification]
+**Vulnerability:** The `verify_github_sig` function in `apps/server/src/infra_routes.rs` verified GitHub webhook signatures using standard string comparison `expected.eq_ignore_ascii_case(hex_sig)`.
+**Learning:** String comparison functions exit early as soon as a character mismatch is found. In a cryptographic context, this variable response time leaks information and allows an attacker to perform a timing attack to forge a valid HMAC signature by guessing it byte by byte.
+**Prevention:** Always use a constant-time comparison library (like `hmac`'s `verify_slice()`) to compare cryptographic hashes, secrets, and signatures to prevent side-channel timing attacks. Avoid custom implementations of standard cryptographic algorithms.

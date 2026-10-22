@@ -43,11 +43,11 @@ describe('brouillon : origine et recommandation', () => {
           origin_kinds: ['repair'],
           insight: { behind: 2, overlap: ['package-lock.json'], already_on_github: [] },
           repair_succeeded_at: new Date().toISOString(),
-          advice: { level: 'delete', label: 'Peut être supprimé', reason: 'Une mise en ligne a réussi depuis.' },
+          advice: { level: 'delete', label: 'Conseil · supprimer', reason: 'Une mise en ligne a réussi depuis.' },
         })}
       />,
     );
-    expect(getByTestId('draft-advice').textContent).toContain('Peut être supprimé');
+    expect(getByTestId('draft-advice').textContent).toContain('Conseil · supprimer');
     expect(getByText('Réparation · Rustine')).toBeTruthy();
     expect(getByText(/GitHub a 2 commits de plus/)).toBeTruthy();
     expect(getByText(/Mêmes fichiers touchés sur GitHub : package-lock.json/)).toBeTruthy();

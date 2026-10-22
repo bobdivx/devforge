@@ -286,6 +286,47 @@ pub fn redact_url(url: &str) -> String {
     format!("{scheme}{authority}{path}{query_and_frag}")
 }
 
+/// Git remote for display: any userinfo (`user:token@`, `token@`) becomes
+/// `***@`, so neither the token nor its account name leaks
+/// (`https://x-access-token:ghp_…@github.com/o/r.git` →
+/// `https://***@github.com/o/r.git`). SSH remotes (`git@host:o/r`) and URLs
+/// without credentials are returned unchanged.
+pub fn redact_remote(url: &str) -> String {
+    let t = url.trim();
+    let Some(scheme_end) = t.find("://") else {
+        return t.to_string();
+    };
+    let (scheme, rest) = t.split_at(scheme_end + 3);
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    match rest[..authority_end].rfind('@') {
+        Some(at) => format!("{scheme}{MASK}{}", &rest[at..]),
+        None => t.to_string(),
+    }
+}
+
+/// Masks credentials of every URL found in free text (logs, CLI output):
+/// `scheme://user:token@host` → `scheme://***@host`. The rest of the text is
+/// unchanged.
+pub fn redact_urls_in_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find("://") {
+        out.push_str(&rest[..i + 3]);
+        rest = &rest[i + 3..];
+        let end = rest
+            .find(|c: char| {
+                c.is_whitespace() || matches!(c, '/' | '?' | '#' | '\'' | '"' | '<' | '>' | '`')
+            })
+            .unwrap_or(rest.len());
+        if let Some(at) = rest[..end].rfind('@') {
+            out.push_str(MASK);
+            rest = &rest[at..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 fn is_sensitive_query_key(k: &str) -> bool {
     let n = normalise_key(k);
     is_sensitive_key(k)
@@ -687,5 +728,43 @@ mod tests {
         assert_eq!(r["api_token"]["masked"], "ghp_…6789");
         assert_eq!(r["api_token"]["has_value"], true);
         assert_eq!(r["empty"]["has_value"], false);
+    }
+
+    #[test]
+    fn redact_remote_hides_userinfo() {
+        assert_eq!(
+            redact_remote("https://x-access-token:ghp_abc123@github.com/o/r.git"),
+            "https://***@github.com/o/r.git"
+        );
+        assert_eq!(
+            redact_remote("https://ghp_abc@github.com/o/r"),
+            "https://***@github.com/o/r"
+        );
+        assert_eq!(
+            redact_remote("https://github.com/o/r.git"),
+            "https://github.com/o/r.git"
+        );
+        assert_eq!(
+            redact_remote("git@github.com:o/r.git"),
+            "git@github.com:o/r.git"
+        );
+        assert_eq!(
+            redact_remote("http://u:p@host:8080/x@y"),
+            "http://***@host:8080/x@y"
+        );
+    }
+
+    #[test]
+    fn redact_urls_in_text_masks_every_url() {
+        let log = "fatal: unable to access 'https://x-access-token:ghp_secret@github.com/o/r.git/': 403\n\
+                   remote https://tok@gitlab.com/g/p ok, plain https://github.com/o/r";
+        let r = redact_urls_in_text(log);
+        assert!(!r.contains("ghp_secret"), "{r}");
+        assert!(!r.contains("tok@"), "{r}");
+        assert!(r.contains("'https://***@github.com/o/r.git/'"), "{r}");
+        assert!(r.contains("https://***@gitlab.com/g/p ok"), "{r}");
+        assert!(r.contains("plain https://github.com/o/r"), "{r}");
+        assert_eq!(redact_urls_in_text("no url here"), "no url here");
+        assert_eq!(redact_urls_in_text("mail me@x.org"), "mail me@x.org");
     }
 }

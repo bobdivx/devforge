@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { deployStatusShort, isDeployInProgress, shortSha } from '../../lib/deployStatus';
-import { X, ListFilter, AlignLeft, Square } from 'lucide-preact';
+import { X, ListFilter, AlignLeft, Square, Trash2 } from 'lucide-preact';
 import { api, type Deployment } from '../../lib/api';
 import { Badge, Button, Portal, Spinner } from '../ui';
 import { cn } from '../../lib/cn';
@@ -80,6 +80,9 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
   const [showAll, setShowAll] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [dismissing, setDismissing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [selectedLogs, setSelectedLogs] = useState<string>('');
   const isPanel = variant === 'panel';
 
@@ -191,12 +194,62 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
     }
   }
 
+  async function dismissDeploy() {
+    if (!selectedUuid) return;
+    if (
+      !confirm(
+        'Ignorer cet échec ?\n\nLe badge Échec disparaît si une version tourne encore. La version en ligne ne change pas.',
+      )
+    ) {
+      return;
+    }
+    setDismissing(true);
+    setActionError(null);
+    try {
+      await api.dismissDeployment(selectedUuid);
+      await loadDeployments(false);
+    } catch (err) {
+      setActionError(String((err as Error).message || err));
+    } finally {
+      setDismissing(false);
+    }
+  }
+
+  async function deleteDeploy() {
+    if (!selectedUuid) return;
+    if (
+      !confirm(
+        'Retirer cette ligne de l’historique ?\n\nAction non restaurable. La version en ligne et GitHub ne changent pas.',
+      )
+    ) {
+      return;
+    }
+    const removed = selectedUuid;
+    setDeleting(true);
+    setActionError(null);
+    try {
+      await api.deleteDeployment(removed);
+      await loadDeployments(false);
+      setSelectedUuid((prev) => (prev === removed ? null : prev));
+    } catch (err) {
+      setActionError(String((err as Error).message || err));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   if (!open) return null;
 
   const selected = deployments.find((d) => d.uuid === selectedUuid);
   const ordered = sortDeploymentsForDisplay(deployments);
   const visibleChips = showAll ? ordered : ordered.slice(0, DEPLOYMENTS_VISIBLE_DEFAULT);
   const canStop = selected ? isDeployInProgress(selected.status) : false;
+  const selectedDismissed = !!(selected?.dismissed_at && String(selected.dismissed_at).trim());
+  const canDismiss =
+    !!selected &&
+    ['failed', 'error', 'cancelled', 'canceled'].includes(selected.status) &&
+    !selectedDismissed;
+  const canDelete = !!selected && !isDeployInProgress(selected.status);
 
   const body = (
     <>
@@ -306,23 +359,53 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
                       </span>
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="danger"
-                        disabled={!canStop || cancelling}
-                        onClick={stopDeploy}
-                      >
-                        {cancelling ? <Spinner /> : <Square size={12} strokeWidth={2.5} aria-hidden />}
-                        Arrêter
-                      </Button>
-                      {cancelError && (
-                        <span class="text-xs text-[var(--color-danger)]">{cancelError}</span>
+                      {canStop && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="danger"
+                          disabled={cancelling}
+                          onClick={stopDeploy}
+                        >
+                          {cancelling ? <Spinner /> : <Square size={12} strokeWidth={2.5} aria-hidden />}
+                          Arrêter
+                        </Button>
+                      )}
+                      {canDismiss && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          disabled={dismissing || deleting}
+                          onClick={() => void dismissDeploy()}
+                        >
+                          {dismissing ? <Spinner /> : null}
+                          Ignorer
+                        </Button>
+                      )}
+                      {canDelete && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          class="text-[var(--color-danger)] hover:bg-rose-500/10"
+                          disabled={deleting || dismissing}
+                          onClick={() => void deleteDeploy()}
+                          aria-label="Supprimer cette ligne de l’historique"
+                        >
+                          {deleting ? <Spinner /> : <Trash2 size={14} aria-hidden />}
+                        </Button>
+                      )}
+                      {(cancelError || actionError) && (
+                        <span class="text-xs text-[var(--color-danger)]">{cancelError || actionError}</span>
                       )}
                     </div>
                   </div>
                   {selected.git_message && (
                     <p class="mt-2 text-sm text-[var(--color-ink)]">{selected.git_message}</p>
+                  )}
+                  {selectedDismissed && (
+                    <p class="mt-2 text-xs text-[var(--color-ink-muted)]">Échec ignoré — n’affecte plus le statut du projet.</p>
                   )}
                   {selected.status === 'queued' && (
                     <p class="mt-2 text-sm text-[var(--color-ink-muted)]">
@@ -335,7 +418,7 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
                   {selected.error_hint && (
                     <p class="mt-1 text-xs text-[var(--color-ink-muted)]">{selected.error_hint}</p>
                   )}
-                  {(selected.status === 'failed' || selected.status === 'error') && (
+                  {(selected.status === 'failed' || selected.status === 'error') && !selectedDismissed && (
                     <div class="mt-3 flex flex-wrap items-center gap-2">
                       <Button type="button" size="sm" disabled={retrying} onClick={retryDeploy}>
                         {retrying ? <Spinner /> : null}

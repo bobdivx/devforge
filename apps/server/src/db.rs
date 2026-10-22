@@ -141,6 +141,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         ("live_revision_sha", "TEXT"),
         // `production` (défaut) ou `dev` (environnement dev séparé).
         ("environment", "TEXT NOT NULL DEFAULT 'production'"),
+        // Acquittement d’un échec (badge Échec) sans supprimer la ligne.
+        ("dismissed_at", "TEXT"),
     ] {
         let sql = format!("ALTER TABLE deployments ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;
@@ -483,6 +485,14 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         // Ancien webhook par dépôt (`/api/v1/webhooks/github`) : 1 = actif, 0 = 410 Gone.
         // Piloté depuis Réglages › GitHub (pas de variable d’environnement).
         ("legacy_webhook", "BIGINT NOT NULL DEFAULT 1"),
+        // Worker Cursor Self-Hosted (My Machines) — CLI `agent worker start`.
+        ("cursor_worker_enabled", "BIGINT NOT NULL DEFAULT 0"),
+        ("cursor_worker_name", "TEXT NOT NULL DEFAULT ''"),
+        ("cursor_worker_api_key", "TEXT NOT NULL DEFAULT ''"),
+        ("cursor_worker_binary", "TEXT NOT NULL DEFAULT ''"),
+        ("cursor_worker_extra_dirs", "TEXT NOT NULL DEFAULT ''"),
+        // Nœud qui héberge le worker ('' = leader / ce serveur).
+        ("cursor_worker_node", "TEXT NOT NULL DEFAULT ''"),
     ] {
         let sql = format!("ALTER TABLE instance_settings ADD COLUMN {col} {def}");
         let _ = sqlx::query(&sql).execute(pool).await;

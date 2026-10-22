@@ -16,12 +16,16 @@ mod cluster_store;
 mod control_pg;
 mod correction;
 mod cron_routes;
+mod cursor_worker;
+mod cursor_worker_routes;
 mod db;
 mod deploy_queue;
 mod detect_svc;
 mod dev_env;
 mod dns;
 mod dns_failover;
+mod docker_gc;
+mod docker_gc_routes;
 mod domain_catalog;
 mod draft;
 mod draft_origin;
@@ -250,6 +254,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     crate::dns::spawn_dns_loop(state.clone());
     crate::dns_failover::spawn_loop(state.clone());
+    crate::docker_gc_routes::spawn_loop(state.clone());
     routes::resume_deploy_queue(state.clone());
     run_routes::install_launcher(&state);
     routes::resume_agent_runs(state.clone());
@@ -354,6 +359,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     update_routes::spawn_auto_update(state.clone());
+    cursor_worker_routes::spawn_autostart(state.clone());
 
     // Advertise agent tools on the local MCP server surface.
     state
@@ -375,6 +381,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(backup_routes::router())
         .merge(sso_routes::router())
         .merge(acme_routes::router())
+        .merge(docker_gc_routes::router())
         .merge(project_oidc_routes::router())
         .merge(dev_env::router())
         .merge(project_pg_routes::router())
@@ -399,6 +406,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(mobile_routes::router())
         .merge(android_routes::router())
         .merge(cluster_routes::router())
+        .merge(cursor_worker_routes::router())
         .merge(worker::exec_route())
         .route("/", get(auth_routes::marketing_home))
         .route("/index.html", get(auth_routes::marketing_home))
