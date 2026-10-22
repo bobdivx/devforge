@@ -164,10 +164,12 @@ async fn exec_on(
         .exec(&node.exec_id, "", script, timeout)
         .await
         .map_err(|e| e.to_string())?;
+    // Les sorties nœud (logs CLI, git) ne doivent jamais exposer un jeton d'URL.
+    let output = devforge_shared::redact::redact_urls_in_text(&r.output);
     if !r.ok {
-        let rep = cursor_worker::parse_script_output(&r.output);
+        let rep = cursor_worker::parse_script_output(&output);
         let detail = if rep.logs.is_empty() {
-            r.output
+            output
         } else {
             rep.logs
         };
@@ -178,7 +180,7 @@ async fn exec_on(
             cursor_worker::tail_lines(&detail, 15)
         ));
     }
-    Ok(r.output)
+    Ok(output)
 }
 
 /// Chemins candidats (projets + extra) pour un nœud distant : l'existence
@@ -269,6 +271,7 @@ async fn status(State(state): State<AppState>, headers: HeaderMap) -> Result<Jso
         "node": node.to_json(),
         "nodes": nodes_json,
         "node_error": err,
+        "repos_up": rep.repos_up,
         "workdirs": [],
         "eligible_count": Value::Null,
         "env_key_present": cursor_worker::env_key_present(),

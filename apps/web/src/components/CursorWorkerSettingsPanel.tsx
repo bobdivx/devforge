@@ -809,6 +809,14 @@ function StatusModal({
             <Row label="État" value={`${sum.label}${status.pid ? ` · pid ${status.pid}` : ''}`} />
             <Row label="Machine" value={status.node ? nodeLabel(status.node) : '—'} />
             <Row label="Nom annoncé" value={<code class="text-xs">{status.name}</code>} />
+            {status.running && status.repos_up != null ? (
+              <Row
+                label="Dépôts actifs"
+                value={`${status.repos_up}${
+                  status.registered_paths?.length ? ` / ${status.registered_paths.length}` : ''
+                } (un process par dépôt)`}
+              />
+            ) : null}
             <Row
               label="CLI Cursor"
               value={status.cli_installed ? status.cli_version || 'installé' : 'non installé'}

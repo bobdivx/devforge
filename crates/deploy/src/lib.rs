@@ -868,7 +868,7 @@ impl DeployFacade {
                 logs.push_str(&format!(
                     "[git] exit={} {}\n",
                     r.exit_code,
-                    trim_out(&r.output)
+                    devforge_shared::redact::redact_urls_in_text(&trim_out(&r.output))
                 ));
                 if !r.ok {
                     return DeployResult {
@@ -879,7 +879,10 @@ impl DeployFacade {
                 }
             }
             Err(e) => {
-                logs.push_str(&format!("[git] error: {e}\n"));
+                logs.push_str(&format!(
+                    "[git] error: {}\n",
+                    devforge_shared::redact::redact_urls_in_text(&e.to_string())
+                ));
                 return DeployResult {
                     ok: false,
                     git_sha: None,

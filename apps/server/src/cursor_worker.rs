@@ -91,6 +91,35 @@ fn registered_path() -> PathBuf {
     state_dir().join("registered.json")
 }
 
+/// Un sous-dossier par dépôt servi en plus du premier (pid, logs, data-dir).
+fn repos_dir() -> PathBuf {
+    state_dir().join("repos")
+}
+
+/// Identifiant stable d'un dépôt : `<nom>-<hash court du chemin>`.
+pub fn repo_slot_id(path: &str) -> String {
+    let base = Path::new(path.trim_end_matches('/'))
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("repo");
+    let mut slug = slug_name(base);
+    slug.truncate(40);
+    if slug.is_empty() {
+        slug = "repo".into();
+    }
+    // FNV-1a 32 bits : stable entre versions (contrairement à DefaultHasher).
+    let mut h: u32 = 0x811c_9dc5;
+    for b in path.as_bytes() {
+        h ^= u32::from(*b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    format!("{slug}-{h:08x}")
+}
+
+fn repo_slot_dir(path: &str) -> PathBuf {
+    repos_dir().join(repo_slot_id(path))
+}
+
 /// HOME dédié au CLI installé par DevForge (persistant dans le volume data).
 pub fn managed_home() -> PathBuf {
     state_dir().join("home")
@@ -413,7 +442,8 @@ fn read_git_remote(workdir: &Path) -> Option<String> {
         return None;
     }
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!s.is_empty()).then_some(s)
+    // Un remote `https://x-access-token:…@github.com/…` ne sort jamais en clair.
+    (!s.is_empty()).then(|| devforge_shared::redact::redact_remote(&s))
 }
 
 pub fn parse_extra_dirs(raw: &str) -> Vec<String> {
@@ -465,6 +495,29 @@ pub fn build_worker_args(name: &str, workdirs: &[String]) -> Result<Vec<String>,
     args.push(MANAGEMENT_ADDR.into());
     args.push("start".into());
     Ok(args)
+}
+
+/// Arguments d'un worker dédié à UN dépôt.
+///
+/// Le CLI utilise le premier `--worker-dir` comme espace de travail de toute
+/// session : un worker multi-dossiers exécute donc chaque agent dans le premier
+/// dépôt, quel que soit le dépôt demandé. Un process par dépôt (même nom de
+/// machine) laisse Cursor router chaque demande vers le bon checkout. Chaque
+/// process a son propre `--data-dir` (verrou du CLI) et pas de sonde HTTP
+/// (le port est réservé au worker principal).
+pub fn build_repo_worker_args(name: &str, dir: &str, data_dir: &str) -> Vec<String> {
+    let mut args = vec!["worker".to_string()];
+    let name = name.trim();
+    if !name.is_empty() {
+        args.push("--name".into());
+        args.push(name.to_string());
+    }
+    args.push("--worker-dir".into());
+    args.push(dir.to_string());
+    args.push("--data-dir".into());
+    args.push(data_dir.to_string());
+    args.push("start".into());
+    args
 }
 
 /// Workdirs effectifs : repos éligibles, sinon un espace vide géré par DevForge
@@ -534,6 +587,15 @@ pub fn stop_script(base: &ScriptBase) -> String {
   fi
   rm -f "$PIDF"
 fi
+for f in "$D"/repos/*/worker.pid; do
+  [ -f "$f" ] || continue
+  P=$(cat "$f" 2>/dev/null)
+  if [ -n "$P" ] && kill -0 "$P" 2>/dev/null; then
+    kill -TERM "$P" 2>/dev/null; sleep 1
+    kill -0 "$P" 2>/dev/null && kill -KILL "$P" 2>/dev/null
+  fi
+  rm -f "$f"
+done
 echo "DF_RUNNING=0"
 "#,
         prelude = script_prelude(base)
@@ -553,26 +615,46 @@ N=0
 for d in {dirs}; do
   [ -n "$d" ] && [ -d "$d/.git" ] || continue
   [ "$N" -ge {max} ] && break
-  set -- "$@" --worker-dir "$d"
+  set -- "$@" "$d"
   N=$((N+1))
   echo "DF_DIR=$d"
 done
 if [ "$N" -eq 0 ]; then
   mkdir -p "$D/workspace"
-  set -- --worker-dir "$D/workspace"
+  set -- "$D/workspace"
 fi
 command -v agent >/dev/null 2>&1 || {{ echo "CLI agent absent"; exit 5; }}
 SETSID=""
 command -v setsid >/dev/null 2>&1 && SETSID="setsid"
-CURSOR_API_KEY={key} $SETSID nohup agent worker --name {name} "$@" --management-addr {mgmt} start </dev/null >"$D/worker.out" 2>"$D/worker.err" &
+K={key}
+FIRST="$1"; shift
+# Un process par dépôt : le CLI exécute chaque session dans son premier --worker-dir.
+CURSOR_API_KEY="$K" $SETSID nohup agent worker --name {name} --worker-dir "$FIRST" --management-addr {mgmt} start </dev/null >"$D/worker.out" 2>"$D/worker.err" &
 echo $! >"$PIDF"
+I=1
+for d in "$@"; do
+  S="$D/repos/$I"
+  mkdir -p "$S/data"
+  CURSOR_API_KEY="$K" $SETSID nohup agent worker --name {name} --worker-dir "$d" --data-dir "$S/data" start </dev/null >"$S/worker.out" 2>"$S/worker.err" &
+  echo $! >"$S/worker.pid"
+  I=$((I+1))
+done
 sleep 4
 P=$(cat "$PIDF")
 if kill -0 "$P" 2>/dev/null; then
   echo "DF_RUNNING=1"
   echo "DF_PID=$P"
+  UP=1
+  for f in "$D"/repos/*/worker.pid; do
+    [ -f "$f" ] && kill -0 "$(cat "$f" 2>/dev/null)" 2>/dev/null && UP=$((UP+1))
+  done
+  echo "DF_REPOS_UP=$UP"
 else
   rm -f "$PIDF"
+  for f in "$D"/repos/*/worker.pid; do
+    [ -f "$f" ] && kill -TERM "$(cat "$f" 2>/dev/null)" 2>/dev/null
+    rm -f "$f"
+  done
   echo "DF_RUNNING=0"
   echo "DF_LOGS_BEGIN"
   tail -n 30 "$D/worker.err" 2>/dev/null
@@ -609,6 +691,11 @@ if [ -n "$P" ] && kill -0 "$P" 2>/dev/null; then
   else
     echo "DF_READY=0"
   fi
+  UP=1
+  for f in "$D"/repos/*/worker.pid; do
+    [ -f "$f" ] && kill -0 "$(cat "$f" 2>/dev/null)" 2>/dev/null && UP=$((UP+1))
+  done
+  echo "DF_REPOS_UP=$UP"
 else
   echo "DF_RUNNING=0"
 fi
@@ -630,6 +717,8 @@ pub struct ScriptReport {
     pub pid: Option<u32>,
     pub ready: Option<bool>,
     pub dirs: Vec<String>,
+    /// Process actifs (un par dépôt) après démarrage.
+    pub repos_up: Option<u32>,
     pub logs: String,
 }
 
@@ -658,11 +747,12 @@ pub fn parse_script_output(out: &str) -> ScriptReport {
             "DF_PID" => r.pid = v.parse().ok(),
             "DF_READY" => r.ready = Some(v == "1"),
             "DF_DIR" => r.dirs.push(v.to_string()),
+            "DF_REPOS_UP" => r.repos_up = v.parse().ok(),
             "DF_STOPPED" | "DF_AGENT" | "DF_VERSION" => {}
             _ => logs.push(line),
         }
     }
-    r.logs = logs.join("\n").trim().to_string();
+    r.logs = devforge_shared::redact::redact_urls_in_text(logs.join("\n").trim());
     r
 }
 
@@ -761,12 +851,62 @@ fn kill_pid(pid: u32) -> Result<(), String> {
     Ok(())
 }
 
+/// Pid d'un fichier pid, s'il pointe vers un process vivant.
+fn live_pid_at(path: &Path) -> Option<u32> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let pid: u32 = raw.trim().parse().ok()?;
+    (pid > 0 && pid_is_alive(pid)).then_some(pid)
+}
+
+/// Arrête les workers dédiés aux dépôts secondaires (dossiers `repos/*`).
+/// Renvoie les pids arrêtés.
+fn stop_repo_workers() -> Vec<u32> {
+    let mut stopped = Vec::new();
+    let Ok(entries) = std::fs::read_dir(repos_dir()) else {
+        return stopped;
+    };
+    for e in entries.flatten() {
+        let pidf = e.path().join("worker.pid");
+        if let Some(pid) = live_pid_at(&pidf) {
+            if kill_pid(pid).is_ok() {
+                stopped.push(pid);
+            }
+        }
+        let _ = std::fs::remove_file(&pidf);
+    }
+    stopped
+}
+
+/// État par dépôt servi : le premier est le worker principal, les autres ont
+/// chacun leur process.
+pub fn repo_workers_state(registered: &[String]) -> Vec<Value> {
+    registered
+        .iter()
+        .enumerate()
+        .map(|(i, path)| {
+            let pid = if i == 0 {
+                read_pid().filter(|p| pid_is_alive(*p))
+            } else {
+                live_pid_at(&repo_slot_dir(path).join("worker.pid"))
+            };
+            json!({
+                "path": path,
+                "primary": i == 0,
+                "running": pid.is_some(),
+                "pid": pid,
+            })
+        })
+        .collect()
+}
+
 pub fn stop() -> Result<Value, String> {
+    let extra = stop_repo_workers();
     let Some(pid) = read_pid() else {
         let _ = std::fs::remove_file(pid_path());
         return Ok(json!({
             "ok": true,
             "running": false,
+            "stopped_repo_workers": extra.len(),
             "message": "Aucun worker en cours",
         }));
     };
@@ -775,6 +915,7 @@ pub fn stop() -> Result<Value, String> {
         return Ok(json!({
             "ok": true,
             "running": false,
+            "stopped_repo_workers": extra.len(),
             "message": "Process déjà arrêté",
         }));
     }
@@ -784,26 +925,40 @@ pub fn stop() -> Result<Value, String> {
         "ok": true,
         "running": false,
         "stopped_pid": pid,
+        "stopped_repo_workers": extra.len(),
         "message": format!("Worker arrêté (pid {pid})"),
     }))
+}
+
+fn tail_file(path: &Path, max_lines: usize) -> Option<String> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let lines: Vec<&str> = raw.lines().collect();
+    let start = lines.len().saturating_sub(max_lines);
+    (start < lines.len()).then(|| lines[start..].join("\n"))
 }
 
 pub fn read_logs_tail(max_lines: usize) -> String {
     let mut chunks = Vec::new();
     for path in [out_path(), err_path()] {
-        if let Ok(raw) = std::fs::read_to_string(&path) {
-            let lines: Vec<&str> = raw.lines().collect();
-            let start = lines.len().saturating_sub(max_lines);
-            if start < lines.len() {
-                chunks.push(format!(
-                    "—— {} ——\n{}",
-                    path.file_name().and_then(|s| s.to_str()).unwrap_or("log"),
-                    lines[start..].join("\n")
-                ));
-            }
+        if let Some(tail) = tail_file(&path, max_lines) {
+            chunks.push(format!(
+                "—— {} ——\n{tail}",
+                path.file_name().and_then(|s| s.to_str()).unwrap_or("log"),
+            ));
         }
     }
-    chunks.join("\n\n")
+    // Dépôts secondaires arrêtés : dernière erreur, pour comprendre pourquoi.
+    let registered = load_registered();
+    for path in registered.iter().skip(1) {
+        let dir = repo_slot_dir(path);
+        if live_pid_at(&dir.join("worker.pid")).is_some() {
+            continue;
+        }
+        if let Some(tail) = tail_file(&dir.join("worker.err"), 3) {
+            chunks.push(format!("—— {path} (arrêté) ——\n{tail}"));
+        }
+    }
+    devforge_shared::redact::redact_urls_in_text(&chunks.join("\n\n"))
 }
 
 pub fn load_registered() -> Vec<String> {
@@ -819,36 +974,23 @@ fn save_registered(paths: &[String]) -> Result<(), String> {
     std::fs::write(registered_path(), raw).map_err(|e| e.to_string())
 }
 
-/// Démarre avec un nom déjà résolu (nom du nœud par défaut).
-pub fn start_named(
-    settings: &WorkerSettings,
+/// Lance un process worker détaché (stdout/stderr vers fichiers) et le
+/// récolte dans un thread pour éviter les zombies.
+fn spawn_worker_process(
     bin: &Path,
-    name: &str,
-    workdirs: &[String],
-) -> Result<Value, String> {
-    if is_running() {
-        return Err("Worker déjà en cours — arrête-le avant de relancer.".into());
-    }
-    // Clé API si enregistrée, sinon session `cursor-agent login` (HOME géré).
-    let api_key = effective_api_key(settings).map(|(k, _)| k);
-    if api_key.is_none() && !is_logged_in(bin) {
-        return Err(
-            "Ni clé API Cursor ni connexion Cursor : utilise « Se connecter avec Cursor » ou colle une clé."
-                .into(),
-        );
-    }
-    ensure_state_dir()?;
-    let workdirs = workdirs_or_fallback(workdirs);
-    let args = build_worker_args(name, &workdirs)?;
-    let out = std::fs::File::create(out_path()).map_err(|e| e.to_string())?;
-    let err = std::fs::File::create(err_path()).map_err(|e| e.to_string())?;
-
+    args: &[String],
+    out: &Path,
+    err: &Path,
+    api_key: Option<&str>,
+) -> Result<u32, String> {
+    let out = std::fs::File::create(out).map_err(|e| e.to_string())?;
+    let err = std::fs::File::create(err).map_err(|e| e.to_string())?;
     let mut cmd = Command::new(bin);
-    cmd.args(&args)
+    cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::from(out))
         .stderr(Stdio::from(err));
-    match &api_key {
+    match api_key {
         Some(k) => {
             cmd.env("CURSOR_API_KEY", k);
         }
@@ -875,25 +1017,91 @@ pub fn start_named(
         .spawn()
         .map_err(|e| format!("Échec démarrage `{}`: {e}", bin.display()))?;
     let pid = child.id();
-    std::fs::write(pid_path(), pid.to_string()).map_err(|e| e.to_string())?;
-    save_registered(&workdirs)?;
-
     let _ = std::thread::Builder::new()
         .name("cursor-worker-reap".into())
         .spawn(move || {
             let mut child = child;
             let _ = child.wait();
         });
+    Ok(pid)
+}
 
-    // Laisse le process s’initialiser un court instant.
+/// Démarre avec un nom déjà résolu (nom du nœud par défaut).
+///
+/// Un process par dépôt : le premier dépôt garde le worker « principal »
+/// (pid, logs, sonde `/readyz`), chaque dépôt suivant a le sien sous
+/// `repos/<id>/`. Tous portent le même nom de machine : Cursor choisit le
+/// process dont le dépôt correspond à la demande.
+pub fn start_named(
+    settings: &WorkerSettings,
+    bin: &Path,
+    name: &str,
+    workdirs: &[String],
+) -> Result<Value, String> {
+    if is_running() {
+        return Err("Worker déjà en cours — arrête-le avant de relancer.".into());
+    }
+    // Restes d'un démarrage précédent (worker principal mort, secondaires vivants).
+    stop_repo_workers();
+    // Clé API si enregistrée, sinon session `cursor-agent login` (HOME géré).
+    let api_key = effective_api_key(settings).map(|(k, _)| k);
+    if api_key.is_none() && !is_logged_in(bin) {
+        return Err(
+            "Ni clé API Cursor ni connexion Cursor : utilise « Se connecter avec Cursor » ou colle une clé."
+                .into(),
+        );
+    }
+    ensure_state_dir()?;
+    let workdirs = workdirs_or_fallback(workdirs);
+    let args = build_worker_args(name, &workdirs[..1])?;
+    let pid = spawn_worker_process(bin, &args, &out_path(), &err_path(), api_key.as_deref())?;
+    std::fs::write(pid_path(), pid.to_string()).map_err(|e| e.to_string())?;
+    save_registered(&workdirs)?;
+
+    let mut extra: Vec<(String, u32)> = Vec::new();
+    let mut extra_errors: Vec<String> = Vec::new();
+    for dir in workdirs.iter().skip(1) {
+        let slot = repo_slot_dir(dir);
+        let data = slot.join("data");
+        if let Err(e) = std::fs::create_dir_all(&data) {
+            extra_errors.push(format!("{dir} : {e}"));
+            continue;
+        }
+        let args = build_repo_worker_args(name, dir, &data.display().to_string());
+        match spawn_worker_process(
+            bin,
+            &args,
+            &slot.join("worker.out"),
+            &slot.join("worker.err"),
+            api_key.as_deref(),
+        ) {
+            Ok(p) => {
+                let _ = std::fs::write(slot.join("worker.pid"), p.to_string());
+                extra.push((dir.clone(), p));
+            }
+            Err(e) => extra_errors.push(format!("{dir} : {e}")),
+        }
+    }
+
+    // Laisse les process s’initialiser un court instant.
     std::thread::sleep(std::time::Duration::from_millis(600));
     if !pid_is_alive(pid) {
         let logs = read_logs_tail(40);
         let _ = std::fs::remove_file(pid_path());
+        stop_repo_workers();
         return Err(format!(
             "Le worker s’est arrêté immédiatement. Vérifie la clé API et le réseau sortant (api2.cursor.sh).\n{logs}"
         ));
     }
+    for (dir, p) in &extra {
+        if !pid_is_alive(*p) {
+            let tail = tail_file(&repo_slot_dir(dir).join("worker.err"), 2).unwrap_or_default();
+            extra_errors.push(devforge_shared::redact::redact_urls_in_text(&format!(
+                "{dir} : arrêté au démarrage {tail}"
+            )));
+        }
+    }
+    let serving = workdirs.len() - extra_errors.len();
 
     Ok(json!({
         "ok": true,
@@ -903,7 +1111,16 @@ pub fn start_named(
         "binary": bin.display().to_string(),
         "workdirs": workdirs,
         "workdirs_count": workdirs.len(),
-        "message": format!("Worker « {name} » démarré avec {} repo(s)", workdirs.len()),
+        "processes": 1 + extra.len(),
+        "repo_errors": extra_errors,
+        "message": if extra_errors.is_empty() {
+            format!("Worker « {name} » démarré : {serving} repo(s), un process par repo")
+        } else {
+            format!(
+                "Worker « {name} » démarré : {serving}/{} repo(s) actifs",
+                workdirs.len()
+            )
+        },
     }))
 }
 
@@ -940,6 +1157,12 @@ pub async fn status_json(pool: &PgPool, node_name: &str) -> Result<Value, String
         String::new()
     };
     let key_invalid = key.is_some() && logs_show_invalid_key(&logs);
+    let registered = load_registered();
+    let repo_workers = repo_workers_state(&registered);
+    let repos_up = repo_workers
+        .iter()
+        .filter(|w| w["running"].as_bool() == Some(true))
+        .count();
     // Session `cursor-agent login` (utilisée quand aucune clé n'est enregistrée).
     let logged_in = key.is_none() && bin.as_deref().is_some_and(is_logged_in);
     let key_unsupported = key
@@ -970,7 +1193,9 @@ pub async fn status_json(pool: &PgPool, node_name: &str) -> Result<Value, String
         "workdirs": dirs,
         "eligible_count": eligible.len(),
         "eligible_paths": eligible,
-        "registered_paths": load_registered(),
+        "registered_paths": registered,
+        "repo_workers": repo_workers,
+        "repos_up": if running { Some(repos_up) } else { None },
         "env_key_present": env_key_present(),
         "key_invalid": key_invalid,
         "key_unsupported": key_unsupported,
