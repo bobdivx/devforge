@@ -1,4 +1,4 @@
-import { useRef, useState } from 'preact/hooks';
+import { useRef, useState, useMemo } from 'preact/hooks';
 import { api, type ProjectAgent } from '../../lib/api';
 import { useToast } from '../ui';
 import { nestAgentRows, readStoredThread, sortAgentsPinned, sortByRecent, storeThread, titleFromMessage } from './thread-meta';
@@ -25,10 +25,17 @@ export function useThreadList({ projectUuid, threadsMode, persona, defaultAgentU
   const bootstrapped = useRef(false);
 
   const list = threadsMode ? threads : agents;
-  const current = list.find((a) => a.uuid === selected) ?? agents.find((a) => a.uuid === selected) ?? null;
-  const rows = threadsMode
-    ? nestAgentRows(list.filter((a) => a.kind !== 'subagent'), list)
-    : nestAgentRows(sortAgentsPinned(agents.filter((a) => a.kind !== 'subagent')), agents);
+
+  const current = useMemo(
+    () => list.find((a) => a.uuid === selected) ?? agents.find((a) => a.uuid === selected) ?? null,
+    [list, agents, selected]
+  );
+
+  const rows = useMemo(() => {
+    return threadsMode
+      ? nestAgentRows(list.filter((a) => a.kind !== 'subagent'), list)
+      : nestAgentRows(sortAgentsPinned(agents.filter((a) => a.kind !== 'subagent')), agents);
+  }, [threadsMode, list, agents]);
 
   async function resolveThreads(main: ProjectAgent[]): Promise<ProjectAgent[]> {
     // Workspace = fil coordinateur permanent + tâches isolées. Ops/Reviewer restent dans Agents.
