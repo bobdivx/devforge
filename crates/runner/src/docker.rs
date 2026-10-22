@@ -486,7 +486,7 @@ pub fn mask_sensitive_env_key(key: &str) -> bool {
     let upper = key.to_uppercase();
     SENSITIVE
         .iter()
-        .any(|n| upper == *n || upper.ends_with(&format!("_{n}")))
+        .any(|n| upper.contains(n))
 }
 
 pub fn parse_inspect_env(inspect: &serde_json::Value) -> Vec<EnvEntry> {
