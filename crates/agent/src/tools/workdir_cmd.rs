@@ -35,6 +35,7 @@ fn validate_read_only(bin: &str, parts: &[String]) -> std::result::Result<(), St
         let l = a.to_ascii_lowercase();
         if a.starts_with('/')
             || a.starts_with('~')
+            || l.contains("..")
             || l.contains(".env")
             || l.contains("secret")
             || l.contains(".git/")
@@ -328,6 +329,7 @@ mod tests {
         assert!(validate_command("git -c x=y status").is_err());
         assert!(validate_command("cat .env").is_err());
         assert!(validate_command("cat /etc/passwd").is_err());
+        assert!(validate_command("cat \"..\"/\"..\"/etc/passwd").is_err());
         assert!(validate_command("git branch -D main").is_err());
     }
 
