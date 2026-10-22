@@ -452,7 +452,10 @@ async fn install(
         "name": name,
         "steps": steps,
         "message": if ok {
-            format!("Worker « {name} » installé et démarré sur {}", node.name)
+            format!(
+                "Worker installé et démarré sur {} : une machine Cursor par dépôt ({name}-<dépôt>)",
+                node.name
+            )
         } else if key_invalid {
             cursor_worker::INVALID_KEY_HINT.to_string()
         } else {
@@ -687,6 +690,7 @@ async fn start_on(
         "running": rep.running,
         "pid": rep.pid,
         "name": name,
+        "machine_names": rep.names,
         "workdirs_count": rep.dirs.len(),
         "message": format!("Worker « {name} » démarré sur {}", node.name),
     }))
