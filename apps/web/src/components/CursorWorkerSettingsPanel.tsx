@@ -592,8 +592,8 @@ function InstallModal({
           ) : null}
           {result.ok ? (
             <p class="text-xs text-[var(--color-ink-muted)]">
-              Dans Cursor (My Machines) ou Grok Bot, choisis la machine{' '}
-              <code class="text-xs">{result.name}</code>.
+              Une machine par dépôt : dans Cursor (My Machines) ou Grok Bot, choisis{' '}
+              <code class="text-xs">{result.name}-&lt;dépôt&gt;</code> (détail dans « Statut »).
             </p>
           ) : null}
         </div>
@@ -815,6 +815,25 @@ function StatusModal({
                 value={`${status.repos_up}${
                   status.registered_paths?.length ? ` / ${status.registered_paths.length}` : ''
                 } (un process par dépôt)`}
+              />
+            ) : null}
+            {status.repo_workers?.length ? (
+              <Row
+                label="Machines Cursor"
+                value={
+                  <ul class="space-y-0.5">
+                    {status.repo_workers.map((w) => (
+                      <li key={w.path} class="flex items-center gap-1.5">
+                        <span
+                          class={w.running ? 'text-[var(--color-ok)]' : 'text-[var(--color-danger)]'}
+                        >
+                          ●
+                        </span>
+                        <code class="text-xs">{w.name || w.path}</code>
+                      </li>
+                    ))}
+                  </ul>
+                }
               />
             ) : null}
             <Row

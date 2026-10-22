@@ -168,7 +168,35 @@ fn scripts_run_end_to_end_with_fake_agent() {
     let repo = tmp.join("repo a");
     std::fs::create_dir_all(repo.join(".git")).unwrap();
     let repo_b = tmp.join("repo-b");
-    std::fs::create_dir_all(repo_b.join(".git")).unwrap();
+    std::fs::create_dir_all(&repo_b).unwrap();
+    // Vrai dépôt : le nom de machine vient du remote `origin`.
+    let git_ok = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&repo_b)
+        .args(["init", "-q"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+        && std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo_b)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/o/Template-Studio.git",
+            ])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+    if !git_ok {
+        std::fs::create_dir_all(repo_b.join(".git")).unwrap();
+    }
+    let name_b = if git_ok {
+        "demo-template-studio"
+    } else {
+        "demo-repo-b"
+    };
     let base = ScriptBase::Literal(base_dir.display().to_string());
 
     let run = |script: &str| {
@@ -209,13 +237,15 @@ fn scripts_run_end_to_end_with_fake_agent() {
     // Un process par dépôt : le principal sert UNIQUEMENT le premier dépôt.
     assert_eq!(r.repos_up, Some(2));
     let log = std::fs::read_to_string(base_dir.join("worker.out")).unwrap();
-    assert!(log.contains("--name demo"));
+    // Un nom de machine par dépôt (sinon tous partagent le même workerId).
+    assert!(log.contains("--name demo-repo-a "), "{log}");
+    assert_eq!(r.names, vec!["demo-repo-a".to_string(), name_b.to_string()]);
     assert!(log.contains(&format!("--worker-dir {}", repo.display())));
     assert!(!log.contains("repo-b"), "{log}");
     assert!(log.contains("--management-addr"));
     assert!(!log.contains("key_0123456789abcdef"));
     let log_b = std::fs::read_to_string(base_dir.join("repos/1/worker.out")).unwrap();
-    assert!(log_b.contains("--name demo"), "{log_b}");
+    assert!(log_b.contains(&format!("--name {name_b} ")), "{log_b}");
     assert!(log_b.contains(&format!("--worker-dir {}", repo_b.display())));
     assert!(log_b.contains("--data-dir"));
     assert!(!log_b.contains("--management-addr"));
@@ -393,5 +423,78 @@ fn git_remote_is_redacted() {
     ]));
     let r = read_git_remote(&tmp).unwrap();
     assert_eq!(r, "https://***@github.com/o/r.git");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn one_machine_name_per_repo() {
+    assert_eq!(
+        repo_label(
+            Some("https://***@github.com/bobdivx/template-studio.git"),
+            "/data/x/02792add"
+        ),
+        "template-studio"
+    );
+    assert_eq!(repo_label(Some("git@github.com:o/Repo.git"), "/x"), "repo");
+    assert_eq!(
+        repo_label(None, "/data/devforge/applications/jeser"),
+        "jeser"
+    );
+    assert_eq!(repo_label(Some(""), "/"), "repo");
+    let names = repo_worker_names_from(
+        "DevForge",
+        &[
+            "vigie".into(),
+            "template-studio".into(),
+            "jeser".into(),
+            "jeser".into(),
+        ],
+    );
+    assert_eq!(
+        names,
+        vec![
+            "devforge-vigie",
+            "devforge-template-studio",
+            "devforge-jeser",
+            "devforge-jeser-2"
+        ]
+    );
+    // Tous distincts : c'est ce qui donne un workerId par dépôt.
+    let mut d = names.clone();
+    d.dedup();
+    assert_eq!(d.len(), names.len());
+    assert_eq!(repo_worker_names_from("", &["a".into()]), vec!["a"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn repo_worker_names_read_origin_remote() {
+    let tmp = std::env::temp_dir().join(format!("cw-names-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let a = tmp.join("02792add-bf8d");
+    std::fs::create_dir_all(&a).unwrap();
+    let ok = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&a)
+        .args(["init", "-q"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        return;
+    }
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(&a)
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://x-access-token:ghp_FAKE@github.com/bobdivx/template-studio.git",
+        ])
+        .status()
+        .unwrap();
+    let names = repo_worker_names("devforge", &[a.display().to_string()]);
+    assert_eq!(names, vec!["devforge-template-studio"]);
     let _ = std::fs::remove_dir_all(&tmp);
 }

@@ -173,7 +173,14 @@ export type CursorWorkerStatus = {
   registered_paths?: string[];
   /** Process actifs (un par dépôt servi) ; null si le worker est arrêté. */
   repos_up?: number | null;
-  repo_workers?: Array<{ path: string; primary: boolean; running: boolean; pid: number | null }>;
+  /** Un process et une machine Cursor (`<nom>-<dépôt>`) par dépôt servi. */
+  repo_workers?: Array<{
+    path: string;
+    name?: string | null;
+    primary: boolean;
+    running: boolean;
+    pid: number | null;
+  }>;
   logs_tail: string;
   hint: string;
 };

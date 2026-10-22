@@ -520,6 +520,64 @@ pub fn build_repo_worker_args(name: &str, dir: &str, data_dir: &str) -> Vec<Stri
     args
 }
 
+/// Nom du dépôt servi (dernier segment du remote `origin`, sinon du dossier).
+pub fn repo_label(remote: Option<&str>, path: &str) -> String {
+    let from_remote = remote
+        .map(|r| r.trim().trim_end_matches('/').trim_end_matches(".git"))
+        .and_then(|r| r.rsplit(['/', ':']).next())
+        .map(slug_name)
+        .filter(|s| !s.is_empty());
+    from_remote
+        .or_else(|| {
+            Path::new(path.trim_end_matches('/'))
+                .file_name()
+                .and_then(|s| s.to_str())
+                .map(slug_name)
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| "repo".into())
+}
+
+/// Un nom de machine Cursor par dépôt : `<nom>-<dépôt>`.
+///
+/// Le CLI mémorise l'identifiant du worker par nom affiché
+/// (`workerIdsByDisplayName` dans son HOME) : des process qui partagent un
+/// nom partagent donc le même workerId, et Cursor confie la session à
+/// n'importe lequel d'entre eux. Un nom distinct par dépôt donne un workerId
+/// distinct et une cible explicite (`worker=devforge-template-studio`).
+pub fn repo_worker_names_from(base: &str, labels: &[String]) -> Vec<String> {
+    let base = slug_name(base);
+    let mut seen: Vec<String> = Vec::with_capacity(labels.len());
+    for label in labels {
+        let raw = if base.is_empty() {
+            label.clone()
+        } else {
+            format!("{base}-{label}")
+        };
+        let mut name = slug_name(&raw);
+        if name.is_empty() {
+            name = "repo".into();
+        }
+        let mut candidate = name.clone();
+        let mut n = 2;
+        while seen.contains(&candidate) {
+            candidate = format!("{name}-{n}");
+            n += 1;
+        }
+        seen.push(candidate);
+    }
+    seen
+}
+
+/// Noms de machine des dépôts servis (lit le remote `origin` de chaque dossier).
+pub fn repo_worker_names(base: &str, workdirs: &[String]) -> Vec<String> {
+    let labels: Vec<String> = workdirs
+        .iter()
+        .map(|d| repo_label(read_git_remote(Path::new(d)).as_deref(), d))
+        .collect();
+    repo_worker_names_from(base, &labels)
+}
+
 /// Workdirs effectifs : repos éligibles, sinon un espace vide géré par DevForge
 /// (le worker démarre quand même et les repos s'ajoutent au prochain relancement).
 pub fn workdirs_or_fallback(paths: &[String]) -> Vec<String> {
@@ -627,15 +685,30 @@ command -v agent >/dev/null 2>&1 || {{ echo "CLI agent absent"; exit 5; }}
 SETSID=""
 command -v setsid >/dev/null 2>&1 && SETSID="setsid"
 K={key}
+# Un nom de machine par dépôt (<nom>-<dépôt>) : le CLI associe le workerId au nom.
+SEEN=" "
+dfname() {{
+  r=$(git -C "$1" remote get-url origin 2>/dev/null)
+  r=${{r%/}}; r=${{r%.git}}; r=${{r##*/}}; r=${{r##*:}}
+  [ -n "$r" ] || r=$(basename "$1")
+  n=$(printf '%s-%s' {name} "$r" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | sed 's/^-*//; s/-*$//' | cut -c1-48)
+  [ -n "$n" ] || n=repo
+  c="$n"; i=2
+  while case "$SEEN" in *" $c "*) true;; *) false;; esac; do c="$n-$i"; i=$((i+1)); done
+  SEEN="$SEEN$c "
+  DFN="$c"
+}}
 FIRST="$1"; shift
 # Un process par dépôt : le CLI exécute chaque session dans son premier --worker-dir.
-CURSOR_API_KEY="$K" $SETSID nohup agent worker --name {name} --worker-dir "$FIRST" --management-addr {mgmt} start </dev/null >"$D/worker.out" 2>"$D/worker.err" &
+dfname "$FIRST" 2>/dev/null; echo "DF_NAME=$DFN"
+CURSOR_API_KEY="$K" $SETSID nohup agent worker --name "$DFN" --worker-dir "$FIRST" --management-addr {mgmt} start </dev/null >"$D/worker.out" 2>"$D/worker.err" &
 echo $! >"$PIDF"
 I=1
 for d in "$@"; do
   S="$D/repos/$I"
   mkdir -p "$S/data"
-  CURSOR_API_KEY="$K" $SETSID nohup agent worker --name {name} --worker-dir "$d" --data-dir "$S/data" start </dev/null >"$S/worker.out" 2>"$S/worker.err" &
+  dfname "$d" 2>/dev/null; echo "DF_NAME=$DFN"
+  CURSOR_API_KEY="$K" $SETSID nohup agent worker --name "$DFN" --worker-dir "$d" --data-dir "$S/data" start </dev/null >"$S/worker.out" 2>"$S/worker.err" &
   echo $! >"$S/worker.pid"
   I=$((I+1))
 done
@@ -719,6 +792,8 @@ pub struct ScriptReport {
     pub dirs: Vec<String>,
     /// Process actifs (un par dépôt) après démarrage.
     pub repos_up: Option<u32>,
+    /// Noms de machine Cursor (un par dépôt) annoncés au démarrage.
+    pub names: Vec<String>,
     pub logs: String,
 }
 
@@ -748,6 +823,7 @@ pub fn parse_script_output(out: &str) -> ScriptReport {
             "DF_READY" => r.ready = Some(v == "1"),
             "DF_DIR" => r.dirs.push(v.to_string()),
             "DF_REPOS_UP" => r.repos_up = v.parse().ok(),
+            "DF_NAME" if !v.is_empty() => r.names.push(v.to_string()),
             "DF_STOPPED" | "DF_AGENT" | "DF_VERSION" => {}
             _ => logs.push(line),
         }
@@ -879,7 +955,8 @@ fn stop_repo_workers() -> Vec<u32> {
 
 /// État par dépôt servi : le premier est le worker principal, les autres ont
 /// chacun leur process.
-pub fn repo_workers_state(registered: &[String]) -> Vec<Value> {
+pub fn repo_workers_state(base_name: &str, registered: &[String]) -> Vec<Value> {
+    let names = repo_worker_names(base_name, registered);
     registered
         .iter()
         .enumerate()
@@ -891,6 +968,7 @@ pub fn repo_workers_state(registered: &[String]) -> Vec<Value> {
             };
             json!({
                 "path": path,
+                "name": names.get(i),
                 "primary": i == 0,
                 "running": pid.is_some(),
                 "pid": pid,
@@ -1053,21 +1131,22 @@ pub fn start_named(
     }
     ensure_state_dir()?;
     let workdirs = workdirs_or_fallback(workdirs);
-    let args = build_worker_args(name, &workdirs[..1])?;
+    let names = repo_worker_names(name, &workdirs);
+    let args = build_worker_args(&names[0], &workdirs[..1])?;
     let pid = spawn_worker_process(bin, &args, &out_path(), &err_path(), api_key.as_deref())?;
     std::fs::write(pid_path(), pid.to_string()).map_err(|e| e.to_string())?;
     save_registered(&workdirs)?;
 
     let mut extra: Vec<(String, u32)> = Vec::new();
     let mut extra_errors: Vec<String> = Vec::new();
-    for dir in workdirs.iter().skip(1) {
+    for (dir, repo_name) in workdirs.iter().zip(names.iter()).skip(1) {
         let slot = repo_slot_dir(dir);
         let data = slot.join("data");
         if let Err(e) = std::fs::create_dir_all(&data) {
             extra_errors.push(format!("{dir} : {e}"));
             continue;
         }
-        let args = build_repo_worker_args(name, dir, &data.display().to_string());
+        let args = build_repo_worker_args(repo_name, dir, &data.display().to_string());
         match spawn_worker_process(
             bin,
             &args,
@@ -1111,10 +1190,13 @@ pub fn start_named(
         "binary": bin.display().to_string(),
         "workdirs": workdirs,
         "workdirs_count": workdirs.len(),
+        "machine_names": names,
         "processes": 1 + extra.len(),
         "repo_errors": extra_errors,
         "message": if extra_errors.is_empty() {
-            format!("Worker « {name} » démarré : {serving} repo(s), un process par repo")
+            format!(
+                "Worker démarré : {serving} repo(s), une machine Cursor par dépôt ({name}-<dépôt>)"
+            )
         } else {
             format!(
                 "Worker « {name} » démarré : {serving}/{} repo(s) actifs",
@@ -1158,7 +1240,7 @@ pub async fn status_json(pool: &PgPool, node_name: &str) -> Result<Value, String
     };
     let key_invalid = key.is_some() && logs_show_invalid_key(&logs);
     let registered = load_registered();
-    let repo_workers = repo_workers_state(&registered);
+    let repo_workers = repo_workers_state(&name, &registered);
     let repos_up = repo_workers
         .iter()
         .filter(|w| w["running"].as_bool() == Some(true))
@@ -1366,7 +1448,7 @@ pub fn status_hint(cli: bool, key: bool, running: bool, ready: Option<bool>) -> 
     } else if ready == Some(false) {
         "Worker démarré, connexion à Cursor en cours."
     } else {
-        "Worker connecté : choisis cette machine dans Cursor (My Machines) ou Grok Bot (worker=<nom>)."
+        "Worker connecté : une machine par dépôt. Dans Cursor (My Machines) ou Grok Bot, choisis <nom>-<dépôt> (ex. worker=<nom>-mon-depot)."
     }
 }
 
