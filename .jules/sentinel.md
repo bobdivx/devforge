@@ -6,3 +6,9 @@
 **Vulnerability:** The `validate_read_only` function in `crates/agent/src/tools/workdir_cmd.rs` allowed command parsing bypass (using quoted paths like `cat ".."/".."/etc/passwd`) which facilitated path traversal because the check only matched against the literal block string `../`.
 **Learning:** Checking for exact substrings against raw commands is highly fragile against obfuscation, such as Unix-style quotation.
 **Prevention:** Validation for string containment (such as blocking `..`) should run against the tokenized and normalized (i.e., lower-case without surrounding quotes) arguments, not the unparsed raw command line.
+
+
+## 2026-10-18 - [Timing Attack in Webhook Signature Verification]
+**Vulnerability:** The `verify_github_sig` function in `apps/server/src/infra_routes.rs` verified GitHub webhook signatures using standard string comparison `expected.eq_ignore_ascii_case(hex_sig)`.
+**Learning:** String comparison functions exit early as soon as a character mismatch is found. In a cryptographic context, this variable response time leaks information and allows an attacker to perform a timing attack to forge a valid HMAC signature by guessing it byte by byte.
+**Prevention:** Always use a constant-time comparison library (like `hmac`'s `verify_slice()`) to compare cryptographic hashes, secrets, and signatures to prevent side-channel timing attacks. Avoid custom implementations of standard cryptographic algorithms.

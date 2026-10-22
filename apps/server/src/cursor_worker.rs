@@ -30,12 +30,21 @@ pub const INSTALL_URL: &str = "https://cursor.com/install";
 pub struct WorkerDir {
     pub project_uuid: String,
     pub project_name: String,
+    /// Dossier servi au worker : le worktree `<workdir>-cursor` (jamais le checkout de déploiement).
     pub path: String,
+    /// Checkout du projet (celui que les déploiements remettent à `origin/<branche>`).
+    pub source_path: String,
+    /// Branche de production du projet (base du worktree).
+    pub branch: String,
     pub exists: bool,
     pub has_git: bool,
+    /// Le worktree `-cursor` existe déjà (sinon il est créé au démarrage).
+    pub worktree_ready: bool,
     pub git_remote: Option<String>,
-    /// Inclus dans le prochain / dernier démarrage (existe + .git).
+    /// Inclus dans le prochain / dernier démarrage (checkout du projet présent).
     pub eligible: bool,
+    /// Raison affichée quand le projet n'est pas servi.
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -398,8 +407,9 @@ pub fn agent_version(bin: &Path) -> Option<String> {
 }
 
 pub async fn list_project_workdirs(pool: &PgPool) -> Result<Vec<WorkerDir>, String> {
-    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
-        r#"SELECT uuid, name, COALESCE(workdir, ''), COALESCE(git_repository, '')
+    let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
+        r#"SELECT uuid, name, COALESCE(workdir, ''), COALESCE(git_repository, ''),
+                  COALESCE(git_branch, '')
            FROM projects ORDER BY name COLLATE "C""#,
     )
     .fetch_all(pool)
@@ -407,24 +417,243 @@ pub async fn list_project_workdirs(pool: &PgPool) -> Result<Vec<WorkerDir>, Stri
     .map_err(|e| e.to_string())?;
 
     let mut dirs = Vec::with_capacity(rows.len());
-    for (uuid, name, workdir, _repo) in rows {
-        let path = devforge_deploy::resolve_project_workdir(&workdir, &uuid);
-        let p = Path::new(&path);
-        let exists = p.is_dir();
-        let has_git = exists && (p.join(".git").exists());
-        let git_remote = if has_git { read_git_remote(p) } else { None };
-        let eligible = exists && has_git;
-        dirs.push(WorkerDir {
-            project_uuid: uuid,
-            project_name: name,
-            path,
-            exists,
-            has_git,
-            git_remote,
-            eligible,
-        });
+    for (uuid, name, workdir, _repo, branch) in rows {
+        let source = devforge_deploy::resolve_project_workdir(&workdir, &uuid);
+        dirs.push(worker_dir_for(uuid, name, source, &branch));
     }
     Ok(dirs)
+}
+
+/// Décrit un projet pour le worker : le dossier servi est toujours le worktree
+/// `<workdir>-cursor`, jamais le checkout que les déploiements remettent à zéro.
+pub fn worker_dir_for(uuid: String, name: String, source: String, branch: &str) -> WorkerDir {
+    let p = Path::new(&source);
+    let exists = p.is_dir();
+    let has_git = exists && p.join(".git").exists();
+    let git_remote = if has_git { read_git_remote(p) } else { None };
+    let path = cursor_worktree_path(&source);
+    let worktree_ready = Path::new(&path).join(".git").exists();
+    WorkerDir {
+        project_uuid: uuid,
+        project_name: name,
+        path,
+        source_path: source,
+        branch: safe_branch(branch).unwrap_or_else(|| "main".into()),
+        exists,
+        has_git,
+        worktree_ready,
+        git_remote,
+        eligible: has_git,
+        note: (!has_git).then(|| NO_CHECKOUT_NOTE.to_string()),
+    }
+}
+
+// ───────────────────────── Worktree `-cursor` ─────────────────────────
+
+/// Suffixe du worktree dédié aux agents Cursor, à côté du checkout du projet
+/// (comme `<workdir>-dev` pour l'environnement dev).
+pub const CURSOR_WORKTREE_SUFFIX: &str = "-cursor";
+/// Branche locale du worktree (les agents y travaillent, puis poussent / ouvrent une PR).
+pub const CURSOR_BRANCH: &str = "cursor/devforge";
+pub const NO_CHECKOUT_NOTE: &str = "pas encore de checkout : déployer une fois";
+
+/// `<workdir>` → `<workdir>-cursor`.
+pub fn cursor_worktree_path(source: &str) -> String {
+    let s = source.trim_end_matches('/');
+    format!("{s}{CURSOR_WORKTREE_SUFFIX}")
+}
+
+/// Nom de branche sûr pour une commande git (sinon `None`).
+pub fn safe_branch(raw: &str) -> Option<String> {
+    let b = raw.trim();
+    let ok = !b.is_empty()
+        && b.len() <= 200
+        && !b.starts_with('-')
+        && !b.starts_with('/')
+        && !b.ends_with('/')
+        && !b.contains("..")
+        && !b.ends_with(".lock")
+        && b.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'));
+    ok.then(|| b.to_string())
+}
+
+fn git_in(dir: &Path, args: &[&str]) -> Result<String, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("git introuvable : {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        Err(devforge_shared::redact::redact_urls_in_text(&msg))
+    }
+}
+
+/// Résultat de [`ensure_cursor_worktree`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CursorWorktree {
+    pub path: String,
+    pub created: bool,
+}
+
+/// Crée le worktree `<workdir>-cursor` s'il manque (`git worktree add` depuis
+/// le checkout du projet, branche `cursor/devforge` partant de
+/// `origin/<branche>`). Un worktree existant n'est jamais modifié. Un dossier
+/// présent mais qui n'est pas un worktree est laissé tel quel (erreur).
+///
+/// `branch` : branche de production ; vide → branche courante du checkout.
+pub fn ensure_cursor_worktree(
+    source: &Path,
+    branch: Option<&str>,
+) -> Result<CursorWorktree, String> {
+    if !source.join(".git").exists() {
+        return Err(NO_CHECKOUT_NOTE.into());
+    }
+    let src = source.to_string_lossy().to_string();
+    let wt = cursor_worktree_path(&src);
+    let wt_path = Path::new(&wt);
+    if wt_path.join(".git").exists() {
+        return match git_in(wt_path, &["rev-parse", "--is-inside-work-tree"]) {
+            Ok(_) => Ok(CursorWorktree {
+                path: wt,
+                created: false,
+            }),
+            Err(e) => Err(format!("{wt} : worktree illisible, laissé tel quel ({e})")),
+        };
+    }
+    if wt_path.exists()
+        && std::fs::read_dir(wt_path)
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(true)
+    {
+        return Err(format!(
+            "{wt} existe déjà sans dépôt Git : laissé tel quel, à vider ou renommer"
+        ));
+    }
+    let branch = branch
+        .and_then(safe_branch)
+        .or_else(|| {
+            git_in(source, &["symbolic-ref", "--short", "-q", "HEAD"])
+                .ok()
+                .and_then(|b| safe_branch(&b))
+        })
+        .unwrap_or_else(|| "main".into());
+    // Entrées orphelines (dossier `-cursor` supprimé à la main).
+    let _ = git_in(source, &["worktree", "prune"]);
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    let base = if git_in(source, &["rev-parse", "--verify", "--quiet", &remote_ref]).is_ok() {
+        format!("origin/{branch}")
+    } else {
+        "HEAD".to_string()
+    };
+    let local_branch = format!("refs/heads/{CURSOR_BRANCH}");
+    let res = if git_in(source, &["show-ref", "--verify", "--quiet", &local_branch]).is_ok() {
+        // La branche existe (worktree recréé) : on la reprend telle quelle, sans perdre ses commits.
+        git_in(source, &["worktree", "add", "--quiet", &wt, CURSOR_BRANCH])
+    } else {
+        git_in(
+            source,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "--no-track",
+                "-b",
+                CURSOR_BRANCH,
+                &wt,
+                &base,
+            ],
+        )
+    };
+    res.map_err(|e| format!("{wt} : création du worktree impossible ({e})"))?;
+    Ok(CursorWorktree {
+        path: wt,
+        created: true,
+    })
+}
+
+/// Prépare les dossiers à servir : un worktree `-cursor` par projet cloné
+/// (créé si besoin), puis les dossiers extra tels quels.
+/// Renvoie (dossiers servis, erreurs lisibles).
+pub fn prepare_worker_paths(dirs: &[WorkerDir], extra_raw: &str) -> (Vec<String>, Vec<String>) {
+    let mut paths = Vec::new();
+    let mut errors = Vec::new();
+    for d in dirs.iter().filter(|d| d.eligible) {
+        match ensure_cursor_worktree(Path::new(&d.source_path), Some(&d.branch)) {
+            Ok(w) => paths.push(w.path),
+            Err(e) => errors.push(format!("{} : {e}", d.project_name)),
+        }
+    }
+    for extra in extra_paths(extra_raw, &paths) {
+        paths.push(extra);
+    }
+    (paths, errors)
+}
+
+fn extra_paths(extra_raw: &str, existing: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for extra in parse_extra_dirs(extra_raw) {
+        let p = Path::new(&extra);
+        if p.is_dir()
+            && p.join(".git").exists()
+            && !existing.iter().any(|x| x == &extra)
+            && !out.contains(&extra)
+        {
+            out.push(extra);
+        }
+    }
+    out
+}
+
+/// « Remettre à jour » : replace le worktree `-cursor` sur `origin/<branche>`
+/// (branche `cursor/devforge`). Si des changements non publiés existent, ils
+/// sont d'abord sauvegardés (même format que les sauvegardes du brouillon).
+/// Renvoie l'identifiant de la sauvegarde éventuelle.
+pub fn refresh_cursor_worktree(
+    worktree: &Path,
+    branch: &str,
+    backup_root: &Path,
+) -> Result<Option<String>, String> {
+    if !worktree.join(".git").exists() {
+        return Err("worktree absent : il sera créé au prochain démarrage".into());
+    }
+    let branch = safe_branch(branch).unwrap_or_else(|| "main".into());
+    // Best effort : les refs `origin/*` sont partagées avec le checkout (déploiements).
+    let _ = crate::draft::fetch(worktree, &branch, None);
+    let st = crate::draft::status(worktree, &branch, None);
+    let mut backup_id = None;
+    let has_local = st.dirty || st.ahead > 0;
+    if has_local {
+        let b = crate::draft::backup(worktree, backup_root, &st.files, "cursor-worker")
+            .map_err(|e| format!("sauvegarde impossible, rien n'a été modifié ({e})"))?;
+        backup_id = Some(b.id);
+    }
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    let target = if git_in(worktree, &["rev-parse", "--verify", "--quiet", &remote_ref]).is_ok() {
+        format!("origin/{branch}")
+    } else {
+        "HEAD".to_string()
+    };
+    git_in(
+        worktree,
+        &[
+            "checkout",
+            "--quiet",
+            "-f",
+            "--no-track",
+            "-B",
+            CURSOR_BRANCH,
+            &target,
+        ],
+    )?;
+    crate::draft::discard(worktree, &branch, None).map_err(|e| e.0)?;
+    Ok(backup_id)
 }
 
 fn read_git_remote(workdir: &Path) -> Option<String> {
@@ -455,18 +684,15 @@ pub fn parse_extra_dirs(raw: &str) -> Vec<String> {
         .collect()
 }
 
+/// Dossiers servis (sans rien créer) : worktrees `-cursor` des projets clonés + extra.
 pub fn eligible_paths(dirs: &[WorkerDir], extra_raw: &str) -> Vec<String> {
     let mut paths: Vec<String> = dirs
         .iter()
         .filter(|d| d.eligible)
         .map(|d| d.path.clone())
         .collect();
-    for extra in parse_extra_dirs(extra_raw) {
-        let p = Path::new(&extra);
-        if p.is_dir() && p.join(".git").exists() && !paths.iter().any(|x| x == &extra) {
-            paths.push(extra);
-        }
-    }
+    let extras = extra_paths(extra_raw, &paths);
+    paths.extend(extras);
     paths
 }
 
@@ -518,6 +744,64 @@ pub fn build_repo_worker_args(name: &str, dir: &str, data_dir: &str) -> Vec<Stri
     args.push(data_dir.to_string());
     args.push("start".into());
     args
+}
+
+/// Nom du dépôt servi (dernier segment du remote `origin`, sinon du dossier).
+pub fn repo_label(remote: Option<&str>, path: &str) -> String {
+    let from_remote = remote
+        .map(|r| r.trim().trim_end_matches('/').trim_end_matches(".git"))
+        .and_then(|r| r.rsplit(['/', ':']).next())
+        .map(slug_name)
+        .filter(|s| !s.is_empty());
+    from_remote
+        .or_else(|| {
+            Path::new(path.trim_end_matches('/'))
+                .file_name()
+                .and_then(|s| s.to_str())
+                .map(slug_name)
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| "repo".into())
+}
+
+/// Un nom de machine Cursor par dépôt : `<nom>-<dépôt>`.
+///
+/// Le CLI mémorise l'identifiant du worker par nom affiché
+/// (`workerIdsByDisplayName` dans son HOME) : des process qui partagent un
+/// nom partagent donc le même workerId, et Cursor confie la session à
+/// n'importe lequel d'entre eux. Un nom distinct par dépôt donne un workerId
+/// distinct et une cible explicite (`worker=devforge-template-studio`).
+pub fn repo_worker_names_from(base: &str, labels: &[String]) -> Vec<String> {
+    let base = slug_name(base);
+    let mut seen: Vec<String> = Vec::with_capacity(labels.len());
+    for label in labels {
+        let raw = if base.is_empty() {
+            label.clone()
+        } else {
+            format!("{base}-{label}")
+        };
+        let mut name = slug_name(&raw);
+        if name.is_empty() {
+            name = "repo".into();
+        }
+        let mut candidate = name.clone();
+        let mut n = 2;
+        while seen.contains(&candidate) {
+            candidate = format!("{name}-{n}");
+            n += 1;
+        }
+        seen.push(candidate);
+    }
+    seen
+}
+
+/// Noms de machine des dépôts servis (lit le remote `origin` de chaque dossier).
+pub fn repo_worker_names(base: &str, workdirs: &[String]) -> Vec<String> {
+    let labels: Vec<String> = workdirs
+        .iter()
+        .map(|d| repo_label(read_git_remote(Path::new(d)).as_deref(), d))
+        .collect();
+    repo_worker_names_from(base, &labels)
 }
 
 /// Workdirs effectifs : repos éligibles, sinon un espace vide géré par DevForge
@@ -604,15 +888,50 @@ echo "DF_RUNNING=0"
 
 /// Démarre le worker en arrière-plan sur le nœud et vérifie qu'il tient.
 ///
-/// `candidates` : chemins projets ; seuls ceux avec `.git` sont servis
-/// (sinon un espace vide). La clé est passée via l'environnement, jamais
-/// écrite sur disque ni affichée.
-pub fn start_script(base: &ScriptBase, name: &str, candidates: &[String], api_key: &str) -> String {
-    let dirs: Vec<String> = candidates.iter().map(|c| shell_quote(c)).collect();
+/// `projects` : (checkout du projet, branche de prod). Chaque projet cloné est
+/// servi depuis son worktree `<checkout>-cursor`, créé sur place s'il manque
+/// (jamais le checkout de déploiement). `extras` : dossiers servis tels quels.
+/// La clé est passée via l'environnement, jamais écrite sur disque ni affichée.
+pub fn start_script(
+    base: &ScriptBase,
+    name: &str,
+    projects: &[(String, String)],
+    extras: &[String],
+    api_key: &str,
+) -> String {
+    let specs: Vec<String> = projects
+        .iter()
+        .map(|(p, b)| {
+            let b = safe_branch(b).unwrap_or_default();
+            shell_quote(&format!("{p}|{b}"))
+        })
+        .collect();
+    let extra_dirs: Vec<String> = extras.iter().map(|c| shell_quote(c)).collect();
     format!(
         r#"{stop}set --
 N=0
-for d in {dirs}; do
+for spec in {specs}; do
+  d=${{spec%|*}}; b=${{spec##*|}}
+  [ -n "$d" ] && [ -d "$d/.git" ] || continue
+  [ "$N" -ge {max} ] && break
+  w="$d{suffix}"
+  if [ ! -e "$w/.git" ]; then
+    [ -n "$b" ] || b=$(git -C "$d" symbolic-ref --short -q HEAD 2>/dev/null)
+    [ -n "$b" ] || b=main
+    git -C "$d" worktree prune >/dev/null 2>&1
+    base="origin/$b"
+    git -C "$d" rev-parse --verify --quiet "refs/remotes/origin/$b" >/dev/null 2>&1 || base=HEAD
+    if git -C "$d" show-ref --verify --quiet refs/heads/{branch} 2>/dev/null; then
+      git -C "$d" worktree add --quiet "$w" {branch} >/dev/null 2>&1
+    else
+      git -C "$d" worktree add --quiet --no-track -b {branch} "$w" "$base" >/dev/null 2>&1
+    fi || {{ echo "DF_WT_ERR=$w"; continue; }}
+  fi
+  set -- "$@" "$w"
+  N=$((N+1))
+  echo "DF_DIR=$w"
+done
+for d in {extra_dirs}; do
   [ -n "$d" ] && [ -d "$d/.git" ] || continue
   [ "$N" -ge {max} ] && break
   set -- "$@" "$d"
@@ -627,15 +946,30 @@ command -v agent >/dev/null 2>&1 || {{ echo "CLI agent absent"; exit 5; }}
 SETSID=""
 command -v setsid >/dev/null 2>&1 && SETSID="setsid"
 K={key}
+# Un nom de machine par dépôt (<nom>-<dépôt>) : le CLI associe le workerId au nom.
+SEEN=" "
+dfname() {{
+  r=$(git -C "$1" remote get-url origin 2>/dev/null)
+  r=${{r%/}}; r=${{r%.git}}; r=${{r##*/}}; r=${{r##*:}}
+  [ -n "$r" ] || r=$(basename "$1")
+  n=$(printf '%s-%s' {name} "$r" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | sed 's/^-*//; s/-*$//' | cut -c1-48)
+  [ -n "$n" ] || n=repo
+  c="$n"; i=2
+  while case "$SEEN" in *" $c "*) true;; *) false;; esac; do c="$n-$i"; i=$((i+1)); done
+  SEEN="$SEEN$c "
+  DFN="$c"
+}}
 FIRST="$1"; shift
 # Un process par dépôt : le CLI exécute chaque session dans son premier --worker-dir.
-CURSOR_API_KEY="$K" $SETSID nohup agent worker --name {name} --worker-dir "$FIRST" --management-addr {mgmt} start </dev/null >"$D/worker.out" 2>"$D/worker.err" &
+dfname "$FIRST" 2>/dev/null; echo "DF_NAME=$DFN"
+CURSOR_API_KEY="$K" $SETSID nohup agent worker --name "$DFN" --worker-dir "$FIRST" --management-addr {mgmt} start </dev/null >"$D/worker.out" 2>"$D/worker.err" &
 echo $! >"$PIDF"
 I=1
 for d in "$@"; do
   S="$D/repos/$I"
   mkdir -p "$S/data"
-  CURSOR_API_KEY="$K" $SETSID nohup agent worker --name {name} --worker-dir "$d" --data-dir "$S/data" start </dev/null >"$S/worker.out" 2>"$S/worker.err" &
+  dfname "$d" 2>/dev/null; echo "DF_NAME=$DFN"
+  CURSOR_API_KEY="$K" $SETSID nohup agent worker --name "$DFN" --worker-dir "$d" --data-dir "$S/data" start </dev/null >"$S/worker.out" 2>"$S/worker.err" &
   echo $! >"$S/worker.pid"
   I=$((I+1))
 done
@@ -663,11 +997,18 @@ else
 fi
 "#,
         stop = stop_script(base).replace("echo \"DF_RUNNING=0\"\n", ""),
-        dirs = if dirs.is_empty() {
+        specs = if specs.is_empty() {
             "''".to_string()
         } else {
-            dirs.join(" ")
+            specs.join(" ")
         },
+        extra_dirs = if extra_dirs.is_empty() {
+            "''".to_string()
+        } else {
+            extra_dirs.join(" ")
+        },
+        suffix = CURSOR_WORKTREE_SUFFIX,
+        branch = CURSOR_BRANCH,
         max = MAX_WORKER_DIRS,
         key = shell_quote(api_key),
         name = shell_quote(name),
@@ -719,6 +1060,10 @@ pub struct ScriptReport {
     pub dirs: Vec<String>,
     /// Process actifs (un par dépôt) après démarrage.
     pub repos_up: Option<u32>,
+    /// Noms de machine Cursor (un par dépôt) annoncés au démarrage.
+    pub names: Vec<String>,
+    /// Worktrees `-cursor` impossibles à créer (projets non servis).
+    pub worktree_errors: Vec<String>,
     pub logs: String,
 }
 
@@ -748,6 +1093,8 @@ pub fn parse_script_output(out: &str) -> ScriptReport {
             "DF_READY" => r.ready = Some(v == "1"),
             "DF_DIR" => r.dirs.push(v.to_string()),
             "DF_REPOS_UP" => r.repos_up = v.parse().ok(),
+            "DF_NAME" if !v.is_empty() => r.names.push(v.to_string()),
+            "DF_WT_ERR" if !v.is_empty() => r.worktree_errors.push(v.to_string()),
             "DF_STOPPED" | "DF_AGENT" | "DF_VERSION" => {}
             _ => logs.push(line),
         }
@@ -879,7 +1226,8 @@ fn stop_repo_workers() -> Vec<u32> {
 
 /// État par dépôt servi : le premier est le worker principal, les autres ont
 /// chacun leur process.
-pub fn repo_workers_state(registered: &[String]) -> Vec<Value> {
+pub fn repo_workers_state(base_name: &str, registered: &[String]) -> Vec<Value> {
+    let names = repo_worker_names(base_name, registered);
     registered
         .iter()
         .enumerate()
@@ -891,6 +1239,7 @@ pub fn repo_workers_state(registered: &[String]) -> Vec<Value> {
             };
             json!({
                 "path": path,
+                "name": names.get(i),
                 "primary": i == 0,
                 "running": pid.is_some(),
                 "pid": pid,
@@ -1052,22 +1401,25 @@ pub fn start_named(
         );
     }
     ensure_state_dir()?;
-    let workdirs = workdirs_or_fallback(workdirs);
-    let args = build_worker_args(name, &workdirs[..1])?;
+    // Chaque projet est servi depuis son worktree `<workdir>-cursor`, créé ici s'il manque.
+    let (workdirs, worktree_errors) = ensure_worktrees_for(workdirs);
+    let workdirs = workdirs_or_fallback(&workdirs);
+    let names = repo_worker_names(name, &workdirs);
+    let args = build_worker_args(&names[0], &workdirs[..1])?;
     let pid = spawn_worker_process(bin, &args, &out_path(), &err_path(), api_key.as_deref())?;
     std::fs::write(pid_path(), pid.to_string()).map_err(|e| e.to_string())?;
     save_registered(&workdirs)?;
 
     let mut extra: Vec<(String, u32)> = Vec::new();
     let mut extra_errors: Vec<String> = Vec::new();
-    for dir in workdirs.iter().skip(1) {
+    for (dir, repo_name) in workdirs.iter().zip(names.iter()).skip(1) {
         let slot = repo_slot_dir(dir);
         let data = slot.join("data");
         if let Err(e) = std::fs::create_dir_all(&data) {
             extra_errors.push(format!("{dir} : {e}"));
             continue;
         }
-        let args = build_repo_worker_args(name, dir, &data.display().to_string());
+        let args = build_repo_worker_args(repo_name, dir, &data.display().to_string());
         match spawn_worker_process(
             bin,
             &args,
@@ -1111,10 +1463,14 @@ pub fn start_named(
         "binary": bin.display().to_string(),
         "workdirs": workdirs,
         "workdirs_count": workdirs.len(),
+        "machine_names": names,
         "processes": 1 + extra.len(),
         "repo_errors": extra_errors,
+        "worktree_errors": worktree_errors,
         "message": if extra_errors.is_empty() {
-            format!("Worker « {name} » démarré : {serving} repo(s), un process par repo")
+            format!(
+                "Worker démarré : {serving} repo(s), une machine Cursor par dépôt ({name}-<dépôt>)"
+            )
         } else {
             format!(
                 "Worker « {name} » démarré : {serving}/{} repo(s) actifs",
@@ -1122,6 +1478,45 @@ pub fn start_named(
             )
         },
     }))
+}
+
+/// Crée les worktrees `-cursor` manquants (branche courante du checkout) ;
+/// un chemin `-cursor` impossible à créer n'est pas servi (jamais de repli sur
+/// le checkout de déploiement).
+pub fn ensure_worktrees_for(workdirs: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut out = Vec::with_capacity(workdirs.len());
+    let mut errors = Vec::new();
+    for d in workdirs {
+        match d.strip_suffix(CURSOR_WORKTREE_SUFFIX) {
+            Some(src) if !Path::new(d).join(".git").exists() => {
+                match ensure_cursor_worktree(Path::new(src), None) {
+                    Ok(w) => out.push(w.path),
+                    Err(e) => errors.push(e),
+                }
+            }
+            _ => out.push(d.clone()),
+        }
+    }
+    (out, errors)
+}
+
+/// Relance avec les projets : worktrees `-cursor` préparés (branche de prod du
+/// projet), puis un process par dossier. Les erreurs de worktree sont jointes
+/// au résultat (`worktree_errors`).
+pub fn restart_with_dirs(
+    settings: &WorkerSettings,
+    bin: &Path,
+    name: &str,
+    dirs: &[WorkerDir],
+) -> Result<Value, String> {
+    let (paths, errors) = prepare_worker_paths(dirs, &settings.extra_dirs);
+    let mut v = restart_named(settings, bin, name, &paths)?;
+    if let Some(arr) = v.get_mut("worktree_errors").and_then(Value::as_array_mut) {
+        let later = std::mem::take(arr);
+        arr.extend(errors.into_iter().map(Value::String));
+        arr.extend(later);
+    }
+    Ok(v)
 }
 
 pub fn restart_named(
@@ -1158,7 +1553,7 @@ pub async fn status_json(pool: &PgPool, node_name: &str) -> Result<Value, String
     };
     let key_invalid = key.is_some() && logs_show_invalid_key(&logs);
     let registered = load_registered();
-    let repo_workers = repo_workers_state(&registered);
+    let repo_workers = repo_workers_state(&name, &registered);
     let repos_up = repo_workers
         .iter()
         .filter(|w| w["running"].as_bool() == Some(true))
@@ -1366,7 +1761,7 @@ pub fn status_hint(cli: bool, key: bool, running: bool, ready: Option<bool>) -> 
     } else if ready == Some(false) {
         "Worker démarré, connexion à Cursor en cours."
     } else {
-        "Worker connecté : choisis cette machine dans Cursor (My Machines) ou Grok Bot (worker=<nom>)."
+        "Worker connecté : une machine par dépôt. Dans Cursor (My Machines) ou Grok Bot, choisis <nom>-<dépôt> (ex. worker=<nom>-mon-depot)."
     }
 }
 
@@ -1390,13 +1785,21 @@ pub fn spawn_autostart(pool: PgPool, node_name: String) {
                 return;
             }
         };
-        let paths = eligible_paths(&dirs, &settings.extra_dirs);
         let Some(bin) = resolve_agent_binary(&settings) else {
             tracing::warn!("cursor-worker autostart: CLI absent");
             return;
         };
         let name = resolve_worker_name_for_node(&settings, &node_name);
-        match start_named(&settings, &bin, &name, &paths) {
+        let started = tokio::task::spawn_blocking(move || {
+            let (paths, errors) = prepare_worker_paths(&dirs, &settings.extra_dirs);
+            for e in &errors {
+                tracing::warn!(error = %e, "cursor-worker autostart: worktree");
+            }
+            start_named(&settings, &bin, &name, &paths)
+        })
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()));
+        match started {
             Ok(v) => tracing::info!(name = ?v.get("name"), "cursor-worker autostart ok"),
             Err(e) => tracing::warn!(error = %tail_lines(&e, 3), "cursor-worker autostart"),
         }
