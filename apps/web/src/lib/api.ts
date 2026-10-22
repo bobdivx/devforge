@@ -161,11 +161,18 @@ export type CursorWorkerStatus = {
   workdirs: Array<{
     project_uuid: string;
     project_name: string;
+    /** Dossier servi : worktree `<workdir>-cursor` (jamais le checkout de déploiement). */
     path: string;
+    /** Checkout du projet (remis à `origin/<branche>` par les déploiements). */
+    source_path?: string;
+    branch?: string;
     exists: boolean;
     has_git: boolean;
+    /** Le worktree `-cursor` existe (sinon créé au démarrage). */
+    worktree_ready?: boolean;
     git_remote?: string | null;
     eligible: boolean;
+    note?: string | null;
   }>;
   /** null pour un nœud distant (compté au démarrage). */
   eligible_count: number | null;
@@ -1972,6 +1979,19 @@ export const api = {
       message?: string;
       error?: string;
     }>('/cursor-worker/restart', { method: 'POST', body: '{}' }),
+  /** « Remettre à jour » : worktrees `-cursor` sur `origin/<branche>` (sauvegarde d'abord). */
+  cursorWorkerRefresh: () =>
+    request<{
+      ok: boolean;
+      message?: string;
+      results: Array<{
+        project: string;
+        path: string;
+        ok: boolean;
+        backup?: string | null;
+        error?: string | null;
+      }>;
+    }>('/cursor-worker/refresh', { method: 'POST', body: '{}' }),
   cursorWorkerSettings: () =>
     request<{
       ok: boolean;

@@ -3,6 +3,7 @@ import {
   cursorKeyProblem,
   cursorKeyWarning,
   installNeeds,
+  repoBadge,
   workerSummary,
 } from './CursorWorkerSettingsPanel';
 
@@ -80,5 +81,30 @@ describe('Cursor login (no key)', () => {
       key_unsupported: true,
     };
     expect(workerSummary(s).detail).toMatch(/grok_/);
+  });
+});
+
+describe('repoBadge', () => {
+  const w = {
+    project_uuid: 'u',
+    project_name: 'template-studio',
+    path: '/data/devforge/applications/u-cursor',
+    exists: true,
+    has_git: true,
+    eligible: true,
+  };
+  it('montre le dossier -cursor servi, créé au démarrage s’il manque', () => {
+    expect(repoBadge({ ...w, worktree_ready: true })).toEqual({ label: 'Servi', tone: 'ok' });
+    expect(repoBadge({ ...w, worktree_ready: false }).label).toBe('Créé au démarrage');
+  });
+  it('signale un projet sans checkout', () => {
+    expect(
+      repoBadge({
+        ...w,
+        has_git: false,
+        eligible: false,
+        note: 'pas encore de checkout : déployer une fois',
+      }).label,
+    ).toBe('Pas de checkout');
   });
 });

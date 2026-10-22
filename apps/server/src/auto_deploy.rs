@@ -210,8 +210,7 @@ pub(crate) async fn deploy_project(
     if let Some(sha) = target_sha {
         crate::auto_deploy_guard::set_target_sha(&state.pool, &dep_uuid, sha).await;
     }
-    // Le déploiement fait un `reset --hard` du workdir : le brouillon en cours est sauvegardé.
-    crate::auto_deploy_guard::backup_draft_before_reset(state, project).await;
+    // Le brouillon en cours est sauvegardé par `run_real_deploy_at` (tous les déploiements).
 
     let _ = sqlx::query("UPDATE projects SET status = 'deploying', updated_at = $1 WHERE id = $2")
         .bind(&now)

@@ -90,7 +90,8 @@ fn scripts_never_print_key_and_use_env() {
     let s = start_script(
         &ScriptBase::NodeDataDir,
         "demeter",
-        &["/data/applications/a".into()],
+        &[("/data/applications/a".into(), "main".into())],
+        &[],
         key,
     );
     assert!(s.contains("K='key_SECRET_0123456789'"));
@@ -169,34 +170,30 @@ fn scripts_run_end_to_end_with_fake_agent() {
     std::fs::create_dir_all(repo.join(".git")).unwrap();
     let repo_b = tmp.join("repo-b");
     std::fs::create_dir_all(&repo_b).unwrap();
-    // Vrai dépôt : le nom de machine vient du remote `origin`.
-    let git_ok = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&repo_b)
-        .args(["init", "-q"])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-        && std::process::Command::new("git")
+    // Vrai dépôt (avec un commit) : servi via son worktree `-cursor`, le nom
+    // de machine vient du remote `origin`.
+    let g = |args: &[&str]| {
+        std::process::Command::new("git")
             .arg("-C")
             .arg(&repo_b)
-            .args([
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/o/Template-Studio.git",
-            ])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-    if !git_ok {
-        std::fs::create_dir_all(repo_b.join(".git")).unwrap();
-    }
-    let name_b = if git_ok {
-        "demo-template-studio"
-    } else {
-        "demo-repo-b"
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     };
+    let git_ok = g(&["init", "-q", "-b", "main"])
+        && g(&[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/o/Template-Studio.git",
+        ])
+        && g(&["commit", "-q", "--allow-empty", "-m", "init"]);
+    if !git_ok {
+        return; // git absent : le reste est couvert par les autres tests.
+    }
+    let wt_b = format!("{}-cursor", repo_b.display());
     let base = ScriptBase::Literal(base_dir.display().to_string());
 
     let run = |script: &str| {
@@ -220,36 +217,48 @@ fn scripts_run_end_to_end_with_fake_agent() {
         &base,
         "demo",
         &[
-            repo.display().to_string(),
-            "/nope".into(),
-            repo_b.display().to_string(),
+            ("/nope".into(), "main".into()),
+            (repo_b.display().to_string(), "main".into()),
         ],
+        &[repo.display().to_string()],
         "key_0123456789abcdef",
     ));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{stdout}");
     let r = parse_script_output(&stdout);
     assert!(r.running);
-    assert_eq!(
-        r.dirs,
-        vec![repo.display().to_string(), repo_b.display().to_string()]
-    );
-    // Un process par dépôt : le principal sert UNIQUEMENT le premier dépôt.
+    // Le projet est servi depuis son worktree, jamais depuis le checkout.
+    assert_eq!(r.dirs, vec![wt_b.clone(), repo.display().to_string()]);
+    assert!(r.worktree_errors.is_empty(), "{stdout}");
+    assert!(Path::new(&wt_b).join(".git").exists());
+    let head = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&wt_b)
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&head.stdout).trim(), CURSOR_BRANCH);
+    // Un process par dépôt : le principal sert UNIQUEMENT le premier dossier.
     assert_eq!(r.repos_up, Some(2));
     let log = std::fs::read_to_string(base_dir.join("worker.out")).unwrap();
     // Un nom de machine par dépôt (sinon tous partagent le même workerId).
-    assert!(log.contains("--name demo-repo-a "), "{log}");
-    assert_eq!(r.names, vec!["demo-repo-a".to_string(), name_b.to_string()]);
-    assert!(log.contains(&format!("--worker-dir {}", repo.display())));
-    assert!(!log.contains("repo-b"), "{log}");
+    assert!(log.contains("--name demo-template-studio "), "{log}");
+    assert_eq!(
+        r.names,
+        vec![
+            "demo-template-studio".to_string(),
+            "demo-repo-a".to_string()
+        ]
+    );
+    assert!(log.contains(&format!("--worker-dir {wt_b} ")), "{log}");
     assert!(log.contains("--management-addr"));
     assert!(!log.contains("key_0123456789abcdef"));
     let log_b = std::fs::read_to_string(base_dir.join("repos/1/worker.out")).unwrap();
-    assert!(log_b.contains(&format!("--name {name_b} ")), "{log_b}");
-    assert!(log_b.contains(&format!("--worker-dir {}", repo_b.display())));
+    assert!(log_b.contains("--name demo-repo-a "), "{log_b}");
+    assert!(log_b.contains(&format!("--worker-dir {}", repo.display())));
     assert!(log_b.contains("--data-dir"));
     assert!(!log_b.contains("--management-addr"));
-    assert!(!log_b.contains("repo a"));
+    assert!(!log_b.contains("repo-b"));
     let pid_b: u32 = std::fs::read_to_string(base_dir.join("repos/1/worker.pid"))
         .unwrap()
         .trim()
@@ -496,5 +505,196 @@ fn repo_worker_names_read_origin_remote() {
         .unwrap();
     let names = repo_worker_names("devforge", &[a.display().to_string()]);
     assert_eq!(names, vec!["devforge-template-studio"]);
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cursor_worktree_path_and_branch_rules() {
+    assert_eq!(
+        cursor_worktree_path("/data/devforge/applications/02792add/"),
+        "/data/devforge/applications/02792add-cursor"
+    );
+    assert_eq!(safe_branch(" main "), Some("main".into()));
+    assert_eq!(safe_branch("release/2.0"), Some("release/2.0".into()));
+    assert_eq!(safe_branch(""), None);
+    assert_eq!(safe_branch("-x"), None);
+    assert_eq!(safe_branch("a..b"), None);
+    assert_eq!(safe_branch("main; rm -rf /"), None);
+    let d = worker_dir_for("u".into(), "Cheval".into(), "/nope/cheval".into(), "");
+    assert!(!d.eligible);
+    assert_eq!(d.path, "/nope/cheval-cursor");
+    assert_eq!(d.note.as_deref(), Some(NO_CHECKOUT_NOTE));
+    assert_eq!(d.branch, "main");
+    // Les projets sans checkout ne sont jamais servis.
+    assert!(eligible_paths(&[d], "").is_empty());
+}
+
+/// Dépôt « GitHub » (bare) + checkout de déploiement, comme sur le serveur.
+#[cfg(unix)]
+fn deploy_like_checkout(tmp: &Path) -> Option<PathBuf> {
+    let run = |dir: &Path, args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+    let _ = std::fs::remove_dir_all(tmp);
+    std::fs::create_dir_all(tmp).ok()?;
+    let origin = tmp.join("origin.git");
+    let src = tmp.join("app");
+    let seed = tmp.join("seed");
+    std::fs::create_dir_all(&seed).ok()?;
+    if !run(tmp, &["init", "-q", "--bare", "-b", "main", "origin.git"]) {
+        return None;
+    }
+    std::fs::write(seed.join("index.html"), "v1").ok()?;
+    let ok = run(&seed, &["init", "-q", "-b", "main"])
+        && run(&seed, &["add", "."])
+        && run(&seed, &["commit", "-q", "-m", "v1"])
+        && run(
+            &seed,
+            &["remote", "add", "origin", &origin.display().to_string()],
+        )
+        && run(&seed, &["push", "-q", "origin", "main"])
+        && run(
+            tmp,
+            &[
+                "clone",
+                "-q",
+                "-b",
+                "main",
+                &origin.display().to_string(),
+                "app",
+            ],
+        );
+    ok.then_some(src)
+}
+
+#[cfg(unix)]
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    let o = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+        .args(args)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&o.stdout).trim().to_string()
+}
+
+#[cfg(unix)]
+#[test]
+fn cursor_worktree_is_separate_from_deploy_checkout() {
+    let tmp = std::env::temp_dir().join(format!("cw-wt-{}", std::process::id()));
+    let Some(src) = deploy_like_checkout(&tmp) else {
+        return; // git absent
+    };
+    let wt = PathBuf::from(cursor_worktree_path(&src.display().to_string()));
+
+    // Pas de checkout : rien n'est créé.
+    let missing = tmp.join("cheval");
+    std::fs::create_dir_all(&missing).unwrap();
+    assert_eq!(
+        ensure_cursor_worktree(&missing, Some("main")).unwrap_err(),
+        NO_CHECKOUT_NOTE
+    );
+    assert!(!tmp.join("cheval-cursor").exists());
+
+    // Création : branche cursor/devforge partant d'origin/main.
+    let w = ensure_cursor_worktree(&src, Some("main")).unwrap();
+    assert!(w.created);
+    assert_eq!(w.path, wt.display().to_string());
+    assert_eq!(
+        git_out(&wt, &["symbolic-ref", "--short", "HEAD"]),
+        CURSOR_BRANCH
+    );
+    assert_eq!(
+        git_out(&wt, &["rev-parse", "HEAD"]),
+        git_out(&src, &["rev-parse", "origin/main"])
+    );
+    // Le checkout de déploiement reste sur sa branche, propre.
+    assert_eq!(git_out(&src, &["symbolic-ref", "--short", "HEAD"]), "main");
+    assert_eq!(git_out(&src, &["status", "--porcelain"]), "");
+
+    // Un agent travaille dans le worktree…
+    std::fs::write(wt.join("index.html"), "agent").unwrap();
+    // …un déploiement (même commande que git_sync_command) ne le touche pas.
+    for args in [
+        &["fetch", "-q", "origin"][..],
+        &["checkout", "-q", "main"][..],
+        &["reset", "-q", "--hard", "origin/main"][..],
+    ] {
+        git_out(&src, args);
+    }
+    assert_eq!(
+        std::fs::read_to_string(wt.join("index.html")).unwrap(),
+        "agent"
+    );
+    assert_eq!(git_out(&src, &["status", "--porcelain"]), "");
+    assert_eq!(
+        std::fs::read_to_string(src.join("index.html")).unwrap(),
+        "v1"
+    );
+
+    // Déjà présent : laissé tel quel (changements conservés).
+    let again = ensure_cursor_worktree(&src, Some("main")).unwrap();
+    assert!(!again.created);
+    assert_eq!(
+        std::fs::read_to_string(wt.join("index.html")).unwrap(),
+        "agent"
+    );
+    // Chemin `-cursor` déjà présent : start_named ne recrée rien.
+    let (paths, errs) = ensure_worktrees_for(&[wt.display().to_string()]);
+    assert_eq!(paths, vec![wt.display().to_string()]);
+    assert!(errs.is_empty());
+
+    // « Remettre à jour » : sauvegarde puis retour sur origin/main.
+    let root = tmp.join("backups");
+    let id = refresh_cursor_worktree(&wt, "main", &root).unwrap();
+    let id = id.expect("changements sauvegardés");
+    assert!(root.join(&id).join("files.tar.gz").exists());
+    assert_eq!(
+        std::fs::read_to_string(wt.join("index.html")).unwrap(),
+        "v1"
+    );
+    assert_eq!(
+        git_out(&wt, &["symbolic-ref", "--short", "HEAD"]),
+        CURSOR_BRANCH
+    );
+    // Propre : pas de nouvelle sauvegarde.
+    assert_eq!(refresh_cursor_worktree(&wt, "main", &root).unwrap(), None);
+
+    // Dossier `-cursor` supprimé à la main : recréé, la branche est reprise.
+    std::fs::remove_dir_all(&wt).unwrap();
+    let w = ensure_cursor_worktree(&src, None).unwrap();
+    assert!(w.created);
+    assert_eq!(
+        git_out(&wt, &["symbolic-ref", "--short", "HEAD"]),
+        CURSOR_BRANCH
+    );
+
+    // Dossier occupé (pas un dépôt) : jamais écrasé.
+    let other = tmp.join("other");
+    let other_src = tmp.join("app2");
+    std::fs::create_dir_all(&other).unwrap();
+    git_out(
+        &tmp,
+        &[
+            "clone",
+            "-q",
+            &tmp.join("origin.git").display().to_string(),
+            "app2",
+        ],
+    );
+    let busy = tmp.join("app2-cursor");
+    std::fs::create_dir_all(&busy).unwrap();
+    std::fs::write(busy.join("keep.txt"), "x").unwrap();
+    assert!(ensure_cursor_worktree(&other_src, Some("main")).is_err());
+    assert_eq!(std::fs::read_to_string(busy.join("keep.txt")).unwrap(), "x");
+
     let _ = std::fs::remove_dir_all(&tmp);
 }

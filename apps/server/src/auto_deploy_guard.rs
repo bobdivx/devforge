@@ -241,11 +241,12 @@ pub async fn escalate_once(
 
 /// Le reset du workdir par le déploiement ne doit pas effacer un brouillon en cours :
 /// sauvegarde restaurable (même mécanisme que « Supprimer le brouillon »).
-pub async fn backup_draft_before_reset(state: &AppState, project: &Project) {
+///
+/// Appelé par tous les déploiements prod (`run_real_deploy_at` : manuel, auto, GitHub).
+/// `origin` : libellé de la sauvegarde (`deploy`, `auto-deploy`…).
+pub async fn backup_draft_before_reset(state: &AppState, project: &Project, origin: &str) {
+    // Même résolution que le déploiement (vide → `<data>/applications/<uuid>`).
     let configured = project.workdir.as_deref().unwrap_or("").trim().to_string();
-    if configured.is_empty() {
-        return;
-    }
     let wd = std::path::PathBuf::from(devforge_deploy::resolve_project_workdir(
         &configured,
         &project.uuid,
@@ -259,26 +260,43 @@ pub async fn backup_draft_before_reset(state: &AppState, project: &Project) {
         std::env::var("DEVFORGE_DATA_DIR").unwrap_or_else(|_| "/data".into()),
     );
     let root = crate::draft::backups_root(&data, &project.uuid);
-    let res = tokio::task::spawn_blocking(move || {
-        let st = crate::draft::status(&wd, &branch, None);
-        if !st.available || !st.dirty {
-            return Ok(None);
+    let reason = origin.to_string();
+    let res =
+        tokio::task::spawn_blocking(move || backup_dirty_checkout(&wd, &branch, &root, &reason))
+            .await;
+    match res {
+        Ok(Ok(Some((id, n)))) => {
+            crate::deploy_queue::record_event(
+                &state.pool,
+                &project.uuid,
+                "draft",
+                "backed_up",
+                &id,
+                &format!("{origin} · {n} fichier(s) du brouillon sauvegardés avant mise à jour"),
+            )
+            .await;
         }
-        crate::draft::backup(&wd, &root, &st.files, "auto-deploy")
-            .map(|b| Some((b.id, st.files.len())))
-    })
-    .await;
-    if let Ok(Ok(Some((id, n)))) = res {
-        crate::deploy_queue::record_event(
-            &state.pool,
-            &project.uuid,
-            "draft",
-            "backed_up",
-            &id,
-            &format!("auto-deploy · {n} fichier(s) du brouillon sauvegardés avant mise à jour"),
-        )
-        .await;
+        Ok(Err(e)) => {
+            tracing::warn!(project = %project.uuid, error = %e, "sauvegarde du brouillon avant déploiement impossible");
+        }
+        _ => {}
     }
+}
+
+/// Sauvegarde le brouillon d'un checkout s'il en a un. `Ok(None)` = rien à sauver.
+pub fn backup_dirty_checkout(
+    workdir: &std::path::Path,
+    branch: &str,
+    root: &std::path::Path,
+    reason: &str,
+) -> Result<Option<(String, usize)>, String> {
+    let st = crate::draft::status(workdir, branch, None);
+    if !st.available || !st.dirty {
+        return Ok(None);
+    }
+    crate::draft::backup(workdir, root, &st.files, reason)
+        .map(|b| Some((b.id, st.files.len())))
+        .map_err(|e| e.0)
 }
 
 #[cfg(test)]
@@ -451,5 +469,46 @@ mod tests {
                 && t.contains("prochain commit")
                 && t.contains("Réessayer la mise en ligne")
         );
+    }
+
+    /// Déploiement manuel ou automatique : un brouillon présent est sauvegardé
+    /// avant le `reset --hard`, un checkout propre ne crée rien.
+    #[cfg(unix)]
+    #[test]
+    fn backup_dirty_checkout_before_reset() {
+        let tmp = std::env::temp_dir().join(format!("guard-bk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&tmp)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        };
+        std::fs::write(tmp.join("a.txt"), "v1").unwrap();
+        if !(git(&["init", "-q", "-b", "main"])
+            && git(&["add", "."])
+            && git(&["commit", "-q", "-m", "v1"]))
+        {
+            return; // git absent
+        }
+        let root = tmp.join("backups");
+        assert_eq!(
+            backup_dirty_checkout(&tmp, "main", &root, "deploy").unwrap(),
+            None
+        );
+        std::fs::write(tmp.join("a.txt"), "draft").unwrap();
+        let (id, n) = backup_dirty_checkout(&tmp, "main", &root, "deploy")
+            .unwrap()
+            .expect("brouillon sauvegardé");
+        assert_eq!(n, 1);
+        assert!(root.join(&id).join("files.tar.gz").exists());
+        let manifest = std::fs::read_to_string(root.join(&id).join("manifest.json")).unwrap();
+        assert!(manifest.contains("\"deploy\""), "{manifest}");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

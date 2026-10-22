@@ -449,7 +449,12 @@ export function CursorWorkerSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
         onClose={() => setModal(null)}
         onChanged={() => void load()}
       />
-      <ReposModal open={modal === 'repos'} status={status} onClose={() => setModal(null)} />
+      <ReposModal
+        open={modal === 'repos'}
+        status={status}
+        onClose={() => setModal(null)}
+        onChanged={() => void load()}
+      />
       <AdvancedModal
         open={modal === 'advanced'}
         status={status}
@@ -870,26 +875,99 @@ function StatusModal({
   );
 }
 
+export function repoBadge(w: CursorWorkerStatus['workdirs'][number]): {
+  label: string;
+  tone: 'ok' | 'neutral';
+} {
+  if (!w.eligible) return { label: 'Pas de checkout', tone: 'neutral' };
+  return w.worktree_ready === false
+    ? { label: 'Créé au démarrage', tone: 'neutral' }
+    : { label: 'Servi', tone: 'ok' };
+}
+
 function ReposModal({
   open,
   status,
   onClose,
+  onChanged,
 }: {
   open: boolean;
   status: CursorWorkerStatus;
   onClose: () => void;
+  onChanged: () => void;
 }) {
+  const toast = useToast();
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
   const rows = status.workdirs ?? [];
+  const leader = status.eligible_count != null;
+  const canRefresh = leader && rows.some((w) => w.eligible && w.worktree_ready);
+
+  useEffect(() => {
+    if (open) setConfirm(false);
+  }, [open]);
+
+  async function refresh() {
+    setBusy(true);
+    try {
+      const r = await api.cursorWorkerRefresh();
+      const failed = r.results.filter((x) => !x.ok);
+      toast.push({
+        title: r.ok ? 'Dossiers remis à jour' : 'Remise à jour partielle',
+        detail:
+          [r.message, ...failed.map((x) => `${x.project} : ${x.error ?? 'échec'}`)]
+            .filter(Boolean)
+            .join('\n') || undefined,
+        tone: r.ok ? 'ok' : 'danger',
+      });
+      setConfirm(false);
+      onChanged();
+    } catch (e) {
+      toast.push({ title: 'Échec', detail: String((e as Error).message || e), tone: 'danger' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Modal
       open={open}
-      onClose={onClose}
-      title="Dépôts servis"
-      description="Chaque projet DevForge cloné (avec .git) est exposé au worker."
+      onClose={() => !busy && onClose()}
+      title={confirm ? 'Remettre à jour les dossiers ?' : 'Dépôts servis'}
+      description={
+        confirm
+          ? undefined
+          : 'Chaque projet cloné a son propre dossier pour les agents Cursor (…-cursor). Les déploiements n’y touchent pas.'
+      }
       size="lg"
       fullOnMobile
+      footer={
+        canRefresh ? (
+          <div class="flex flex-wrap justify-end gap-2">
+            {confirm ? (
+              <>
+                <Button variant="ghost" disabled={busy} onClick={() => setConfirm(false)}>
+                  Retour
+                </Button>
+                <Button variant="secondary" disabled={busy} onClick={() => void refresh()}>
+                  {busy ? 'Mise à jour…' : 'Remettre à jour'}
+                </Button>
+              </>
+            ) : (
+              <Button variant="ghost" onClick={() => setConfirm(true)}>
+                Remettre à jour…
+              </Button>
+            )}
+          </div>
+        ) : undefined
+      }
     >
-      {status.eligible_count == null ? (
+      {confirm ? (
+        <p class="text-sm text-[var(--color-ink-muted)]">
+          Chaque dossier …-cursor repart de la version en ligne sur GitHub. Les changements pas
+          encore publiés sont d’abord sauvegardés. À éviter pendant qu’un agent Cursor travaille.
+        </p>
+      ) : status.eligible_count == null ? (
         <Alert tone="info">
           Sur {status.node?.name ?? 'ce nœud'}, les dépôts clonés sont détectés à chaque démarrage.
         </Alert>
@@ -897,19 +975,20 @@ function ReposModal({
         <Alert tone="info">Aucun projet pour l’instant.</Alert>
       ) : (
         <ul class="divide-y divide-[var(--color-line)]">
-          {rows.map((w) => (
-            <li key={w.project_uuid} class="flex items-start justify-between gap-3 py-2">
-              <div class="min-w-0">
-                <div class="truncate text-sm text-[var(--color-ink)]">{w.project_name}</div>
-                <div class="break-all font-mono text-[11px] text-[var(--color-ink-muted)]">
-                  {w.git_remote || w.path}
+          {rows.map((w) => {
+            const b = repoBadge(w);
+            return (
+              <li key={w.project_uuid} class="flex items-start justify-between gap-3 py-2">
+                <div class="min-w-0">
+                  <div class="truncate text-sm text-[var(--color-ink)]">{w.project_name}</div>
+                  <div class="break-all font-mono text-[11px] text-[var(--color-ink-muted)]">
+                    {w.eligible ? w.path : w.note || w.git_remote || w.path}
+                  </div>
                 </div>
-              </div>
-              <Badge tone={w.eligible ? 'ok' : 'neutral'}>
-                {w.eligible ? 'Servi' : !w.exists ? 'Pas cloné' : 'Sans .git'}
-              </Badge>
-            </li>
-          ))}
+                <Badge tone={b.tone}>{b.label}</Badge>
+              </li>
+            );
+          })}
         </ul>
       )}
     </Modal>
