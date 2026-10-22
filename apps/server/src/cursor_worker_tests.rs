@@ -93,7 +93,8 @@ fn scripts_never_print_key_and_use_env() {
         &["/data/applications/a".into()],
         key,
     );
-    assert!(s.contains("CURSOR_API_KEY='key_SECRET_0123456789'"));
+    assert!(s.contains("K='key_SECRET_0123456789'"));
+    assert!(s.contains("CURSOR_API_KEY=\"$K\""));
     assert!(!s.contains("--api-key"));
     // La clé n'apparaît qu'une fois (affectation), jamais dans un echo.
     assert_eq!(s.matches(key).count(), 1);
@@ -166,6 +167,8 @@ fn scripts_run_end_to_end_with_fake_agent() {
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
     let repo = tmp.join("repo a");
     std::fs::create_dir_all(repo.join(".git")).unwrap();
+    let repo_b = tmp.join("repo-b");
+    std::fs::create_dir_all(repo_b.join(".git")).unwrap();
     let base = ScriptBase::Literal(base_dir.display().to_string());
 
     let run = |script: &str| {
@@ -188,27 +191,53 @@ fn scripts_run_end_to_end_with_fake_agent() {
     let out = run(&start_script(
         &base,
         "demo",
-        &[repo.display().to_string(), "/nope".into()],
+        &[
+            repo.display().to_string(),
+            "/nope".into(),
+            repo_b.display().to_string(),
+        ],
         "key_0123456789abcdef",
     ));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{stdout}");
     let r = parse_script_output(&stdout);
     assert!(r.running);
-    assert_eq!(r.dirs, vec![repo.display().to_string()]);
+    assert_eq!(
+        r.dirs,
+        vec![repo.display().to_string(), repo_b.display().to_string()]
+    );
+    // Un process par dépôt : le principal sert UNIQUEMENT le premier dépôt.
+    assert_eq!(r.repos_up, Some(2));
     let log = std::fs::read_to_string(base_dir.join("worker.out")).unwrap();
     assert!(log.contains("--name demo"));
-    assert!(log.contains("--worker-dir"));
+    assert!(log.contains(&format!("--worker-dir {}", repo.display())));
+    assert!(!log.contains("repo-b"), "{log}");
+    assert!(log.contains("--management-addr"));
     assert!(!log.contains("key_0123456789abcdef"));
+    let log_b = std::fs::read_to_string(base_dir.join("repos/1/worker.out")).unwrap();
+    assert!(log_b.contains("--name demo"), "{log_b}");
+    assert!(log_b.contains(&format!("--worker-dir {}", repo_b.display())));
+    assert!(log_b.contains("--data-dir"));
+    assert!(!log_b.contains("--management-addr"));
+    assert!(!log_b.contains("repo a"));
+    let pid_b: u32 = std::fs::read_to_string(base_dir.join("repos/1/worker.pid"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
 
     let out = run(&status_script(&base));
     let r = parse_script_output(&String::from_utf8_lossy(&out.stdout));
     assert!(r.running);
+    assert_eq!(r.repos_up, Some(2));
     assert_eq!(r.version.as_deref(), Some("9.9.9"));
 
     let out = run(&stop_script(&base));
     let r = parse_script_output(&String::from_utf8_lossy(&out.stdout));
     assert!(!r.running);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(!pid_is_alive(pid_b), "worker du 2e dépôt toujours vivant");
+    assert!(!base_dir.join("repos/1/worker.pid").exists());
     let out = run(&status_script(&base));
     assert!(!parse_script_output(&String::from_utf8_lossy(&out.stdout)).running);
     let _ = std::fs::remove_dir_all(&tmp);
@@ -296,4 +325,73 @@ fn start_without_key_requires_login() {
     .unwrap();
     assert!(is_logged_in(&fake));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn repo_worker_args_serve_exactly_one_repo() {
+    let a = build_repo_worker_args("devforge", "/data/apps/template-studio", "/d/repos/x/data");
+    assert_eq!(
+        a,
+        vec![
+            "worker",
+            "--name",
+            "devforge",
+            "--worker-dir",
+            "/data/apps/template-studio",
+            "--data-dir",
+            "/d/repos/x/data",
+            "start"
+        ]
+    );
+    assert!(!a.iter().any(|x| x == "--management-addr"));
+    assert!(!a.iter().any(|x| x == "--api-key"));
+}
+
+#[test]
+fn repo_slot_ids_are_stable_and_distinct() {
+    let a = repo_slot_id("/data/devforge/applications/02792add-bf8d");
+    assert_eq!(a, repo_slot_id("/data/devforge/applications/02792add-bf8d"));
+    assert!(a.starts_with("02792add-bf8d-"), "{a}");
+    // Même nom de dossier, chemins différents → identifiants différents.
+    assert_ne!(repo_slot_id("/a/app"), repo_slot_id("/b/app"));
+    assert!(repo_slot_id("/").starts_with("repo-"));
+    assert!(repo_slot_id("/x/Mon Projet!").starts_with("mon-projet-"));
+}
+
+#[test]
+fn script_output_logs_never_show_url_tokens() {
+    let out = "DF_RUNNING=1\nDF_REPOS_UP=3\nDF_LOGS_BEGIN\nfatal: https://x-access-token:ghp_FAKE123@github.com/o/r.git\n";
+    let r = parse_script_output(out);
+    assert_eq!(r.repos_up, Some(3));
+    assert!(!r.logs.contains("ghp_FAKE123"), "{}", r.logs);
+    assert!(r.logs.contains("https://***@github.com/o/r.git"));
+}
+
+#[cfg(unix)]
+#[test]
+fn git_remote_is_redacted() {
+    let tmp = std::env::temp_dir().join(format!("cw-remote-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&tmp)
+            .args(args)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+    if !git(&["init", "-q"]) {
+        return; // git absent : rien à vérifier.
+    }
+    assert!(git(&[
+        "remote",
+        "add",
+        "origin",
+        "https://x-access-token:ghp_FAKE0123456789@github.com/o/r.git",
+    ]));
+    let r = read_git_remote(&tmp).unwrap();
+    assert_eq!(r, "https://***@github.com/o/r.git");
+    let _ = std::fs::remove_dir_all(&tmp);
 }
