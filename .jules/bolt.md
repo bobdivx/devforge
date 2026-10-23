@@ -5,3 +5,7 @@
 ## 2026-10-15 - [Performance] Prevent unnecessary UI array recalculations
 **Learning:** In the chat component (`useThreadList`), derived state that requires filtering and sorting large arrays (like generating nested agent lists) was running synchronously on every render. Given that chat polling triggers frequent re-renders, this caused unnecessary CPU strain on lists that only rarely change.
 **Action:** Use `useMemo` for derived states like `rows` and `current` in custom hooks when they involve `.filter()`, `.map()`, or `.sort()` and depend on data that updates less frequently than the component renders.
+
+## 2026-10-23 - [Performance] Avoid `Array.join()` on hot paths for string building
+**Learning:** In frequently called functions or render hooks during polling (like `messagesSignature` and `useStickToBottom`), constructing signatures using `[val1, val2, ...].join('|')` unnecessarily allocates arrays and causes garbage collection overhead. Since polling and re-renders happen continuously, these small allocations add up to noticeable memory pressure.
+**Action:** Use direct template literals (e.g., `${val1}|${val2}`) for simple string concatenations in performance-critical paths instead of array mapping or joining.
