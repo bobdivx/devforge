@@ -101,15 +101,16 @@ fn validate_command(raw: &str) -> std::result::Result<Vec<String>, String> {
     if cmd.len() > 400 {
         return Err("command trop longue (max 400)".into());
     }
-    let lower = cmd.to_ascii_lowercase();
+    let parts = shell_words_split(cmd);
+    if parts.is_empty() {
+        return Err("command invalide".into());
+    }
+    let joined = parts.join(" ");
+    let lower = joined.to_ascii_lowercase();
     for bad in BLOCKED_TOKENS {
         if lower.contains(bad) {
             return Err(format!("token interdit dans la commande : {bad}"));
         }
-    }
-    let parts = shell_words_split(cmd);
-    if parts.is_empty() {
-        return Err("command invalide".into());
     }
     let bin = parts[0].as_str();
     let bin_base = Path::new(bin)
@@ -347,6 +348,12 @@ mod tests {
     #[test]
     fn blocks_curl() {
         assert!(validate_command("curl https://x").is_err());
+    }
+
+    #[test]
+    fn blocks_obfuscated_commands() {
+        assert!(validate_command("npm run \"s\"udo").is_err());
+        assert!(validate_command("cat \"..\"/\"..\"/etc/passwd").is_err());
     }
 }
 
