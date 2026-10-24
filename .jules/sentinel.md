@@ -17,3 +17,8 @@
 **Vulnerability:** The `verify_github_sig` function in `apps/server/src/infra_routes.rs` verified GitHub webhook signatures using standard string comparison `expected.eq_ignore_ascii_case(hex_sig)`.
 **Learning:** String comparison functions exit early as soon as a character mismatch is found. In a cryptographic context, this variable response time leaks information and allows an attacker to perform a timing attack to forge a valid HMAC signature by guessing it byte by byte.
 **Prevention:** Always use a constant-time comparison library (like `hmac`'s `verify_slice()`) to compare cryptographic hashes, secrets, and signatures to prevent side-channel timing attacks. Avoid custom implementations of standard cryptographic algorithms.
+
+## 2023-10-24 - [Add Security Headers to Backend]
+**Vulnerability:** Missing critical security headers (X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security) in Axum HTTP responses.
+**Learning:** In axum, the `HeaderName::from_static` method strictly requires the header string to be lowercase (e.g., `x-frame-options`). Using uppercase letters will cause a runtime panic. The `security.rs` file manages static asset and cache headers via middleware where these security headers should logically reside.
+**Prevention:** Always verify that all newly added HTTP headers in the axum backend use exclusively lowercase strings when passing to `from_static` or `insert`. Consider creating a unified security middleware in `security.rs` that applies strict defaults (like `nosniff` and HSTS) to all endpoints to enforce defense in depth.
