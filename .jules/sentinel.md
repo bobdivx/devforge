@@ -17,3 +17,8 @@
 **Vulnerability:** The `verify_github_sig` function in `apps/server/src/infra_routes.rs` verified GitHub webhook signatures using standard string comparison `expected.eq_ignore_ascii_case(hex_sig)`.
 **Learning:** String comparison functions exit early as soon as a character mismatch is found. In a cryptographic context, this variable response time leaks information and allows an attacker to perform a timing attack to forge a valid HMAC signature by guessing it byte by byte.
 **Prevention:** Always use a constant-time comparison library (like `hmac`'s `verify_slice()`) to compare cryptographic hashes, secrets, and signatures to prevent side-channel timing attacks. Avoid custom implementations of standard cryptographic algorithms.
+
+## 2025-10-25 - [HTTP Security Headers Added]
+**Vulnerability:** The Rust/Axum backend lacked common HTTP security headers (e.g., X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Strict-Transport-Security), exposing the app to MIME sniffing, clickjacking, and inadequate HTTPS enforcement.
+**Learning:** Security headers are not applied automatically in Axum routing layers unless specifically configured. In `security.rs`, the string literals passed to `HeaderName::from_static()` for security headers must be exclusively lowercase.
+**Prevention:** Global middleware should be configured early in the router pipeline to append these defensive HTTP headers, with careful attention to library-specific panics like uppercase letters in header names.

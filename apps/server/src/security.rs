@@ -2,7 +2,7 @@
 
 use axum::{
     body::Body,
-    http::{header, HeaderValue, Method, Request, Response},
+    http::{header, HeaderName, HeaderValue, Method, Request, Response},
     middleware::Next,
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -67,5 +67,16 @@ pub async fn static_cache_headers(req: Request<Body>, next: Next) -> Response<Bo
     if let Ok(v) = HeaderValue::from_str(value) {
         res.headers_mut().insert(header::CACHE_CONTROL, v);
     }
+    res
+}
+
+/// Security headers for all responses.
+pub async fn security_headers(req: Request<Body>, next: Next) -> Response<Body> {
+    let mut res = next.run(req).await;
+    let headers = res.headers_mut();
+    headers.insert(HeaderName::from_static("x-content-type-options"), HeaderValue::from_static("nosniff"));
+    headers.insert(HeaderName::from_static("x-frame-options"), HeaderValue::from_static("DENY"));
+    headers.insert(HeaderName::from_static("x-xss-protection"), HeaderValue::from_static("1; mode=block"));
+    headers.insert(HeaderName::from_static("strict-transport-security"), HeaderValue::from_static("max-age=31536000; includeSubDomains"));
     res
 }
