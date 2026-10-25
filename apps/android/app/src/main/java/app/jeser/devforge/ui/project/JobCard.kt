@@ -31,6 +31,7 @@ import app.jeser.devforge.ui.theme.DfColors
 val JOB_STATUS_LABEL = mapOf(
     "queued" to "En file",
     "running" to "En cours",
+    "paused" to "En pause",
     "done" to "Terminé",
     "failed" to "Échec",
     "cancelled" to "Arrêté",
@@ -40,13 +41,14 @@ private fun jobTone(status: String): Color = when (status) {
     "done" -> DfColors.Ok
     "failed" -> DfColors.Danger
     "cancelled" -> DfColors.InkFaint
+    "paused" -> DfColors.InkMuted
     "queued" -> DfColors.Warn
     else -> DfColors.Accent
 }
 
 /** Carte compacte d'un job en arrière-plan (worker délégué, mise en ligne), comme sur le web. */
 @Composable
-fun JobCardRow(job: JobInfo, onCancel: () -> Unit) {
+fun JobCardRow(job: JobInfo, onCancel: () -> Unit, onControl: (String) -> Unit = {}) {
     val tone = jobTone(job.status)
     Surface(
         color = DfColors.Card,
@@ -76,9 +78,24 @@ fun JobCardRow(job: JobInfo, onCancel: () -> Unit) {
                 Text(job.summary, color = DfColors.InkMuted, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(end = 8.dp))
             }
             if (job.files > 0) Text("${job.files} fichier${if (job.files > 1) "s" else ""} modifié${if (job.files > 1) "s" else ""}", color = DfColors.InkFaint, fontSize = 12.sp)
-            if (job.live && job.kind == "worker") {
-                TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp).align(Alignment.End)) {
-                    Text("Arrêter", color = DfColors.Danger)
+            if (job.kind == "worker" && (job.live || job.paused || job.status == "failed")) {
+                Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    when {
+                        job.live -> TextButton(onClick = { onControl("pause") }, modifier = Modifier.heightIn(min = 48.dp).testTag("job-pause")) {
+                            Text("Pause", color = DfColors.InkMuted)
+                        }
+                        job.paused -> TextButton(onClick = { onControl("resume") }, modifier = Modifier.heightIn(min = 48.dp).testTag("job-resume")) {
+                            Text("Reprendre", color = DfColors.Accent)
+                        }
+                        else -> TextButton(onClick = { onControl("retry") }, modifier = Modifier.heightIn(min = 48.dp).testTag("job-retry")) {
+                            Text("Relancer", color = DfColors.Accent)
+                        }
+                    }
+                    if (job.live) {
+                        TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text("Arrêter", color = DfColors.Danger)
+                        }
+                    }
                 }
             }
         }

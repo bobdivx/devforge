@@ -3554,10 +3554,26 @@ async fn persist_resumed_deploy(
 
 pub fn resume_agent_runs(state: AppState) {
     tokio::spawn(async move {
-        if let Err(e) = crate::agent_runs::reopen_interrupted(&state.pool).await {
-            tracing::error!(error = %e, "reprise des tours d'agent");
-            return;
+        // Au démarrage : seuls les baux expirés (ou les runs sans bail) sont repris.
+        match crate::agent_runs::recover_expired(&state.pool, true).await {
+            Ok(rec) => {
+                if !rec.requeued.is_empty() || !rec.failed.is_empty() {
+                    tracing::info!(
+                        requeued = rec.requeued.len(),
+                        failed = rec.failed.len(),
+                        "baux de runs expirés repris"
+                    );
+                }
+                for run in &rec.failed {
+                    crate::run_routes::on_run_finished(&state, run).await;
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "reprise des tours d'agent");
+                return;
+            }
         }
+        spawn_lease_watch(state.clone());
         let runs = match crate::agent_runs::list_pending(&state.pool).await {
             Ok(runs) => runs,
             Err(e) => {
@@ -3593,6 +3609,27 @@ pub fn resume_agent_runs(state: AppState) {
                     tracing::error!(error = %e, run = %run.uuid, "échec reprise tour d'agent");
                 }
             });
+        }
+    });
+}
+
+/// Toutes les 30 s : un run dont le bail n'est plus renouvelé (processus mort, autre nœud) est repris.
+fn spawn_lease_watch(state: AppState) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(30));
+        tick.tick().await;
+        loop {
+            tick.tick().await;
+            let Ok(rec) = crate::agent_runs::recover_expired(&state.pool, false).await else {
+                continue;
+            };
+            for run in &rec.failed {
+                crate::run_routes::on_run_finished(&state, run).await;
+            }
+            for run in rec.requeued {
+                tracing::info!(run = %run, "bail expiré : run relancé");
+                crate::run_routes::start_pending_run(state.clone(), run);
+            }
         }
     });
 }

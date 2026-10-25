@@ -78,4 +78,21 @@ class MemoryAndJobsTest {
         assertEquals("Build", merged[0][1].milestones.single().label)
         assertTrue(merged[0][1].live)
     }
+
+    @Test fun pausedAndRetriedRunsFollowTheirLease() {
+        assertEquals("paused", app.jeser.devforge.data.jobStatus("paused"))
+        val first = jobsFromToolCalls(parseToolCalls("""[{"name":"delegate_task","result":{"ok":true,"status":"started","run_uuid":"r1","title":"A"}},
+            {"name":"delegate_task","result":{"ok":true,"status":"started","run_uuid":"r2","title":"B"}}]"""))
+        val later = jobsFromToolCalls(parseToolCalls("""[{"name":"job_result","result":{"status":"failed","run_uuid":"r1","title":"A","summary":"build KO"}}]"""))
+        // r1 relancé après son échec, r2 mis en pause : l'état du run prime sur la carte de résultat.
+        val live = mapOf(
+            "r1" to AgentRunInfo("r1", "running", kind = "worker"),
+            "r2" to AgentRunInfo("r2", "paused", kind = "worker"),
+        )
+        val merged = mergeJobStatus(listOf(first, later), live)
+        assertTrue(merged[0][0].live)
+        assertTrue(merged[1][0].live)
+        assertTrue(merged[0][1].paused)
+        assertEquals("En pause", app.jeser.devforge.ui.project.JOB_STATUS_LABEL["paused"])
+    }
 }

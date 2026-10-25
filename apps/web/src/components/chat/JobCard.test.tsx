@@ -73,6 +73,22 @@ describe('JobCardView : un rendu par statut', () => {
     });
   }
 
+  it('en pause : Reprendre ; échec : Relancer ; en cours : Pause', () => {
+    const calls: string[] = [];
+    const onControl = (a: 'pause' | 'resume' | 'retry') => calls.push(a);
+    const paused = render(<JobCardView job={job('paused')} nowMs={NOW} onControl={onControl} onCancel={() => undefined} />);
+    expect(paused.container.querySelector('[data-testid="job-card"]')!.textContent).toContain('En pause');
+    expect(paused.container.textContent).not.toContain('Annuler');
+    (Array.from(paused.container.querySelectorAll('button')).find((b) => b.textContent?.includes('Reprendre')) as HTMLButtonElement).click();
+    paused.unmount();
+    const failed = render(<JobCardView job={job('failed')} nowMs={NOW} onControl={onControl} />);
+    (Array.from(failed.container.querySelectorAll('button')).find((b) => b.textContent?.includes('Relancer')) as HTMLButtonElement).click();
+    failed.unmount();
+    const running = render(<JobCardView job={job('running')} nowMs={NOW} onControl={onControl} onCancel={() => undefined} />);
+    (Array.from(running.container.querySelectorAll('button')).find((b) => b.textContent?.includes('Pause')) as HTMLButtonElement).click();
+    expect(calls).toEqual(['resume', 'retry', 'pause']);
+  });
+
   it('la durée s’incrémente pendant le run et se fige à la fin', () => {
     const { container, rerender } = render(<JobCardView job={job('running')} nowMs={NOW} />);
     expect(container.querySelector('[data-testid="job-elapsed"]')!.textContent).toBe('1 min 30 s');

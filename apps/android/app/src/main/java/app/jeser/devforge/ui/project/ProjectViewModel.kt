@@ -143,6 +143,9 @@ fun AgentMessage.toChatItem(index: Int) = ChatItem(
 class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewModel() {
     private val api: ApiClient get() = graph.api
     private val _state = MutableStateFlow(ProjectUiState(uuid))
+    /** Runs pausés / repris / relancés depuis l'app : suivis même si une carte de résultat existe. */
+    private val controlledRuns = java.util.concurrent.CopyOnWriteArraySet<String>()
+
     val state: StateFlow<ProjectUiState> = _state
     private var poll: Job? = null
 
@@ -182,7 +185,8 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
         val raw = list.mapIndexed { i, m -> m.toChatItem(i) }
         val merged = app.jeser.devforge.data.mergeJobStatus(raw.map { it.jobs })
         // Workers encore en cours : on lit leur run (jalons, statut) — 3 au plus par rafraîchissement.
-        val liveIds = merged.flatten().filter { it.live && it.kind == "worker" }.map { it.id }.distinct().takeLast(3)
+        val liveIds = (merged.flatten().filter { (it.live || it.paused) && it.kind == "worker" }.map { it.id }.distinct().takeLast(3) +
+            controlledRuns).distinct()
         val live = liveIds.mapNotNull { id -> runCatching { api.agentRun(id) }.getOrNull()?.let { id to it } }.toMap()
         val jobs = if (live.isEmpty()) merged else app.jeser.devforge.data.mergeJobStatus(merged, live)
         val deploys = _state.value.deployments.associateBy { it.uuid }
@@ -361,6 +365,18 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
     }
 
     fun urlOpened() = _state.update { it.copy(openUrl = null) }
+
+    /** Bail SQL : pause, reprise ou relance d'un worker. */
+    fun controlJob(runUuid: String, action: String) {
+        viewModelScope.launch {
+            runCatching { api.controlRun(runUuid, action) }
+                .onSuccess {
+                    controlledRuns.add(runUuid)
+                    _state.value.coordinatorUuid?.let { a -> runCatching { refreshMessages(a) } }
+                }
+                .onFailure { e -> _state.update { it.copy(notice = e.message ?: "Action impossible") } }
+        }
+    }
 
     /** Arrête un worker délégué (annulation réelle côté serveur). */
     fun cancelJob(runUuid: String) {

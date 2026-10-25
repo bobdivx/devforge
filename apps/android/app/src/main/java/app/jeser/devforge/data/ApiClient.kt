@@ -367,6 +367,10 @@ class ApiClient(
     suspend fun agentRun(runUuid: String): AgentRunInfo =
         get("/agent/runs/${enc(runUuid)}", DataEnvelope.serializer(AgentRunInfo.serializer())).data
 
+    /** Bail SQL : `pause` | `resume` | `retry`. Refus (409) → exception avec le message serveur. */
+    suspend fun controlRun(runUuid: String, action: String): RunCancel =
+        send("POST", "/agent/runs/${enc(runUuid)}/${enc(action)}", buildJsonObject { }, DataEnvelope.serializer(RunCancel.serializer())).data
+
     suspend fun cancelRun(runUuid: String): RunCancel =
         send("POST", "/agent/runs/${enc(runUuid)}/cancel", buildJsonObject { }, DataEnvelope.serializer(RunCancel.serializer())).data
 
