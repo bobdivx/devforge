@@ -169,7 +169,7 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
     setRetrying(true);
     setRetryError(null);
     try {
-      const r = await api.createDeployment(projectUuid, { git_message: 'Relance' });
+      const r = await api.createDeployment(projectUuid, { git_message: 'Relance', action: 'retry' });
       const uuid = r.data?.uuid;
       await loadDeployments(false);
       if (uuid) setSelectedUuid(uuid);

@@ -361,7 +361,10 @@ export function ProjectHome({
   async function deployNow() {
     setDeployBusy(true);
     try {
-      await api.createDeployment(uuid, { git_message: intent.message || 'Mise en ligne depuis la page projet' });
+      await api.createDeployment(uuid, {
+        git_message: intent.message || 'Mise en ligne depuis la page projet',
+        action: intent.kind === 'retry' || intent.kind === 'rebuild' || intent.kind === 'publish' ? intent.kind : 'deploy',
+      });
       toast.push({ title: 'Mise en ligne lancée', detail: 'Reconstruction depuis GitHub…', tone: 'info' });
       setConfirmOpen(false);
       const list = await api.deployments(uuid);

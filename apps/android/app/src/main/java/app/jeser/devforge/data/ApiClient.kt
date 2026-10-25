@@ -122,6 +122,8 @@ class ApiClient(
     private fun Request.withBearer(token: String) = newBuilder()
         .header("Authorization", "Bearer $token")
         .header("Accept", header("Accept") ?: "application/json")
+        // P2 : les reçus d'approbation indiquent d'où vient la confirmation.
+        .header("X-DevForge-Client", "android")
         .build()
 
     private fun url(path: String): String {
@@ -334,6 +336,19 @@ class ApiClient(
         send("POST", "/projects/${enc(uuid)}/corrections/redo", buildJsonObject { put("confirm", true) }, OkOnly.serializer())
 
     /* Mémoire des agents (écran natif Réglages → Mémoire). */
+    /** P2 : historique des validations ; `status` = liste séparée par des virgules. */
+    suspend fun receipts(status: String? = null, before: String? = null): ReceiptList {
+        val q = listOfNotNull(
+            status?.takeIf { it.isNotBlank() }?.let { "status=${enc(it)}" },
+            before?.takeIf { it.isNotBlank() }?.let { "before=${enc(it)}" },
+            "limit=50",
+        ).joinToString("&")
+        return get("/receipts?$q", ReceiptList.serializer())
+    }
+
+    suspend fun receipt(uuid: String): ApprovalReceipt =
+        get("/receipts/${enc(uuid)}", DataEnvelope.serializer(ApprovalReceipt.serializer())).data
+
     suspend fun memoryList(tier: String): MemoryList = get("/memory?tier=${enc(tier)}", MemoryList.serializer())
 
     suspend fun memoryCorrect(uuid: String, content: String): MemoryWriteResult =

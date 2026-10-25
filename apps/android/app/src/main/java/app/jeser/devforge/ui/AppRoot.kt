@@ -38,6 +38,9 @@ import app.jeser.devforge.ui.hub.SettingsScreen
 import app.jeser.devforge.ui.memory.MemoryActions
 import app.jeser.devforge.ui.memory.MemoryScreen
 import app.jeser.devforge.ui.memory.MemoryViewModel
+import app.jeser.devforge.ui.receipts.ReceiptsActions
+import app.jeser.devforge.ui.receipts.ReceiptsScreen
+import app.jeser.devforge.ui.receipts.ReceiptsViewModel
 import app.jeser.devforge.ui.project.ProjectActions
 import app.jeser.devforge.ui.project.ProjectScreen
 import app.jeser.devforge.ui.project.ProjectSheet
@@ -95,6 +98,7 @@ fun HomeRoot(
         openCorrectionsFor?.let { draftFor = it; onSelect(it); onCorrectionsOpened() }
     }
     var memoryOpen by rememberSaveable { mutableStateOf(false) }
+    var receiptsOpen by rememberSaveable { mutableStateOf(false) }
     // Écran plein (app, mémoire) : la barre Apps / Braise / Réglages reste visible dessous.
     val screen: (@Composable (Modifier) -> Unit)? = when {
         selected != null -> { m ->
@@ -112,6 +116,10 @@ fun HomeRoot(
             BackHandler { memoryOpen = false }
             Box(m) { MemoryRoute(graph, onBack = { memoryOpen = false }) }
         }
+        receiptsOpen -> { m ->
+            BackHandler { receiptsOpen = false }
+            Box(m) { ReceiptsRoute(graph, onBack = { receiptsOpen = false }) }
+        }
         else -> null
     }
     if (screen == null && tab != HomeTab.Apps) BackHandler { tab = HomeTab.Apps }
@@ -121,6 +129,7 @@ fun HomeRoot(
             // Toucher un onglet depuis une app / la mémoire : on ferme l'écran et on va sur l'onglet.
             draftFor = null
             memoryOpen = false
+            receiptsOpen = false
             if (selected != null) onSelect(null)
             tab = it
         },
@@ -146,6 +155,7 @@ fun HomeRoot(
         onUpdate = { hubVm.apkUrl()?.let { runCatching { uri.openUri(it) } } },
         onOpenWeb = { hub.instance?.let { runCatching { uri.openUri(it) } } },
         onOpenMemory = { memoryOpen = true },
+        onOpenReceipts = { receiptsOpen = true },
         onSignOut = onSignOut,
     )
 }
@@ -168,6 +178,7 @@ fun HomeShell(
     onUpdate: () -> Unit = {},
     onOpenWeb: () -> Unit = {},
     onOpenMemory: () -> Unit = {},
+    onOpenReceipts: () -> Unit = {},
     onSignOut: () -> Unit = {},
     initialInboxOpen: Boolean = false,
     /** Écran ouvert par-dessus l'onglet (page d'app, mémoire…) ; la navigation reste visible. */
@@ -187,7 +198,7 @@ fun HomeShell(
                 HomeTab.Braise -> BraiseScreen(hub, onRefresh = onRefreshBraise, onOpen = onOpen, onOpenDraft = onOpenDraft)
                 HomeTab.Settings -> SettingsScreen(
                     hub, apps.me, onToggle = onToggleNotif, onOpenSystemNotif = onOpenSystemNotif,
-                    onUpdate = onUpdate, onOpenWeb = onOpenWeb, onOpenMemory = onOpenMemory, onSignOut = onSignOut,
+                    onUpdate = onUpdate, onOpenWeb = onOpenWeb, onOpenMemory = onOpenMemory, onOpenReceipts = onOpenReceipts, onSignOut = onSignOut,
                 )
             }
         }
@@ -283,6 +294,24 @@ private fun MemoryRoute(graph: AppGraph, onBack: () -> Unit) {
             onForget = vm::forget,
             onPin = vm::pin,
             onNoticeShown = vm::noticeShown,
+        ),
+    )
+}
+
+/** Réglages → Validations : reçus d'approbation (lecture seule). */
+@Composable
+private fun ReceiptsRoute(graph: AppGraph, onBack: () -> Unit) {
+    val vm: ReceiptsViewModel = viewModel(key = "receipts", factory = viewModelFactory { initializer { ReceiptsViewModel(graph) } })
+    val state by vm.state.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { vm.load() }
+    ReceiptsScreen(
+        state = state,
+        actions = ReceiptsActions(
+            onBack = onBack,
+            onFilter = vm::load,
+            onRetry = { vm.load() },
+            onMore = vm::more,
+            loadDetail = vm::fresh,
         ),
     )
 }

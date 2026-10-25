@@ -667,3 +667,33 @@ fun mergeJobStatus(perMessage: List<List<JobInfo>>, live: Map<String, AgentRunIn
         }
     }
 }
+
+/** P2 : reçu d'une action risquée confirmée (qui, quand, quoi, issue). */
+@Serializable
+data class ApprovalReceipt(
+    val uuid: String,
+    @SerialName("project_uuid") val projectUuid: String? = null,
+    @SerialName("project_name") val projectName: String? = null,
+    val action: String = "",
+    @SerialName("action_label") val actionLabel: String = "",
+    val target: String = "",
+    val version: String? = null,
+    @SerialName("action_hash") val actionHash: String = "",
+    val status: String = "",
+    val source: String = "",
+    @SerialName("approved_by_label") val approvedByLabel: String? = null,
+    @SerialName("approved_at") val approvedAt: String? = null,
+    @SerialName("expires_at") val expiresAt: String? = null,
+    @SerialName("consumed_at") val consumedAt: String? = null,
+    @SerialName("finished_at") val finishedAt: String? = null,
+    val detail: String? = null,
+    @SerialName("tool_name") val toolName: String? = null,
+    @SerialName("deployment_uuid") val deploymentUuid: String? = null,
+    @SerialName("created_at") val createdAt: String = "",
+)
+
+@Serializable
+data class ReceiptList(
+    val data: List<ApprovalReceipt> = emptyList(),
+    @SerialName("next_before") val nextBefore: String? = null,
+)

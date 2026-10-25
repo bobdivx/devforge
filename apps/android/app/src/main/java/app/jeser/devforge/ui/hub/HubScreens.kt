@@ -247,6 +247,7 @@ fun SettingsScreen(
     onOpenWeb: () -> Unit,
     onSignOut: () -> Unit,
     onOpenMemory: () -> Unit = {},
+    onOpenReceipts: () -> Unit = {},
 ) {
     var confirmOut by remember { mutableStateOf(false) }
     TabScaffold("Réglages") { padding ->
@@ -305,6 +306,19 @@ fun SettingsScreen(
                             Text("Préférences, machines, journal des déploiements. Corrige, épingle ou oublie.", color = DfColors.InkMuted, fontSize = 13.sp)
                         }
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Ouvrir la mémoire", tint = DfColors.InkFaint)
+                    }
+                }
+            }
+            item(key = "receipts") {
+                SectionTitle("Validations")
+                Card(onClick = onOpenReceipts) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text("🛡️", fontSize = 24.sp)
+                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                            Text("Qui a validé quoi", fontWeight = FontWeight.Medium)
+                            Text("Mises en ligne, arrêts, publications : quand, par qui, et l'issue.", color = DfColors.InkMuted, fontSize = 13.sp)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Ouvrir les validations", tint = DfColors.InkFaint)
                     }
                 }
             }

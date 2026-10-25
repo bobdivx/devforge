@@ -722,6 +722,26 @@ async fn lifecycle(
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let project = auth_project(&state, &headers, &uuid).await?;
     let c = ctx(&project);
+    // P2 : reçu pour les actions confirmées (arrêter, redémarrer, reconstruire).
+    let receipt = if matches!(action.as_str(), "build" | "stop" | "restart") {
+        match crate::auth_routes::current_workspace(&state, &headers).await {
+            Ok((user, _)) => {
+                crate::receipts::begin_for_user(
+                    &state.pool,
+                    &headers,
+                    &user,
+                    &project,
+                    &action,
+                    None,
+                    None,
+                )
+                .await
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
     let out = match action.as_str() {
         "build" => state.deploy.build(&c, None).await,
         "start" => state.deploy.start(&c).await,
@@ -735,6 +755,11 @@ async fn lifecycle(
         }
     };
     let ok = out.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    let err = out
+        .get("error")
+        .and_then(|v| v.as_str())
+        .map(|e| e.chars().take(400).collect::<String>());
+    crate::receipts::finish(&state.pool, receipt.as_ref(), ok, err.as_deref()).await;
     if ok {
         let next = match action.as_str() {
             "stop" => Some("stopped"),

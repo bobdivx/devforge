@@ -92,6 +92,50 @@ export type DnsRuntimeStatus = {
   dns_sync_api?: number;
 };
 
+/** P2 : reçu d'une action risquée confirmée (qui, quand, quoi, issue). */
+export type ReceiptStatus =
+  | 'pending'
+  | 'approved'
+  | 'executing'
+  | 'done'
+  | 'failed'
+  | 'unknown'
+  | 'expired';
+
+export type ApprovalReceipt = {
+  uuid: string;
+  workspace_uuid?: string | null;
+  project_uuid?: string | null;
+  project_name?: string | null;
+  action: string;
+  action_label: string;
+  target: string;
+  version?: string | null;
+  action_hash: string;
+  status: ReceiptStatus;
+  source: string;
+  approved_by?: string | null;
+  approved_by_label?: string | null;
+  approved_at?: string | null;
+  expires_at?: string | null;
+  consumed_at?: string | null;
+  finished_at?: string | null;
+  detail?: string | null;
+  run_uuid?: string | null;
+  tool_name?: string | null;
+  deployment_uuid?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReceiptQuery = {
+  project?: string;
+  status?: ReceiptStatus[];
+  action?: string[];
+  before?: string;
+  limit?: number;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
   const res = await fetch(`${SERVER_BASE}${path}`, {
@@ -912,12 +956,31 @@ export const api = {
         created_at: string;
       }>;
     }>(`/projects/${projectUuid}/trace`),
-  createDeployment: (projectUuid: string, body?: { git_message?: string }) =>
+  createDeployment: (
+    projectUuid: string,
+    /** `action` : libellé du reçu d'approbation (deploy, rebuild, retry, publish). */
+    body?: { git_message?: string; action?: 'deploy' | 'rebuild' | 'retry' | 'publish' },
+  ) =>
     request<{ data: Deployment; ok?: boolean }>(`/projects/${projectUuid}/deployments`, {
       method: 'POST',
       body: JSON.stringify(body ?? { git_message: 'Manual deploy' }),
     }),
   deployment: (uuid: string) => request<{ data: Deployment }>(`/deployments/${uuid}`),
+  /** P2 : historique des validations (reçus d'approbation) de l'espace. */
+  receipts: (q: ReceiptQuery = {}) => {
+    const p = new URLSearchParams();
+    if (q.project) p.set('project', q.project);
+    if (q.status?.length) p.set('status', q.status.join(','));
+    if (q.action?.length) p.set('action', q.action.join(','));
+    if (q.before) p.set('before', q.before);
+    if (q.limit) p.set('limit', String(q.limit));
+    const qs = p.toString();
+    return request<{ data: ApprovalReceipt[]; next_before?: string | null }>(
+      `/receipts${qs ? `?${qs}` : ''}`,
+    );
+  },
+  receipt: (uuid: string) =>
+    request<{ data: ApprovalReceipt }>(`/receipts/${encodeURIComponent(uuid)}`),
   /** Le POST de déploiement répond tout de suite (202) : attendre l'état final. */
   waitDeployment: async (
     uuid: string,
