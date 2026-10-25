@@ -22,6 +22,29 @@ pub fn set_agent_routine_runner(runner: Arc<dyn AgentRoutineRunner>) {
     let _ = ROUTINE_RUNNER.set(runner);
 }
 
+/// Travail périodique branché sur le même tic d'une minute que les crons (ex. surveillance de
+/// pages, P3) : un seul planificateur, pas de boucle parallèle. Appelé en tâche de fond à
+/// chaque tic ; l'implémentation gère elle-même ses baux SQL.
+pub trait TickHook: Send + Sync {
+    fn tick(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>>;
+}
+
+static TICK_HOOKS: std::sync::Mutex<Vec<Arc<dyn TickHook>>> = std::sync::Mutex::new(Vec::new());
+
+/// Ajoute un travail au tic du planificateur (au boot).
+pub fn add_tick_hook(hook: Arc<dyn TickHook>) {
+    if let Ok(mut hooks) = TICK_HOOKS.lock() {
+        hooks.push(hook);
+    }
+}
+
+fn run_tick_hooks() {
+    let hooks: Vec<Arc<dyn TickHook>> = TICK_HOOKS.lock().map(|h| h.clone()).unwrap_or_default();
+    for hook in hooks {
+        tokio::spawn(async move { hook.tick().await });
+    }
+}
+
 pub struct CronScheduler {
     service: Arc<CronService>,
     executor: Arc<dyn RemoteExecutor>,
@@ -52,6 +75,7 @@ impl CronScheduler {
 
     /// Évalue et exécute tous les crons dus.
     async fn tick(&self) -> devforge_shared::Result<()> {
+        run_tick_hooks();
         let due = self.service.get_due_crons().await?;
 
         if due.is_empty() {
@@ -215,5 +239,36 @@ fn shell_escape(s: &str) -> String {
         s.to_string()
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
+#[cfg(test)]
+mod tick_hook_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Count(Arc<AtomicUsize>);
+
+    impl TickHook for Count {
+        fn tick(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+            Box::pin(async move {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn hooks_run_on_each_tick() {
+        let n = Arc::new(AtomicUsize::new(0));
+        add_tick_hook(Arc::new(Count(n.clone())));
+        run_tick_hooks();
+        run_tick_hooks();
+        for _ in 0..50 {
+            if n.load(Ordering::SeqCst) == 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(n.load(Ordering::SeqCst), 2);
     }
 }

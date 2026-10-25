@@ -41,6 +41,9 @@ import app.jeser.devforge.ui.memory.MemoryViewModel
 import app.jeser.devforge.ui.receipts.ReceiptsActions
 import app.jeser.devforge.ui.receipts.ReceiptsScreen
 import app.jeser.devforge.ui.receipts.ReceiptsViewModel
+import app.jeser.devforge.ui.watches.WatchesActions
+import app.jeser.devforge.ui.watches.WatchesScreen
+import app.jeser.devforge.ui.watches.WatchesViewModel
 import app.jeser.devforge.ui.project.ProjectActions
 import app.jeser.devforge.ui.project.ProjectScreen
 import app.jeser.devforge.ui.project.ProjectSheet
@@ -69,6 +72,8 @@ fun HomeRoot(
     onSignOut: () -> Unit,
     openCorrectionsFor: String? = null,
     onCorrectionsOpened: () -> Unit = {},
+    openWatches: Boolean = false,
+    onWatchesOpened: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val uri = LocalUriHandler.current
@@ -99,6 +104,11 @@ fun HomeRoot(
     }
     var memoryOpen by rememberSaveable { mutableStateOf(false) }
     var receiptsOpen by rememberSaveable { mutableStateOf(false) }
+    var watchesOpen by rememberSaveable { mutableStateOf(false) }
+    // Notification « surveillance » : ouvre la liste des pages surveillées.
+    LaunchedEffect(openWatches) {
+        if (openWatches) { draftFor = null; onSelect(null); watchesOpen = true; onWatchesOpened() }
+    }
     // Écran plein (app, mémoire) : la barre Apps / Braise / Réglages reste visible dessous.
     val screen: (@Composable (Modifier) -> Unit)? = when {
         selected != null -> { m ->
@@ -120,6 +130,10 @@ fun HomeRoot(
             BackHandler { receiptsOpen = false }
             Box(m) { ReceiptsRoute(graph, onBack = { receiptsOpen = false }) }
         }
+        watchesOpen -> { m ->
+            BackHandler { watchesOpen = false }
+            Box(m) { WatchesRoute(graph, onBack = { watchesOpen = false }) }
+        }
         else -> null
     }
     if (screen == null && tab != HomeTab.Apps) BackHandler { tab = HomeTab.Apps }
@@ -130,6 +144,7 @@ fun HomeRoot(
             draftFor = null
             memoryOpen = false
             receiptsOpen = false
+            watchesOpen = false
             if (selected != null) onSelect(null)
             tab = it
         },
@@ -137,7 +152,7 @@ fun HomeRoot(
         apps = apps,
         hub = hub,
         onRefreshApps = { appsVm.refresh() },
-        onOpen = { draftFor = null; onSelect(it) },
+        onOpen = { draftFor = null; if (it.isBlank()) watchesOpen = true else onSelect(it) },
         onOpenDraft = { draftFor = it; onSelect(it) },
         onNoticeShown = appsVm::noticeShown,
         onRefreshBraise = hubVm::refreshConversations,
@@ -156,6 +171,7 @@ fun HomeRoot(
         onOpenWeb = { hub.instance?.let { runCatching { uri.openUri(it) } } },
         onOpenMemory = { memoryOpen = true },
         onOpenReceipts = { receiptsOpen = true },
+        onOpenWatches = { watchesOpen = true },
         onSignOut = onSignOut,
     )
 }
@@ -179,6 +195,7 @@ fun HomeShell(
     onOpenWeb: () -> Unit = {},
     onOpenMemory: () -> Unit = {},
     onOpenReceipts: () -> Unit = {},
+    onOpenWatches: () -> Unit = {},
     onSignOut: () -> Unit = {},
     initialInboxOpen: Boolean = false,
     /** Écran ouvert par-dessus l'onglet (page d'app, mémoire…) ; la navigation reste visible. */
@@ -198,7 +215,7 @@ fun HomeShell(
                 HomeTab.Braise -> BraiseScreen(hub, onRefresh = onRefreshBraise, onOpen = onOpen, onOpenDraft = onOpenDraft)
                 HomeTab.Settings -> SettingsScreen(
                     hub, apps.me, onToggle = onToggleNotif, onOpenSystemNotif = onOpenSystemNotif,
-                    onUpdate = onUpdate, onOpenWeb = onOpenWeb, onOpenMemory = onOpenMemory, onOpenReceipts = onOpenReceipts, onSignOut = onSignOut,
+                    onUpdate = onUpdate, onOpenWeb = onOpenWeb, onOpenMemory = onOpenMemory, onOpenReceipts = onOpenReceipts, onOpenWatches = onOpenWatches, onSignOut = onSignOut,
                 )
             }
         }
@@ -312,6 +329,29 @@ private fun ReceiptsRoute(graph: AppGraph, onBack: () -> Unit) {
             onRetry = { vm.load() },
             onMore = vm::more,
             loadDetail = vm::fresh,
+        ),
+    )
+}
+
+/** Réglages → Surveillance : pages surveillées (liste + détail + actions). */
+@Composable
+private fun WatchesRoute(graph: AppGraph, onBack: () -> Unit) {
+    val vm: WatchesViewModel = viewModel(key = "watches", factory = viewModelFactory { initializer { WatchesViewModel(graph) } })
+    val state by vm.state.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { vm.load() }
+    WatchesScreen(
+        state = state,
+        actions = WatchesActions(
+            onBack = onBack,
+            onRetry = vm::load,
+            onOpen = vm::open,
+            onClose = vm::close,
+            onRun = vm::runNow,
+            onPause = vm::pause,
+            onResume = vm::resume,
+            onAskDelete = vm::askDelete,
+            onCancelDelete = vm::cancelDelete,
+            onDelete = vm::delete,
         ),
     )
 }

@@ -23,12 +23,28 @@ object Notifier {
     const val EXTRA_PROJECT = "project_uuid"
     const val EXTRA_OPEN = "open"
     const val OPEN_CORRECTIONS = "corrections"
+    const val OPEN_WATCHES = "watches"
 
     private const val PROGRESS_PREFS = "devforge_deploy_progress"
     private const val KEY_ACTIVE = "active"
 
     /** Réglage qui couvre un type d'événement (les 3 étapes de correction partagent un réglage). */
-    fun settingKey(kind: String): String = if (kind.startsWith("correction_") || kind == "fix_ready") NotifKind.Corrections.key else kind
+    fun settingKey(kind: String): String = when {
+        kind.startsWith("correction_") || kind == "fix_ready" -> NotifKind.Corrections.key
+        kind.startsWith("watch_") -> NotifKind.WatchAlerts.key
+        else -> kind
+    }
+
+    /** Écran à ouvrir quand on touche la notif (null = page de l'app). */
+    fun openTarget(kind: String): String? = when {
+        kind.startsWith("correction_") || kind == "fix_ready" -> OPEN_CORRECTIONS
+        kind.startsWith("watch_") -> OPEN_WATCHES
+        else -> null
+    }
+
+    /** Canal : « à regarder » pour ce qui attend l'utilisateur, « alertes » pour les pannes. */
+    fun channelFor(kind: String): String =
+        if (kind == "spec_waiting" || kind == "fix_ready" || kind == "correction_live" || kind == "watch_alert") CHANNEL_WAITING else CHANNEL_ALERTS
 
     fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -80,14 +96,14 @@ object Notifier {
         if (wanted.isEmpty() || !canNotify(context)) return
         val nm = NotificationManagerCompat.from(context)
         for (e in wanted.take(6)) {
-            val channel = if (e.kind == "spec_waiting" || e.kind == "fix_ready" || e.kind == "correction_live") CHANNEL_WAITING else CHANNEL_ALERTS
+            val channel = channelFor(e.kind)
             val n = NotificationCompat.Builder(context, channel)
                 .setSmallIcon(R.drawable.ic_stat_devforge)
                 .setColor(0xFFA78BFA.toInt())
                 .setContentTitle(e.title)
                 .setContentText(e.body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(e.body))
-                .setContentIntent(openProjectIntent(context, e.projectUuid, if (e.kind.startsWith("correction_") || e.kind == "fix_ready") OPEN_CORRECTIONS else null))
+                .setContentIntent(openProjectIntent(context, e.projectUuid, openTarget(e.kind)))
                 .setAutoCancel(true)
                 .setCategory(if (channel == CHANNEL_ALERTS) NotificationCompat.CATEGORY_ERROR else NotificationCompat.CATEGORY_REMINDER)
                 .setGroup("devforge")

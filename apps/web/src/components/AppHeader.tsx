@@ -4,6 +4,7 @@ import type { Bootstrap } from '../lib/auth';
 import { mobileAvatarNav } from '../lib/nav';
 import { cn } from '../lib/cn';
 import { ActiveRunsMenu } from './ActiveRuns';
+import { WatchAlertsMenu } from './WatchAlertsMenu';
 import { LaunchedAgentsMenu } from './LaunchedAgentsMenu';
 import { StatusBadge, StatusCounters } from './StatusBadge';
 
@@ -130,6 +131,7 @@ export function AppHeader({
         </div>
       ) : (
       <div class="flex min-w-0 shrink-0 items-center gap-2">
+      <WatchAlertsMenu />
       <ActiveRunsMenu />
       <LaunchedAgentsMenu />
       <div class="relative shrink-0" ref={menuRef}>
