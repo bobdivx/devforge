@@ -25,6 +25,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/agent/runs/{run_uuid}", get(get_run))
         .route("/api/v1/agent/runs/{run_uuid}/events", get(run_events_sse))
         .route("/api/v1/agent/runs/{run_uuid}/cancel", post(cancel_run))
+        .route("/api/v1/agent/runs/{run_uuid}/pause", post(pause_run))
+        .route("/api/v1/agent/runs/{run_uuid}/resume", post(resume_run))
+        .route("/api/v1/agent/runs/{run_uuid}/retry", post(retry_run))
+        .route("/api/v1/agent/runs-active", get(active_runs))
         .route(
             "/api/v1/projects/{project_uuid}/agents/{agent_uuid}/active-run",
             get(active_run),
@@ -43,6 +47,8 @@ struct RunInfo {
     summary: Option<String>,
     parent_run_uuid: Option<String>,
     cancel_requested: bool,
+    attempts: i32,
+    error: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -50,7 +56,7 @@ struct RunInfo {
 async fn load_run(state: &AppState, run_uuid: &str) -> Option<RunInfo> {
     sqlx::query_as::<_, RunInfo>(
         r#"SELECT uuid, project_uuid, agent_uuid, status, kind, title, progress::text AS progress, summary,
-                  parent_run_uuid, cancel_requested, created_at, updated_at
+                  parent_run_uuid, cancel_requested, attempts, error, created_at, updated_at
            FROM agent_runs WHERE uuid = $1"#,
     )
     .bind(run_uuid)
@@ -93,6 +99,8 @@ async fn run_json(state: &AppState, r: &RunInfo) -> Value {
         "summary": r.summary,
         "parent_run_uuid": r.parent_run_uuid,
         "cancel_requested": r.cancel_requested,
+        "attempts": r.attempts,
+        "error": r.error,
         "started_at": r.created_at,
         "updated_at": r.updated_at,
         "live": run_events::is_live(&r.uuid),
@@ -227,6 +235,136 @@ async fn cancel_run(
     }
     tracing::info!(run_uuid, local, status, "annulation de run demandée");
     Ok(Json(json!({"data": {"ok": true, "status": status}})))
+}
+
+/// Pause / reprise / relance d'un run (bail SQL : la pause invalide le bail, le run s'arrête).
+async fn control_run(
+    state: &AppState,
+    headers: &HeaderMap,
+    run_uuid: &str,
+    action: crate::agent_runs::Control,
+) -> Result<Json<Value>, ApiError> {
+    use crate::agent_runs::ControlOutcome;
+    let run = authorized_run(state, headers, run_uuid).await?;
+    let outcome = crate::agent_runs::control(&state.pool, run_uuid, action)
+        .await
+        .map_err(ApiError::from)?;
+    let status = match outcome {
+        ControlOutcome::Refused(msg) => {
+            return Err(ApiError {
+                status: axum::http::StatusCode::CONFLICT,
+                message: msg.into(),
+            })
+        }
+        ControlOutcome::Unchanged(status) => status,
+        ControlOutcome::Changed { status, restart } => {
+            if action == crate::agent_runs::Control::Pause {
+                run_events::cancel_local(run_uuid);
+            }
+            if restart {
+                start_run_now(
+                    state.clone(),
+                    run.project_uuid.clone(),
+                    run.agent_uuid.clone(),
+                    run_uuid.to_string(),
+                );
+            }
+            status.to_string()
+        }
+    };
+    tracing::info!(run_uuid, ?action, status, "contrôle de run");
+    Ok(Json(json!({"data": {"ok": true, "status": status}})))
+}
+
+async fn pause_run(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(run_uuid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    control_run(
+        &state,
+        &headers,
+        &run_uuid,
+        crate::agent_runs::Control::Pause,
+    )
+    .await
+}
+
+async fn resume_run(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(run_uuid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    control_run(
+        &state,
+        &headers,
+        &run_uuid,
+        crate::agent_runs::Control::Resume,
+    )
+    .await
+}
+
+async fn retry_run(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(run_uuid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    control_run(
+        &state,
+        &headers,
+        &run_uuid,
+        crate::agent_runs::Control::Retry,
+    )
+    .await
+}
+
+/// `GET /agent/runs-active` : rangée « En cours » (site + Android). Runs de l'espace en file,
+/// en cours ou en pause, plus les échecs des dernières 24 h (à relancer). Survit aux redémarrages.
+async fn active_runs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let (_user, workspace) = crate::auth_routes::current_workspace(&state, &headers)
+        .await
+        .map_err(ApiError::from_auth)?;
+    let since = (chrono::Utc::now() - chrono::Duration::hours(24)).to_rfc3339();
+    let uuids: Vec<(String,)> = sqlx::query_as(
+        r#"SELECT r.uuid FROM agent_runs r JOIN projects p ON p.uuid = r.project_uuid
+           WHERE p.workspace_uuid = $1
+             AND (r.status IN ('pending','queued','running','paused')
+                  OR (r.status = 'failed' AND r.kind = 'worker' AND r.updated_at >= $2))
+           ORDER BY r.created_at DESC LIMIT 20"#,
+    )
+    .bind(&workspace.uuid)
+    .bind(&since)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from)?;
+    let mut items = Vec::with_capacity(uuids.len());
+    for (uuid,) in uuids {
+        if let Some(r) = load_run(&state, &uuid).await {
+            let mut v = run_json(&state, &r).await;
+            let project: Option<String> =
+                sqlx::query_scalar("SELECT name FROM projects WHERE uuid = $1")
+                    .bind(&r.project_uuid)
+                    .fetch_optional(&state.pool)
+                    .await
+                    .ok()
+                    .flatten();
+            v["project_name"] = json!(project);
+            items.push(v);
+        }
+    }
+    Ok(Json(json!({"data": items})))
+}
+
+/// Relance un run remis en `pending` (bail expiré) en retrouvant son projet et son agent.
+pub fn start_pending_run(state: AppState, run_uuid: String) {
+    tokio::spawn(async move {
+        if let Some(r) = load_run(&state, &run_uuid).await {
+            start_run_now(state.clone(), r.project_uuid, r.agent_uuid, run_uuid);
+        }
+    });
 }
 
 /* ---------------- Workers (P4-03) ---------------- */
@@ -369,6 +507,15 @@ pub async fn on_run_finished(state: &AppState, run_uuid: &str) {
         return;
     };
     if run.kind != "worker" {
+        return;
+    }
+    // En pause : pas de carte de fin ni de réveil ; la place libérée profite à la file.
+    if run.status == "paused" {
+        if let Some((next, agent)) =
+            crate::agent_runs::promote_queued(&state.pool, &run.project_uuid).await
+        {
+            start_run_now(state.clone(), run.project_uuid.clone(), agent, next);
+        }
         return;
     }
     let title = run.title.clone().unwrap_or_else(|| "tâche".into());

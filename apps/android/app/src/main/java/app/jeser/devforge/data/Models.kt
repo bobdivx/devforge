@@ -580,6 +580,8 @@ data class AgentRunInfo(
     val summary: String? = null,
     @SerialName("started_at") val startedAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
+    val error: String? = null,
+    val attempts: Int = 0,
 )
 
 @Serializable
@@ -596,11 +598,14 @@ data class JobInfo(
     val milestones: List<RunMilestone> = emptyList(),
 ) {
     val live: Boolean get() = status == "queued" || status == "running"
+    /** Bail SQL : run mis en pause par l'utilisateur (reprise possible). */
+    val paused: Boolean get() = status == "paused"
 }
 
-/** Statut `agent_runs` / déploiement → statut de carte (`queued|running|done|failed|cancelled`). */
+/** Statut `agent_runs` / déploiement → statut de carte (`queued|running|paused|done|failed|cancelled`). */
 fun jobStatus(raw: String?): String = when (raw?.lowercase()) {
     "queued" -> "queued"
+    "paused" -> "paused"
     "completed", "done", "success", "succeeded" -> "done"
     "failed", "error", "timeout" -> "failed"
     "cancelled", "canceled" -> "cancelled"
@@ -640,18 +645,23 @@ fun jobsFromToolCalls(calls: List<ToolCall>): List<JobInfo> {
 
 /**
  * Statut réel des cartes : un `job_result` posté plus tard remplace la carte de délégation du même run,
- * puis les infos live (`agent_runs`) mettent à jour les workers encore en cours.
+ * puis les infos live (`agent_runs`) priment : un run en pause ou relancé après un échec reflète son
+ * état réel (bail SQL), même si une carte de résultat a déjà été postée.
  */
 fun mergeJobStatus(perMessage: List<List<JobInfo>>, live: Map<String, AgentRunInfo> = emptyMap()): List<List<JobInfo>> {
     val finished = perMessage.flatten().filter { it.kind == "worker" && !it.live }.associateBy { it.id }
     return perMessage.map { jobs ->
         jobs.map { j ->
             val done = finished[j.id]
+            val run = if (j.kind == "worker") live[j.id] else null
             when {
+                run != null -> j.copy(
+                    status = jobStatus(run.status),
+                    milestones = run.progress.ifEmpty { j.milestones },
+                    summary = run.summary ?: run.error?.takeIf { jobStatus(run.status) == "failed" } ?: done?.summary ?: j.summary,
+                    files = maxOf(done?.files ?: 0, j.files),
+                )
                 j.live && done != null -> j.copy(status = done.status, summary = done.summary ?: j.summary, files = maxOf(done.files, j.files))
-                j.live && live[j.id] != null -> live.getValue(j.id).let { r ->
-                    j.copy(status = jobStatus(r.status), milestones = r.progress, summary = r.summary ?: j.summary)
-                }
                 else -> j
             }
         }

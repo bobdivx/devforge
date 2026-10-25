@@ -1,4 +1,6 @@
-//! Tours d'agent persistés. Un redémarrage reprend les runs `running` / `pending`.
+//! Tours d'agent persistés. Un redémarrage reprend les runs `pending` et les runs `running`
+//! dont le bail SQL a expiré (`lease_owner` / `lease_until`, renouvelé pendant l'exécution).
+//! Idée reprise d'OpenMuse (MIT) : bail + heartbeat + reprise des seuls baux expirés + plafond d'essais.
 
 use serde_json::Value;
 use sqlx::PgPool;
@@ -122,28 +124,262 @@ pub async fn enqueue(
     Ok(uuid)
 }
 
+/// Durée d'un bail : renouvelé toutes les 30 s par le run, repris par un autre si non renouvelé.
+pub const LEASE_SECS: i64 = 90;
+/// Au-delà, un run coupé n'est plus relancé automatiquement (évite une boucle de crash).
+pub const MAX_ATTEMPTS: i32 = 3;
+/// Statuts qu'une fin de run peut encore écraser (une pause, une annulation ou une reprise gagnent).
+const OPEN_STATUSES: &str = "('pending','queued','running')";
+
+/// Identifiant de ce processus (propriétaire des baux qu'il prend).
+pub fn instance_id() -> &'static str {
+    static ID: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        let host = std::env::var("HOSTNAME").unwrap_or_else(|_| "devforge".into());
+        format!("{host}:{}", &new_uuid()[..8])
+    });
+    &ID
+}
+
 pub async fn try_claim(pool: &PgPool, run_uuid: &str) -> Result<bool, sqlx::Error> {
+    try_claim_as(pool, run_uuid, instance_id()).await
+}
+
+/// Prend le bail d'un run `pending` : un seul gagnant, essai compté.
+pub async fn try_claim_as(pool: &PgPool, run_uuid: &str, owner: &str) -> Result<bool, sqlx::Error> {
     let now = now_str();
     let res = sqlx::query(
-        "UPDATE agent_runs SET status = 'running', updated_at = $1, error = NULL WHERE uuid = $2 AND status = 'pending'",
+        r#"UPDATE agent_runs SET status = 'running', updated_at = $1, error = NULL,
+               lease_owner = $3, lease_until = now() + make_interval(secs => $4),
+               attempts = attempts + 1
+           WHERE uuid = $2 AND status = 'pending'"#,
     )
     .bind(&now)
     .bind(run_uuid)
+    .bind(owner)
+    .bind(LEASE_SECS as f64)
     .execute(pool)
     .await?;
     Ok(res.rows_affected() == 1)
 }
 
-/// Au boot, un `running` est un tour coupé par l'arrêt du processus.
-pub async fn reopen_interrupted(pool: &PgPool) -> Result<u64, sqlx::Error> {
-    let now = now_str();
+/// Heartbeat : prolonge le bail. `false` = bail perdu (pause, annulation, reprise ailleurs) → arrêter.
+pub async fn renew_lease(pool: &PgPool, run_uuid: &str, owner: &str) -> Result<bool, sqlx::Error> {
     let res = sqlx::query(
-        "UPDATE agent_runs SET status = 'pending', updated_at = $1 WHERE status = 'running'",
+        r#"UPDATE agent_runs SET lease_until = now() + make_interval(secs => $3)
+           WHERE uuid = $1 AND status = 'running' AND lease_owner = $2"#,
     )
-    .bind(&now)
+    .bind(run_uuid)
+    .bind(owner)
+    .bind(LEASE_SECS as f64)
     .execute(pool)
     .await?;
-    Ok(res.rows_affected())
+    Ok(res.rows_affected() == 1)
+}
+
+/// Résultat d'une passe de reprise.
+#[derive(Debug, Default, PartialEq)]
+pub struct Recovery {
+    /// Runs remis en `pending` (bail expiré).
+    pub requeued: Vec<String>,
+    /// Runs passés en `failed` : coupés trop souvent.
+    pub failed: Vec<String>,
+}
+
+/// Reprise idempotente des runs `running` dont le bail a expiré. Un run vivant (bail renouvelé)
+/// n'est jamais touché. `include_unleased` (au démarrage seulement) : les runs `running` sans bail
+/// (anciens runs, routines) appartenaient forcément à un processus arrêté.
+pub async fn recover_expired(
+    pool: &PgPool,
+    include_unleased: bool,
+) -> Result<Recovery, sqlx::Error> {
+    let now = now_str();
+    let expired = if include_unleased {
+        "status = 'running' AND (lease_until IS NULL OR lease_until < now())"
+    } else {
+        "status = 'running' AND lease_owner IS NOT NULL AND lease_until < now()"
+    };
+    // Coupé trop souvent, ou sans message à rejouer (routine) : échec explicite, pas de boucle.
+    let failed: Vec<(String, String)> = sqlx::query_as(&format!(
+        r#"UPDATE agent_runs r SET status = 'failed', updated_at = $1, lease_owner = NULL, lease_until = NULL,
+               error = CASE WHEN r.attempts >= $2
+                   THEN 'Interrompu ' || r.attempts || ' fois (redémarrages). Relance-le quand tu veux.'
+                   ELSE 'Interrompu par un redémarrage de DevForge.' END
+           WHERE {expired}
+             AND (r.attempts >= $2 OR NOT EXISTS (SELECT 1 FROM agent_messages m WHERE m.uuid = r.message_uuid))
+           RETURNING r.uuid, r.agent_uuid"#
+    ))
+    .bind(&now)
+    .bind(MAX_ATTEMPTS)
+    .fetch_all(pool)
+    .await?;
+    for (_, agent) in &failed {
+        let _ = sqlx::query(
+            "UPDATE project_agents SET status = 'idle', updated_at = $1 WHERE uuid = $2",
+        )
+        .bind(&now)
+        .bind(agent)
+        .execute(pool)
+        .await;
+    }
+    let requeued: Vec<(String,)> = sqlx::query_as(&format!(
+        r#"UPDATE agent_runs SET status = 'pending', updated_at = $1, lease_owner = NULL, lease_until = NULL
+           WHERE {expired}
+           RETURNING uuid"#
+    ))
+    .bind(&now)
+    .fetch_all(pool)
+    .await?;
+    Ok(Recovery {
+        requeued: requeued.into_iter().map(|r| r.0).collect(),
+        failed: failed.into_iter().map(|r| r.0).collect(),
+    })
+}
+
+/// Contrôle utilisateur d'un run (`pause` | `resume` | `retry`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Control {
+    Pause,
+    Resume,
+    Retry,
+}
+
+/// Issue d'un contrôle.
+#[derive(Debug, PartialEq)]
+pub enum ControlOutcome {
+    /// Nouveau statut ; `restart` = le run doit être relancé (`pending`).
+    Changed { status: &'static str, restart: bool },
+    /// Rien à faire (déjà dans l'état voulu).
+    Unchanged(String),
+    /// Refusé : message pour l'utilisateur.
+    Refused(&'static str),
+}
+
+/// Applique pause / reprise / relance avec des règles strictes. Transition atomique sur le statut lu.
+/// Reprendre un run dont la réponse (partielle) est déjà enregistrée ajoute un message de reprise
+/// au fil et rattache le run à ce message : même carte, même run, l'agent repart de l'historique.
+pub async fn control(
+    pool: &PgPool,
+    run_uuid: &str,
+    action: Control,
+) -> Result<ControlOutcome, sqlx::Error> {
+    let row: Option<(String, String, String, String, Option<String>)> = sqlx::query_as(
+        "SELECT status, project_uuid, agent_uuid, message_uuid, title FROM agent_runs WHERE uuid = $1",
+    )
+    .bind(run_uuid)
+    .fetch_optional(pool)
+    .await?;
+    let Some((status, project, agent, message, title)) = row else {
+        return Ok(ControlOutcome::Refused("Run introuvable"));
+    };
+    let now = now_str();
+    match action {
+        Control::Pause => {
+            if status == "paused" {
+                return Ok(ControlOutcome::Unchanged(status));
+            }
+            if !matches!(status.as_str(), "pending" | "queued" | "running") {
+                return Ok(ControlOutcome::Refused("Ce run est déjà terminé"));
+            }
+            let res = sqlx::query(
+                r#"UPDATE agent_runs SET status = 'paused', updated_at = $1, lease_owner = NULL, lease_until = NULL,
+                       cancel_requested = (status = 'running')
+                   WHERE uuid = $2 AND status = $3"#,
+            )
+            .bind(&now)
+            .bind(run_uuid)
+            .bind(&status)
+            .execute(pool)
+            .await?;
+            if res.rows_affected() == 0 {
+                return Ok(ControlOutcome::Refused("Le run a changé, réessaie"));
+            }
+            let _ = sqlx::query(
+                "UPDATE project_agents SET status = 'idle', updated_at = $1 WHERE uuid = $2",
+            )
+            .bind(&now)
+            .bind(&agent)
+            .execute(pool)
+            .await;
+            Ok(ControlOutcome::Changed {
+                status: "paused",
+                restart: false,
+            })
+        }
+        Control::Resume | Control::Retry => {
+            let expected = if action == Control::Resume {
+                "paused"
+            } else {
+                "failed"
+            };
+            if action == Control::Retry && status == "paused" {
+                return Ok(ControlOutcome::Refused("Ce run est en pause : reprends-le"));
+            }
+            if matches!(status.as_str(), "pending" | "queued" | "running") {
+                return Ok(ControlOutcome::Unchanged(status));
+            }
+            if status != expected {
+                return Ok(ControlOutcome::Refused(if action == Control::Resume {
+                    "Seul un run en pause peut reprendre"
+                } else {
+                    "Seul un run en échec peut être relancé"
+                }));
+            }
+            let replayable: Option<(i64,)> =
+                sqlx::query_as("SELECT id FROM agent_messages WHERE uuid = $1")
+                    .bind(&message)
+                    .fetch_optional(pool)
+                    .await?;
+            if replayable.is_none() {
+                return Ok(ControlOutcome::Refused(
+                    "Ce run ne peut pas être rejoué : relance la routine",
+                ));
+            }
+            let mut next_message = message.clone();
+            if assistant_already_replied(pool, &agent, &message).await? {
+                let label = title
+                    .as_deref()
+                    .filter(|t| !t.trim().is_empty())
+                    .unwrap_or("la tâche");
+                let content = if action == Control::Resume {
+                    format!("Reprends {label} là où tu t'étais arrêté.")
+                } else {
+                    format!("Relance {label} : reprends depuis le début si besoin.")
+                };
+                next_message = new_uuid();
+                sqlx::query(
+                    r#"INSERT INTO agent_messages (uuid, project_uuid, agent_uuid, role, content, tool_calls_json, provider, created_at)
+                       VALUES ($1, $2, $3, 'user', $4, '[]', '', $5)"#,
+                )
+                .bind(&next_message)
+                .bind(&project)
+                .bind(&agent)
+                .bind(&content)
+                .bind(&now)
+                .execute(pool)
+                .await?;
+            }
+            let res = sqlx::query(
+                r#"UPDATE agent_runs SET status = 'pending', updated_at = $1, error = NULL, cancel_requested = FALSE,
+                       message_uuid = $3, lease_owner = NULL, lease_until = NULL,
+                       attempts = CASE WHEN $4 THEN 0 ELSE attempts END
+                   WHERE uuid = $2 AND status = $5"#,
+            )
+            .bind(&now)
+            .bind(run_uuid)
+            .bind(&next_message)
+            .bind(action == Control::Retry)
+            .bind(expected)
+            .execute(pool)
+            .await?;
+            if res.rows_affected() == 0 {
+                return Ok(ControlOutcome::Refused("Le run a changé, réessaie"));
+            }
+            Ok(ControlOutcome::Changed {
+                status: "pending",
+                restart: true,
+            })
+        }
+    }
 }
 
 pub async fn list_pending(pool: &PgPool) -> Result<Vec<RunRow>, sqlx::Error> {
@@ -551,13 +787,17 @@ pub async fn finish(
     error: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     let now = now_str();
-    sqlx::query("UPDATE agent_runs SET status = $1, error = $2, updated_at = $3 WHERE uuid = $4")
-        .bind(status)
-        .bind(error)
-        .bind(&now)
-        .bind(run_uuid)
-        .execute(pool)
-        .await?;
+    // Fencing : une pause, une annulation ou une reprise déjà enregistrée n'est pas écrasée.
+    sqlx::query(&format!(
+        "UPDATE agent_runs SET status = $1, error = $2, updated_at = $3, lease_owner = NULL, lease_until = NULL \
+         WHERE uuid = $4 AND status IN {OPEN_STATUSES}"
+    ))
+    .bind(status)
+    .bind(error)
+    .bind(&now)
+    .bind(run_uuid)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -593,6 +833,11 @@ mod tests {
                 message_uuid TEXT NOT NULL UNIQUE,
                 status TEXT NOT NULL,
                 error TEXT,
+                title TEXT,
+                cancel_requested BOOLEAN NOT NULL DEFAULT FALSE,
+                lease_owner TEXT,
+                lease_until TIMESTAMPTZ,
+                attempts INT NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )"#,
@@ -619,6 +864,24 @@ mod tests {
         pool
     }
 
+    async fn status_of(pool: &PgPool, run: &str) -> (String, i32, Option<String>) {
+        sqlx::query_as("SELECT status, attempts, lease_owner FROM agent_runs WHERE uuid = $1")
+            .bind(run)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn expire(pool: &PgPool, run: &str) {
+        sqlx::query(
+            "UPDATE agent_runs SET lease_until = now() - interval '1 second' WHERE uuid = $1",
+        )
+        .bind(run)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn interrupted_run_is_pending_again_and_claim_is_once() {
         let pool = pool().await;
@@ -627,12 +890,129 @@ mod tests {
             .unwrap();
         assert!(try_claim(&pool, &run).await.unwrap());
         assert!(!try_claim(&pool, &run).await.unwrap());
-        let n = reopen_interrupted(&pool).await.unwrap();
-        assert_eq!(n, 1);
+        let (status, attempts, owner) = status_of(&pool, &run).await;
+        assert_eq!((status.as_str(), attempts), ("running", 1));
+        assert_eq!(owner.as_deref(), Some(instance_id()));
+        // Au démarrage, un run « running » d'un processus arrêté est repris.
+        sqlx::query("UPDATE agent_runs SET lease_owner = NULL, lease_until = NULL")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let rec = recover_expired(&pool, true).await.unwrap();
+        assert_eq!(rec.requeued, vec![run.clone()]);
         let pending = list_pending(&pool).await.unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].content, "scaffold ce projet");
         assert!(try_claim(&pool, &run).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn live_lease_is_untouched_and_expired_lease_is_requeued() {
+        let pool = pool().await;
+        let run = record_user_turn(&pool, "proj", "agent-1", "go")
+            .await
+            .unwrap();
+        assert!(try_claim_as(&pool, &run, "a").await.unwrap());
+        assert!(recover_expired(&pool, false)
+            .await
+            .unwrap()
+            .requeued
+            .is_empty());
+        assert!(recover_expired(&pool, true)
+            .await
+            .unwrap()
+            .requeued
+            .is_empty());
+        assert!(renew_lease(&pool, &run, "a").await.unwrap());
+        assert!(!renew_lease(&pool, &run, "b").await.unwrap());
+        expire(&pool, &run).await;
+        let rec = recover_expired(&pool, false).await.unwrap();
+        assert_eq!(rec.requeued, vec![run.clone()]);
+        // L'ancien propriétaire a perdu le bail : plus de renouvellement.
+        assert!(!renew_lease(&pool, &run, "a").await.unwrap());
+        assert!(try_claim_as(&pool, &run, "b").await.unwrap());
+        assert_eq!(status_of(&pool, &run).await.1, 2);
+    }
+
+    #[tokio::test]
+    async fn too_many_interruptions_or_no_message_fail_instead_of_looping() {
+        let pool = pool().await;
+        let run = record_user_turn(&pool, "proj", "agent-1", "go")
+            .await
+            .unwrap();
+        for _ in 0..MAX_ATTEMPTS {
+            assert!(try_claim_as(&pool, &run, "a").await.unwrap());
+            expire(&pool, &run).await;
+            recover_expired(&pool, false).await.unwrap();
+        }
+        assert_eq!(status_of(&pool, &run).await.0, "failed");
+        // Routine : run « running » sans message à rejouer → échec au démarrage.
+        sqlx::query(
+            "INSERT INTO agent_runs (uuid, project_uuid, agent_uuid, message_uuid, status, created_at, updated_at) \
+             VALUES ('r2', 'proj', 'agent-1', 'routine-x', 'running', 't', 't')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(recover_expired(&pool, false)
+            .await
+            .unwrap()
+            .failed
+            .is_empty());
+        let rec = recover_expired(&pool, true).await.unwrap();
+        assert_eq!(rec.failed, vec!["r2".to_string()]);
+        assert_eq!(
+            control(&pool, "r2", Control::Retry).await.unwrap(),
+            ControlOutcome::Refused("Ce run ne peut pas être rejoué : relance la routine")
+        );
+    }
+
+    #[tokio::test]
+    async fn pause_resume_retry_rules_and_fenced_finish() {
+        let pool = pool().await;
+        let run = record_user_turn(&pool, "proj", "agent-1", "go")
+            .await
+            .unwrap();
+        assert!(try_claim(&pool, &run).await.unwrap());
+        assert_eq!(
+            control(&pool, &run, Control::Pause).await.unwrap(),
+            ControlOutcome::Changed {
+                status: "paused",
+                restart: false
+            }
+        );
+        // Le tour annulé se termine après la pause : le statut reste « paused ».
+        finish(&pool, &run, "cancelled", None).await.unwrap();
+        assert_eq!(status_of(&pool, &run).await.0, "paused");
+        assert!(matches!(
+            control(&pool, &run, Control::Retry).await.unwrap(),
+            ControlOutcome::Refused(_)
+        ));
+        assert_eq!(
+            control(&pool, &run, Control::Resume).await.unwrap(),
+            ControlOutcome::Changed {
+                status: "pending",
+                restart: true
+            }
+        );
+        assert!(matches!(
+            control(&pool, &run, Control::Resume).await.unwrap(),
+            ControlOutcome::Unchanged(_)
+        ));
+        assert!(try_claim(&pool, &run).await.unwrap());
+        finish(&pool, &run, "failed", Some("boom")).await.unwrap();
+        assert!(matches!(
+            control(&pool, &run, Control::Pause).await.unwrap(),
+            ControlOutcome::Refused(_)
+        ));
+        assert_eq!(
+            control(&pool, &run, Control::Retry).await.unwrap(),
+            ControlOutcome::Changed {
+                status: "pending",
+                restart: true
+            }
+        );
+        assert_eq!(status_of(&pool, &run).await.1, 0);
     }
 
     #[tokio::test]

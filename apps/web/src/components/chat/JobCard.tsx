@@ -1,4 +1,4 @@
-import { Check, ExternalLink, FileText, Square, X as XIcon } from 'lucide-preact';
+import { Check, ExternalLink, FileText, Pause, Play, RotateCcw, Square, X as XIcon } from 'lucide-preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { fmtElapsed } from '../../lib/activity';
 import { subscribeRun } from '../../lib/agent-stream';
@@ -6,6 +6,7 @@ import { api, type AgentRunInfo, type Deployment } from '../../lib/api';
 import { cn } from '../../lib/cn';
 import {
   isJobLive,
+  jobControls,
   JOB_KIND_LABEL,
   JOB_STATUS_LABEL,
   jobStatusFromDeployment,
@@ -24,6 +25,9 @@ function StatusDot({ status }: { status: JobStatus }) {
   }
   if (status === 'failed') {
     return <XIcon key="failed" size={14} strokeWidth={2.5} class="df-status-fail shrink-0 text-[var(--color-danger)]" aria-hidden />;
+  }
+  if (status === 'paused') {
+    return <Pause key="paused" size={12} strokeWidth={2.5} class="shrink-0 text-[var(--color-ink-muted)]" aria-hidden />;
   }
   if (status === 'cancelled') {
     return <Square key="cancelled" size={11} strokeWidth={2.5} class="shrink-0 text-[var(--color-ink-faint)]" aria-hidden />;
@@ -50,6 +54,8 @@ export type JobCardActions = {
   onOpenThread?: (workerUuid: string) => void;
   onCancel?: () => void;
   onToggleLogs?: () => void;
+  /** Bail SQL : pause / reprise / relance (worker). */
+  onControl?: (action: 'pause' | 'resume' | 'retry') => void;
 };
 
 /** Rendu pur de la carte (testé par statut). */
@@ -59,17 +65,25 @@ export function JobCardView({
   logs,
   logsOpen,
   cancelling,
+  controlBusy,
+  controlError,
   onOpenThread,
   onCancel,
   onToggleLogs,
+  onControl,
 }: {
   job: Job;
   nowMs: number;
   logs?: string[] | null;
   logsOpen?: boolean;
   cancelling?: boolean;
+  controlBusy?: boolean;
+  controlError?: string | null;
 } & JobCardActions) {
   const live = isJobLive(job.status);
+  const ctl = onControl ? jobControls(job) : { pause: false, resume: false, retry: false };
+  const ctlClass =
+    'df-hit inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs text-[var(--color-ink-muted)] hover:bg-white/[0.06] hover:text-[var(--color-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:opacity-50';
   const started = job.startedAt ? Date.parse(job.startedAt) : NaN;
   const elapsed =
     job.elapsedMs ?? (Number.isFinite(started) ? Math.max(0, (job.finishedAt ? Date.parse(job.finishedAt) : nowMs) - started) : undefined);
@@ -101,7 +115,7 @@ export function JobCardView({
             'df-fade-in shrink-0 rounded-full border px-2 py-0.5 text-[11px] [animation-duration:160ms]',
             job.status === 'done' && 'border-[var(--color-ok)]/40 text-[var(--color-ok)]',
             job.status === 'failed' && 'border-[var(--color-danger)]/40 text-[var(--color-danger)]',
-            (job.status === 'running' || job.status === 'queued' || job.status === 'cancelled') &&
+            (job.status === 'running' || job.status === 'queued' || job.status === 'paused' || job.status === 'cancelled') &&
               'border-[var(--color-line)] text-[var(--color-ink-muted)]',
           )}
           aria-live="polite"
@@ -139,7 +153,12 @@ export function JobCardView({
           {logs.join('\n')}
         </pre>
       ) : null}
-      {(onOpenThread && job.workerUuid) || onToggleLogs || (live && onCancel) || job.links?.length ? (
+      {controlError ? (
+        <p class="mt-2 text-xs text-[var(--color-danger)]" role="alert">
+          {controlError}
+        </p>
+      ) : null}
+      {(onOpenThread && job.workerUuid) || onToggleLogs || (live && onCancel) || ctl.pause || ctl.resume || ctl.retry || job.links?.length ? (
         <div class="mt-2 flex flex-wrap items-center gap-1.5">
           {onOpenThread && job.workerUuid ? (
             <button
@@ -173,10 +192,33 @@ export function JobCardView({
               {l.label}
             </a>
           ))}
+          {ctl.pause ? (
+            <button type="button" class={cn(ctlClass, 'ml-auto')} disabled={controlBusy} onClick={() => onControl?.('pause')}>
+              <Pause size={12} aria-hidden />
+              Pause
+            </button>
+          ) : null}
+          {ctl.resume ? (
+            <button
+              type="button"
+              class={cn(ctlClass, 'ml-auto text-[var(--color-accent)]')}
+              disabled={controlBusy}
+              onClick={() => onControl?.('resume')}
+            >
+              <Play size={12} aria-hidden />
+              Reprendre
+            </button>
+          ) : null}
+          {ctl.retry ? (
+            <button type="button" class={cn(ctlClass, 'ml-auto')} disabled={controlBusy} onClick={() => onControl?.('retry')}>
+              <RotateCcw size={12} aria-hidden />
+              Relancer
+            </button>
+          ) : null}
           {live && onCancel ? (
             <button
               type="button"
-              class="df-hit ml-auto inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs text-[var(--color-danger)] hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:opacity-50"
+              class={ctl.pause ? 'df-hit inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs text-[var(--color-danger)] hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:opacity-50' : 'df-hit ml-auto inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs text-[var(--color-danger)] hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:opacity-50'}
               disabled={cancelling}
               onClick={onCancel}
             >
@@ -194,6 +236,7 @@ export function JobCardView({
 export type JobClient = {
   agentRun: (runUuid: string) => Promise<{ data: AgentRunInfo }>;
   cancelAgentRun: (runUuid: string) => Promise<unknown>;
+  controlAgentRun?: (runUuid: string, action: 'pause' | 'resume' | 'retry') => Promise<unknown>;
   deployment: (uuid: string) => Promise<{ data: Deployment }>;
   cancelDeployment: (uuid: string) => Promise<unknown>;
   deploymentLogs: (uuid: string) => Promise<unknown>;
@@ -203,6 +246,8 @@ export type JobClient = {
 const defaultClient: JobClient = {
   agentRun: (id) => api.agentRun(id),
   cancelAgentRun: (id) => api.cancelAgentRun(id),
+  controlAgentRun: (id, action) =>
+    action === 'pause' ? api.pauseAgentRun(id) : action === 'resume' ? api.resumeAgentRun(id) : api.retryAgentRun(id),
   deployment: (id) => api.deployment(id),
   cancelDeployment: (id) => api.cancelDeployment(id),
   deploymentLogs: (id) => api.deploymentLogs(id),
@@ -218,7 +263,7 @@ function applyRun(job: Job, r: AgentRunInfo): Job {
     milestones: r.progress && r.progress.length ? milestonesFrom(r.progress) : job.milestones,
     startedAt: r.started_at || job.startedAt,
     finishedAt: isJobLive(status) ? undefined : r.updated_at,
-    summary: r.summary || job.summary,
+    summary: r.summary || (status === 'failed' ? r.error || undefined : undefined) || job.summary,
   };
 }
 
@@ -255,12 +300,16 @@ export function JobCard({
   const [logs, setLogs] = useState<string[]>([]);
   const [logsOpen, setLogsOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [controlBusy, setControlBusy] = useState(false);
+  const [controlError, setControlError] = useState<string | null>(null);
+  /** Incrémenté après reprise / relance : la carte resuit le run. */
+  const [follow, setFollow] = useState(0);
   const finished = useRef(!isJobLive(initial.status));
   const onFinishedRef = useRef(onFinished);
   onFinishedRef.current = onFinished;
 
   const finish = (j: Job) => {
-    if (finished.current) return;
+    if (finished.current || j.status === 'paused') return;
     finished.current = true;
     onFinishedRef.current?.(j);
   };
@@ -304,7 +353,7 @@ export function JobCard({
       alive = false;
       ctrl.abort();
     };
-  }, [initial.runUuid]);
+  }, [initial.runUuid, follow]);
 
   // Déploiement : statut relu toutes les 3 s.
   useEffect(() => {
@@ -357,6 +406,27 @@ export function JobCard({
     }
   };
 
+  const control = async (action: 'pause' | 'resume' | 'retry') => {
+    if (!client.controlAgentRun) return;
+    setControlBusy(true);
+    setControlError(null);
+    try {
+      await client.controlAgentRun(job.runUuid, action);
+      if (action === 'pause') {
+        setJob((j) => ({ ...j, status: 'paused' }));
+      } else {
+        finished.current = false;
+        setCancelling(false);
+        setJob((j) => ({ ...j, status: 'running', summary: undefined }));
+        setFollow((n) => n + 1);
+      }
+    } catch (e) {
+      setControlError(e instanceof Error ? e.message : 'Action impossible');
+    } finally {
+      setControlBusy(false);
+    }
+  };
+
   const toggleLogs = async () => {
     const open = !logsOpen;
     setLogsOpen(open);
@@ -377,6 +447,9 @@ export function JobCard({
       logs={logs}
       logsOpen={logsOpen}
       cancelling={cancelling}
+      controlBusy={controlBusy}
+      controlError={controlError}
+      onControl={job.kind === 'worker' && client.controlAgentRun ? control : undefined}
       onOpenThread={onOpenThread}
       onCancel={job.kind === 'worker' || job.kind === 'deploy' ? cancel : undefined}
       onToggleLogs={canLogs ? toggleLogs : undefined}

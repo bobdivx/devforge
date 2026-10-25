@@ -66,6 +66,11 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS progress JSONB NULL",
         "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS cancel_requested BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS summary TEXT NULL",
+        // Baux SQL (reprise après redémarrage) : propriétaire, échéance, essais.
+        "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS lease_owner TEXT NULL",
+        "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ NULL",
+        "ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0",
+        "CREATE INDEX IF NOT EXISTS idx_agent_runs_lease ON agent_runs (status, lease_until)",
         "CREATE INDEX IF NOT EXISTS idx_agent_runs_agent_status ON agent_runs (agent_uuid, status)",
         "CREATE INDEX IF NOT EXISTS idx_agent_runs_project_kind ON agent_runs (project_uuid, kind, status)",
     ] {
@@ -320,6 +325,16 @@ pub async fn start(pool: &PgPool, run_uuid: &str, agent_uuid: &str) -> RunHandle
                         }
                     }
                     // Annulation demandée depuis un autre nœud : relue en base chaque seconde.
+                    // Heartbeat du bail toutes les 30 s ; bail perdu (pause, reprise ailleurs) → arrêt.
+                    if ticks % 600 == 0 && !cancel_watch.is_cancelled() {
+                        let owner = crate::agent_runs::instance_id();
+                        if let Ok(false) = crate::agent_runs::renew_lease(&pool, &run, owner).await {
+                            let status = run_status(&pool, &run).await;
+                            if status.as_deref() != Some("running") || lease_lost(&pool, &run, owner).await {
+                                cancel_watch.cancel();
+                            }
+                        }
+                    }
                     if ticks % 20 == 0 && !cancel_watch.is_cancelled() {
                         let asked: Option<bool> = sqlx::query_scalar("SELECT cancel_requested FROM agent_runs WHERE uuid = $1")
                             .bind(&run).fetch_optional(&pool).await.ok().flatten();
@@ -374,6 +389,17 @@ pub async fn history(pool: &PgPool, run_uuid: &str, after: i64) -> Vec<RunEvent>
     .into_iter()
     .map(|(seq, ty, payload)| RunEvent { seq: seq as i64, ty, payload: serde_json::from_str(&payload).unwrap_or(Value::Null) })
     .collect()
+}
+
+/// Un autre processus détient le bail de ce run.
+async fn lease_lost(pool: &PgPool, run_uuid: &str, owner: &str) -> bool {
+    let current: Option<Option<String>> =
+        sqlx::query_scalar("SELECT lease_owner FROM agent_runs WHERE uuid = $1")
+            .bind(run_uuid)
+            .fetch_optional(pool)
+            .await
+            .ok();
+    matches!(current, Some(Some(o)) if o != owner)
 }
 
 pub async fn run_status(pool: &PgPool, run_uuid: &str) -> Option<String> {

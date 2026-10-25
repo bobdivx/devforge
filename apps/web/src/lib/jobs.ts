@@ -6,7 +6,7 @@ import type { Milestone, MilestoneState } from './activity';
 import type { AgentToolCall } from './agent-stream';
 
 export type JobKind = 'worker' | 'deploy' | 'preview' | 'routine';
-export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+export type JobStatus = 'queued' | 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
 
 export type Job = {
   /** Run (worker) ou déploiement : clé stable de la carte. */
@@ -42,6 +42,8 @@ export function jobStatusFromRun(status: string | undefined | null): JobStatus {
     case 'completed':
     case 'done':
       return 'done';
+    case 'paused':
+      return 'paused';
     case 'cancelled':
       return 'cancelled';
     case 'failed':
@@ -49,6 +51,16 @@ export function jobStatusFromRun(status: string | undefined | null): JobStatus {
     default:
       return 'running';
   }
+}
+
+/** Actions de contrôle proposées pour un worker (bail SQL). */
+export function jobControls(job: Pick<Job, 'kind' | 'status'>): { pause: boolean; resume: boolean; retry: boolean } {
+  const worker = job.kind === 'worker';
+  return {
+    pause: worker && isJobLive(job.status),
+    resume: worker && job.status === 'paused',
+    retry: worker && job.status === 'failed',
+  };
 }
 
 /** Statut de déploiement → statut de carte. */
@@ -64,6 +76,7 @@ export function jobStatusFromDeployment(status: string | undefined | null): JobS
 export const JOB_STATUS_LABEL: Record<JobStatus, string> = {
   queued: 'En file',
   running: 'En cours',
+  paused: 'En pause',
   done: 'Terminé',
   failed: 'Échec',
   cancelled: 'Annulé',

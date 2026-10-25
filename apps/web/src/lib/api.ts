@@ -422,8 +422,13 @@ export type AgentRunInfo = {
   project_uuid: string;
   agent_uuid: string;
   agent_name?: string | null;
-  status: 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | string;
+  status: 'pending' | 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | string;
   kind: 'chat' | 'wake' | 'worker' | 'routine' | string;
+  /** Bail SQL : nombre de démarrages (reprises après redémarrage comprises). */
+  attempts?: number;
+  error?: string | null;
+  /** Rangée « En cours » uniquement. */
+  project_name?: string | null;
   title?: string | null;
   progress?: Array<{ label: string; status: string }>;
   summary?: string | null;
@@ -1078,6 +1083,24 @@ export const api = {
       method: 'POST',
       body: '{}',
     }),
+  /** Bail SQL : pause (arrête le tour en cours), reprise, relance d'un échec. */
+  pauseAgentRun: (runUuid: string) =>
+    request<{ data: { ok: boolean; status: string } }>(`/agent/runs/${encodeURIComponent(runUuid)}/pause`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  resumeAgentRun: (runUuid: string) =>
+    request<{ data: { ok: boolean; status: string } }>(`/agent/runs/${encodeURIComponent(runUuid)}/resume`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  retryAgentRun: (runUuid: string) =>
+    request<{ data: { ok: boolean; status: string } }>(`/agent/runs/${encodeURIComponent(runUuid)}/retry`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  /** Rangée « En cours » : runs en file, en cours, en pause ou en échec récent (durable). */
+  activeAgentRuns: () => request<{ data: AgentRunInfo[] }>(`/agent/runs-active`),
   clearAgentMessages: (projectUuid: string, agentUuid: string) =>
     request<{ ok: boolean }>(`/projects/${projectUuid}/agents/${agentUuid}/messages`, {
       method: 'DELETE',

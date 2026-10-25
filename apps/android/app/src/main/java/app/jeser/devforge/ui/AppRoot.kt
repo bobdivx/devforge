@@ -306,6 +306,7 @@ private fun ProjectRoute(graph: AppGraph, uuid: String, onBack: (() -> Unit)?, o
             onRetry = vm::load,
             onSend = { vm.send(it) },
             onCancelJob = vm::cancelJob,
+            onControlJob = vm::controlJob,
             onAnswer = { item, option, text -> vm.answer(item, option, text) },
             onReact = { item, emoji -> vm.react(item, emoji) },
             onAttachImage = { bytes, mime, name -> vm.attachImage(bytes, mime, name) },

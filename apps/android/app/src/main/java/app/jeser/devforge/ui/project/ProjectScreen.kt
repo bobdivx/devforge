@@ -118,6 +118,7 @@ data class ProjectActions(
     val onDraftValidatedSeen: () -> Unit = {},
     val onUndoShown: () -> Unit = {},
     val onCancelJob: (String) -> Unit = {},
+    val onControlJob: (String, String) -> Unit = { _, _ -> },
     /* P5 : question `ask_user`, réactions, images jointes. */
     val onAnswer: (ChatItem, app.jeser.devforge.data.QuestionOption?, String?) -> Unit = { _, _, _ -> },
     val onReact: (ChatItem, String) -> Unit = { _, _ -> },
@@ -711,6 +712,7 @@ private fun ChatPane(
                     showPlanAction = m.key == lastPlanKey && canChat,
                     onBuild = { actions.onSend(ChipText.BUILD_PLAN) },
                     onCancelJob = actions.onCancelJob,
+                    onControlJob = actions.onControlJob,
                     rich = RichRowState(
                         questionOpen = m.key == state.messages.lastOrNull()?.key && canChat,
                         answer = m.uuid?.let { answers[it] },
@@ -809,6 +811,7 @@ private fun MessageRow(
     showPlanAction: Boolean,
     onBuild: () -> Unit,
     onCancelJob: (String) -> Unit = {},
+    onControlJob: (String, String) -> Unit = { _, _ -> },
     rich: RichRowState = RichRowState(),
     actions: ProjectActions = ProjectActions(),
 ) {
@@ -844,7 +847,7 @@ private fun MessageRow(
                 m.question?.let { q ->
                     QuestionCardRow(q, open = rich.questionOpen, answer = rich.answer, onAnswer = { opt, text -> actions.onAnswer(m, opt, text) })
                 }
-                m.jobs.forEach { job -> JobCardRow(job, onCancel = { onCancelJob(job.id) }) }
+                m.jobs.forEach { job -> JobCardRow(job, onCancel = { onCancelJob(job.id) }, onControl = { a -> onControlJob(job.id, a) }) }
                 if (m.reactions.isNotEmpty() || rich.canReact) {
                     ReactionsRow(m.reactions, enabled = rich.canReact, onToggle = { e -> actions.onReact(m, e) })
                 }
