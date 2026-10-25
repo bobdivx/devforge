@@ -23,6 +23,7 @@ sqlx = { workspace = true }
 regex = "1"
 uuid = { workspace = true }
 chrono = { workspace = true }
+sha2 = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

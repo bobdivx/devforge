@@ -1024,6 +1024,7 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
 
     // Événements de run persistés et runs en fond (P4-01).
     crate::run_events::migrate(pool).await?;
+    crate::receipts::migrate(pool).await?;
 
     // Chat riche (P5) : réactions, pièces jointes, citations, routines d'agent.
     crate::rich_chat::migrate(pool).await?;

@@ -55,6 +55,7 @@ mod project_oidc;
 mod project_oidc_routes;
 mod project_pg;
 mod project_pg_routes;
+mod receipts;
 mod rich_chat;
 mod routes;
 mod run_events;
@@ -255,6 +256,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     crate::dns::spawn_dns_loop(state.clone());
     crate::dns_failover::spawn_loop(state.clone());
     crate::docker_gc_routes::spawn_loop(state.clone());
+    // P2 : actions coupées par le redémarrage → « issue inconnue », avant toute reprise.
+    receipts::recover_at_boot(&state.pool).await;
     routes::resume_deploy_queue(state.clone());
     run_routes::install_launcher(&state);
     routes::resume_agent_runs(state.clone());
@@ -376,6 +379,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(infra_routes::router())
         .merge(memory_routes::router())
         .merge(run_routes::router())
+        .merge(receipts::router())
         .merge(rich_chat::router())
         .merge(wake_gate::router())
         .merge(backup_routes::router())

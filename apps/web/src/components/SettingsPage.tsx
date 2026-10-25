@@ -264,6 +264,13 @@ function SettingsPageInner() {
             description="Installer DevForge sur ton téléphone"
             icon={<span class="text-lg leading-none" aria-hidden>📱</span>}
           />
+          <HubTile
+            index={2}
+            href="/app/receipts"
+            title="Validations"
+            description="Qui a validé quoi, quand, et l’issue"
+            icon={<HubIcon name="shield" />}
+          />
           {SETTINGS_CARDS.map((card, i) => (
             <SettingCard
               key={card.key}
@@ -272,10 +279,10 @@ function SettingsPageInner() {
                   ? { ...card, description: `Principal · ${principal}` }
                   : card
               }
-              index={i + 2}
+              index={i + 3}
             />
           ))}
-          {isAdmin && <AcmeEmailTile index={SETTINGS_CARDS.length + 2} />}
+          {isAdmin && <AcmeEmailTile index={SETTINGS_CARDS.length + 3} />}
         </HubGrid>
       </AppShell>
     );

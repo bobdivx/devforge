@@ -2,6 +2,7 @@ pub mod claims;
 pub mod coerce;
 pub mod events;
 pub mod guard;
+pub mod receipts;
 pub mod roles;
 pub mod sdd;
 mod tools;
@@ -45,6 +46,8 @@ pub struct ToolRegistry {
     gate: Option<Arc<dyn guard::PublishGate>>,
     /// Mémoire durable (P3) : profil injecté + pré-chargement du journal.
     memory: Option<Arc<dyn devforge_memory::MemoryStore>>,
+    /// Reçus d'approbation (P2) : absent = aucun reçu (tests, registre sans base).
+    receipts: Option<Arc<sqlx::PgPool>>,
 }
 
 impl ToolRegistry {
@@ -53,7 +56,17 @@ impl ToolRegistry {
             tools: HashMap::new(),
             gate: None,
             memory: None,
+            receipts: None,
         }
+    }
+
+    /// Branche les reçus d'approbation des actions distantes (P2).
+    pub fn set_receipts(&mut self, pool: Arc<sqlx::PgPool>) {
+        self.receipts = Some(pool);
+    }
+
+    pub fn receipts(&self) -> Option<Arc<sqlx::PgPool>> {
+        self.receipts.clone()
     }
 
     /// Branche la mémoire : outils `memory_*` + injection dans le prompt.
@@ -230,6 +243,7 @@ pub fn build_core_registry(
     registry.register(Arc::new(tools::DeleteRoutineTool { pool: pool.clone() }));
     registry.register(Arc::new(ReviewProjectSecurityTool { pool: pool.clone() }));
     registry.set_publish_gate(Arc::new(guard::PgPublishGate { pool: pool.clone() }));
+    registry.set_receipts(pool.clone());
     registry.set_memory(Arc::new(devforge_memory::PgMemoryStore::new(
         (*pool).clone(),
     )));
@@ -510,14 +524,24 @@ impl AgentRunner {
                     label: events::tool_label(tool, &args),
                 },
             );
+            let turn_started = chrono::Utc::now();
             let result = if let Some(blocked) = refuse_bare_spec_approval(tool, &args, message) {
                 blocked
             } else if let Some(blocked) = refuse_spec_publish(tool, message) {
                 blocked
             } else if let Some(blocked) = self.remote_write_refusal(tool, &args, &ctx).await {
                 blocked
+            } else if let Some(skip) = self.replay_guard(tool, &args, &ctx, turn_started).await {
+                skip
             } else {
-                self.registry.execute(tool, args.clone()).await?
+                let receipt = self.receipt_start(tool, &args, &ctx).await;
+                let res = self.registry.execute(tool, args.clone()).await;
+                let value = match &res {
+                    Ok(v) => v.clone(),
+                    Err(e) => json!({"ok": false, "error": e.to_string()}),
+                };
+                self.receipt_finish(tool, receipt, &value).await;
+                res?
             };
             let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
             let elapsed_ms = started.elapsed().as_millis() as u64;
@@ -580,6 +604,8 @@ impl AgentRunner {
         milestones: &mut events::MilestoneTracker,
     ) -> Result<AgentReply> {
         let progress = progress.clone();
+        // Début du tour : un reçu plus ancien du même run vient d'un tour précédent (reprise).
+        let turn_started = chrono::Utc::now();
         let max_pushes = guard::max_pushes_per_run();
         let mut pushes: usize = 0;
         let mut messages = vec![ChatMessage::system(system_prompt(&ctx, message))];
@@ -800,6 +826,12 @@ impl AgentRunner {
                     self.remote_write_refusal(&call.name, &args, &ctx).await
                 {
                     Some(blocked)
+                } else if let Some(skip) = self
+                    .replay_guard(&call.name, &args, &ctx, turn_started)
+                    .await
+                {
+                    // P2 : action distante déjà faite (ou coupée) avant la reprise du run.
+                    Some(skip)
                 } else if guard::is_github_push(&call.name, &args) && pushes >= max_pushes {
                     // Plafond de pushes par run : on s'arrête et on demande à l'utilisateur.
                     Some(guard::push_limit_blocked(&call.name, &args, max_pushes))
@@ -841,6 +873,7 @@ impl AgentRunner {
                         if guard::is_github_push(&call.name, &args) {
                             pushes += 1;
                         }
+                        let receipt = self.receipt_start(&call.name, &args, &ctx).await;
                         let exec = self.registry.execute(&call.name, args.clone());
                         let res = match &cancel {
                             // Abandon du futur = arrêt de l'outil (processus enfant tué, P4-05).
@@ -854,7 +887,7 @@ impl AgentRunner {
                             },
                             None => exec.await,
                         };
-                        match res {
+                        let value = match res {
                             Ok(v) => v,
                             Err(e) => match e {
                                 devforge_shared::DevForgeError::NeedsUserAction {
@@ -867,7 +900,9 @@ impl AgentRunner {
                                 }
                                 _ => json!({ "ok": false, "error": e.to_string() }),
                             },
-                        }
+                        };
+                        self.receipt_finish(&call.name, receipt, &value).await;
+                        value
                     }
                 };
                 let elapsed_ms = started.elapsed().as_millis() as u64;
@@ -1028,6 +1063,7 @@ impl AgentRunner {
     }
 
     /// P1-01 : action distante sans accord humain récent → refus sans effet de bord.
+    /// P2 : le refus laisse une proposition hashée (30 min) que la validation approuvera.
     async fn remote_write_refusal(
         &self,
         tool: &str,
@@ -1037,22 +1073,139 @@ impl AgentRunner {
         if !guard::is_remote_write(tool, args) {
             return None;
         }
-        let project_uuid = args
-            .get("project_uuid")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.trim().is_empty())
-            .map(str::to_string)
-            .or_else(|| ctx.project_uuid.clone())
-            .unwrap_or_default();
-        if ctx.unattended {
-            return Some(guard::remote_write_blocked_unattended(tool, args));
-        }
-        if self.registry.publish_allowed(&project_uuid).await {
-            None
+        let project_uuid = remote_project(args, ctx);
+        let blocked = if ctx.unattended {
+            guard::remote_write_blocked_unattended(tool, args)
+        } else if self.registry.publish_allowed(&project_uuid).await {
+            return None;
         } else {
-            Some(guard::remote_write_blocked(tool, args))
+            guard::remote_write_blocked(tool, args)
+        };
+        if let Some(pool) = self.registry.receipts() {
+            let r = self.tool_receipt(tool, args, ctx, &project_uuid);
+            if let Err(e) = receipts::propose(&pool, &r).await {
+                tracing::warn!(error = %e, "reçu : proposition non enregistrée");
+            }
+        }
+        Some(blocked)
+    }
+
+    fn tool_receipt(
+        &self,
+        tool: &str,
+        args: &Value,
+        ctx: &AgentChatContext,
+        project_uuid: &str,
+    ) -> receipts::NewReceipt {
+        let version = args
+            .get("git_sha")
+            .or_else(|| args.get("branch"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .or_else(|| ctx.git_branch.clone());
+        receipts::NewReceipt {
+            project_uuid: Some(project_uuid.to_string()).filter(|p| !p.is_empty()),
+            action: "agent_tool".into(),
+            action_label: format!("Agent : {}", guard::remote_write_summary(tool, args)),
+            target: ctx.agent_name.clone().unwrap_or_else(|| "Agent".into()),
+            version,
+            source: "agent".into(),
+            run_uuid: ctx.run_uuid.clone(),
+            tool_name: Some(tool.to_string()),
+            action_hash: Some(receipts::tool_hash(project_uuid, tool, args)),
+            ..Default::default()
         }
     }
+
+    /// P2 (idempotence à la reprise) : une action distante déjà faite par ce run lors d'un tour
+    /// précédent n'est pas rejouée ; une action coupée en route ne l'est pas sans nouvelle validation.
+    async fn replay_guard(
+        &self,
+        tool: &str,
+        args: &Value,
+        ctx: &AgentChatContext,
+        turn_started: chrono::DateTime<chrono::Utc>,
+    ) -> Option<Value> {
+        if !guard::is_remote_write(tool, args) {
+            return None;
+        }
+        let pool = self.registry.receipts()?;
+        let run_uuid = ctx.run_uuid.as_deref().filter(|r| !r.is_empty())?;
+        let project_uuid = remote_project(args, ctx);
+        let hash = receipts::tool_hash(&project_uuid, tool, args);
+        match receipts::prior_in_run(&pool, run_uuid, &hash, turn_started).await {
+            Ok(receipts::Prior::Done { uuid }) => Some(receipts::already_done_result(tool, &uuid)),
+            Ok(receipts::Prior::Unknown { uuid }) => {
+                Some(receipts::outcome_unknown_result(tool, &uuid))
+            }
+            Ok(receipts::Prior::None) => None,
+            Err(e) => {
+                tracing::warn!(error = %e, "reçu : historique du run illisible");
+                None
+            }
+        }
+    }
+
+    /// Reçu « en cours » juste avant l'action distante : consomme la validation correspondante
+    /// (usage unique) ou, à défaut, s'appuie sur l'accord de publication en cours.
+    async fn receipt_start(
+        &self,
+        tool: &str,
+        args: &Value,
+        ctx: &AgentChatContext,
+    ) -> Option<String> {
+        if !guard::is_remote_write(tool, args) {
+            return None;
+        }
+        let pool = self.registry.receipts()?;
+        let project_uuid = remote_project(args, ctx);
+        let mut r = self.tool_receipt(tool, args, ctx, &project_uuid);
+        let hash = r.hash();
+        match receipts::consume(&pool, &project_uuid, &hash, ctx.run_uuid.as_deref()).await {
+            Ok(Some(uuid)) => return Some(uuid),
+            Ok(None) => {}
+            Err(e) => tracing::warn!(error = %e, "reçu : validation non consommée"),
+        }
+        if let Some((by, label, at)) = receipts::grant_approver(&pool, &project_uuid).await {
+            r.approved_by = by;
+            r.approved_by_label = label;
+            r.approved_at = at;
+        }
+        match receipts::begin(&pool, &r).await {
+            Ok(uuid) => Some(uuid),
+            Err(e) => {
+                tracing::warn!(error = %e, "reçu : action non enregistrée");
+                None
+            }
+        }
+    }
+
+    async fn receipt_finish(&self, tool: &str, receipt: Option<String>, result: &Value) {
+        let (Some(uuid), Some(pool)) = (receipt, self.registry.receipts()) else {
+            return;
+        };
+        let (status, detail) = receipts::tool_outcome(result);
+        // Déploiement lancé : son issue finale sera celle du reçu (réconciliation côté serveur).
+        if status == "done" && receipts::LAUNCHES_DEPLOY.contains(&tool) {
+            if let Some(dep) = receipts::deployment_of(result) {
+                let _ = receipts::link_deployment(&pool, &uuid, &dep).await;
+                return;
+            }
+        }
+        if let Err(e) = receipts::finish(&pool, &uuid, status, detail.as_deref()).await {
+            tracing::warn!(error = %e, "reçu : issue non enregistrée");
+        }
+    }
+}
+
+/// Projet visé par une action distante : argument explicite, sinon projet courant.
+fn remote_project(args: &Value, ctx: &AgentChatContext) -> String {
+    args.get("project_uuid")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| ctx.project_uuid.clone())
+        .unwrap_or_default()
 }
 
 /// Dernier message utilisateur, avec ses images si le modèle les voit.

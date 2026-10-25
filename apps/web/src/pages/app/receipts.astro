@@ -1,0 +1,7 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { ReceiptsPage } from '../../components/ReceiptsPage';
+---
+<BaseLayout title="Validations · DevForge">
+  <ReceiptsPage client:only="preact" />
+</BaseLayout>

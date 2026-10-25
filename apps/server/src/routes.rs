@@ -1246,6 +1246,9 @@ async fn project_trace(
 pub struct CreateDeployment {
     pub git_sha: Option<String>,
     pub git_message: Option<String>,
+    /// Action confirmée côté client (`deploy`, `rebuild`, `retry`, `publish`) : libellé du reçu.
+    #[serde(default)]
+    pub action: Option<String>,
 }
 
 async fn create_deployment(
@@ -1278,11 +1281,22 @@ async fn create_deployment(
         )
         .await;
     }
-    let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
+    let (user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
 
     let dep_uuid = new_uuid();
     let now = now_str();
     let message = body.git_message.unwrap_or_else(|| "Manual deploy".into());
+    // P2 : reçu de la confirmation (issue = celle du déploiement, réconciliée à la fin).
+    let receipt = crate::receipts::begin_for_user(
+        &state.pool,
+        &headers,
+        &user,
+        &project,
+        crate::receipts::deploy_action(body.action.as_deref()),
+        None,
+        body.git_sha.clone(),
+    )
+    .await;
 
     // Mark queued first
     sqlx::query(
@@ -1300,6 +1314,7 @@ async fn create_deployment(
     .execute(&state.pool)
     .await
     .map_err(ApiError::from)?;
+    crate::receipts::link_deployment(&state.pool, receipt.as_ref(), &dep_uuid).await;
 
     sqlx::query("UPDATE projects SET status = 'deploying', updated_at = $1 WHERE id = $2")
         .bind(&now)
@@ -1978,13 +1993,14 @@ async fn delete_deployment(
         .await;
     }
 
-    let project_status = sqlx::query_as::<_, (String,)>("SELECT status FROM projects WHERE id = $1")
-        .bind(dep.project_id)
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(ApiError::from)?
-        .map(|r| r.0)
-        .unwrap_or_default();
+    let project_status =
+        sqlx::query_as::<_, (String,)>("SELECT status FROM projects WHERE id = $1")
+            .bind(dep.project_id)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(ApiError::from)?
+            .map(|r| r.0)
+            .unwrap_or_default();
 
     Ok(Json(json!({
         "ok": true,
@@ -2002,7 +2018,7 @@ async fn cancel_deployment(
     headers: HeaderMap,
     Path(uuid): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    let (_user, _ws, dep) = auth_deployment(&state, &headers, &uuid).await?;
+    let (user, _ws, dep) = auth_deployment(&state, &headers, &uuid).await?;
 
     let in_progress = matches!(
         dep.status.as_str(),
@@ -2021,10 +2037,34 @@ async fn cancel_deployment(
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::not_found("project"))?;
 
+    let receipt = crate::receipts::begin_for_user(
+        &state.pool,
+        &headers,
+        &user,
+        &project,
+        "cancel_deploy",
+        Some(format!(
+            "{} · déploiement {}",
+            project.name,
+            &uuid[..uuid.len().min(8)]
+        )),
+        dep.git_sha.clone(),
+    )
+    .await;
     let cancelled =
-        crate::deploy_queue::cancel_one_deployment(&state.deploy_queue, &state.pool, &uuid)
-            .await
-            .map_err(ApiError::from)?;
+        crate::deploy_queue::cancel_one_deployment(&state.deploy_queue, &state.pool, &uuid).await;
+    crate::receipts::finish(
+        &state.pool,
+        receipt.as_ref(),
+        matches!(cancelled, Ok(true)),
+        match &cancelled {
+            Ok(true) => None,
+            Ok(false) => Some("Le déploiement n’était plus en cours."),
+            Err(_) => Some("Erreur pendant l’arrêt."),
+        },
+    )
+    .await;
+    let cancelled = cancelled.map_err(ApiError::from)?;
 
     if !cancelled {
         return Err(ApiError::message(
@@ -4255,19 +4295,27 @@ pub struct PublishProjectBody {
     pub private: Option<bool>,
 }
 
-async fn grant_publish(state: &AppState, project_uuid: &str) -> Result<(), ApiError> {
+async fn grant_publish(
+    state: &AppState,
+    project_uuid: &str,
+    user: &crate::auth_routes::UserRow,
+) -> Result<(), ApiError> {
     let now = chrono::Utc::now();
     let expires = (now + chrono::Duration::minutes(15)).to_rfc3339();
     sqlx::query(
-        r#"INSERT INTO project_publish_grants (project_uuid, granted_at, expires_at)
-           VALUES ($1, $2, $3)
+        r#"INSERT INTO project_publish_grants (project_uuid, granted_at, expires_at, granted_by, granted_by_label)
+           VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT(project_uuid) DO UPDATE SET
              granted_at = excluded.granted_at,
-             expires_at = excluded.expires_at"#,
+             expires_at = excluded.expires_at,
+             granted_by = excluded.granted_by,
+             granted_by_label = excluded.granted_by_label"#,
     )
     .bind(project_uuid)
     .bind(now.to_rfc3339())
     .bind(&expires)
+    .bind(&user.uuid)
+    .bind(crate::receipts::user_label(user))
     .execute(&state.pool)
     .await
     .map_err(ApiError::from)?;
@@ -4281,8 +4329,9 @@ async fn approve_publish(
     headers: HeaderMap,
     Path(uuid): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    let (_user, _ws, _project) = auth_project(&state, &headers, &uuid).await?;
-    grant_publish(&state, &uuid).await?;
+    let (user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
+    grant_publish(&state, &uuid, &user).await?;
+    crate::receipts::record_publish_approval(&state.pool, &headers, &user, &project).await;
     Ok(Json(json!({
         "ok": true,
         "expires_in_seconds": 900,
@@ -4298,8 +4347,8 @@ async fn publish_project(
     Path(uuid): Path<String>,
     Json(body): Json<PublishProjectBody>,
 ) -> Result<(axum::http::StatusCode, Json<Value>), ApiError> {
-    let (_user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
-    grant_publish(&state, &uuid).await?;
+    let (user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
+    grant_publish(&state, &uuid, &user).await?;
 
     // Dériver repo_name depuis le slug si non fourni
     let repo_name = body.repo_name.unwrap_or_else(|| {
@@ -4343,11 +4392,29 @@ async fn publish_project(
         "private": private
     });
 
-    let result = state
-        .registry
-        .execute("publish_to_github", args)
-        .await
-        .map_err(|e| ApiError::message(e.to_string()))?;
+    let receipt = crate::receipts::begin_for_user(
+        &state.pool,
+        &headers,
+        &user,
+        &project,
+        "publish",
+        Some(format!("{} → GitHub {repo_name}", project.name)),
+        None,
+    )
+    .await;
+    let result = state.registry.execute("publish_to_github", args).await;
+    let result = match result {
+        Ok(v) => v,
+        Err(e) => {
+            crate::receipts::finish(&state.pool, receipt.as_ref(), false, Some(&e.to_string()))
+                .await;
+            return Err(ApiError::message(e.to_string()));
+        }
+    };
+    if let Some(r) = receipt.as_ref() {
+        let (status, detail) = devforge_agent::receipts::tool_outcome(&result);
+        let _ = devforge_agent::receipts::finish(&state.pool, r, status, detail.as_deref()).await;
+    }
 
     let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
     let status_code = if ok {
