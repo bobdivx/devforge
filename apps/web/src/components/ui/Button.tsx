@@ -65,7 +65,7 @@ export function Button({
   title,
 }: Props) {
   const cls = cn(
-    'inline-flex cursor-pointer items-center justify-center gap-2 font-medium tracking-tight transition-[filter,background-color,color,opacity,box-shadow] duration-200 ease-out disabled:pointer-events-none disabled:opacity-50',
+    'inline-flex cursor-pointer items-center justify-center gap-2 font-medium tracking-tight transition-[filter,background-color,color,opacity,box-shadow] duration-200 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] disabled:pointer-events-none disabled:opacity-50',
     variants[variant],
     sizes[size],
     className,
