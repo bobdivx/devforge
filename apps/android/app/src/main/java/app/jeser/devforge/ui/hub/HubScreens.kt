@@ -248,6 +248,7 @@ fun SettingsScreen(
     onSignOut: () -> Unit,
     onOpenMemory: () -> Unit = {},
     onOpenReceipts: () -> Unit = {},
+    onOpenWatches: () -> Unit = {},
 ) {
     var confirmOut by remember { mutableStateOf(false) }
     TabScaffold("Réglages") { padding ->
@@ -319,6 +320,19 @@ fun SettingsScreen(
                             Text("Mises en ligne, arrêts, publications : quand, par qui, et l'issue.", color = DfColors.InkMuted, fontSize = 13.sp)
                         }
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Ouvrir les validations", tint = DfColors.InkFaint)
+                    }
+                }
+            }
+            item(key = "watches") {
+                SectionTitle("Surveillance")
+                Card(onClick = onOpenWatches) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text("👁️", fontSize = 24.sp)
+                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                            Text("Pages surveillées", fontWeight = FontWeight.Medium)
+                            Text("Un changement, un texte, un prix sous un seuil : tu es prévenu.", color = DfColors.InkMuted, fontSize = 13.sp)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Ouvrir la surveillance", tint = DfColors.InkFaint)
                     }
                 }
             }

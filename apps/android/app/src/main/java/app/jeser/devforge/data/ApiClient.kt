@@ -349,6 +349,29 @@ class ApiClient(
     suspend fun receipt(uuid: String): ApprovalReceipt =
         get("/receipts/${enc(uuid)}", DataEnvelope.serializer(ApprovalReceipt.serializer())).data
 
+    /* P3 : surveillance de page. */
+    suspend fun watches(): WatchList = get("/watches", WatchList.serializer())
+
+    suspend fun watch(uuid: String): WatchDetail = get("/watches/${enc(uuid)}", WatchDetail.serializer())
+
+    suspend fun runWatch(uuid: String): PageWatch =
+        send("POST", "/watches/${enc(uuid)}/run", buildJsonObject { }, DataEnvelope.serializer(PageWatch.serializer())).data
+
+    suspend fun pauseWatch(uuid: String): PageWatch =
+        send("POST", "/watches/${enc(uuid)}/pause", buildJsonObject { }, DataEnvelope.serializer(PageWatch.serializer())).data
+
+    suspend fun resumeWatch(uuid: String): PageWatch =
+        send("POST", "/watches/${enc(uuid)}/resume", buildJsonObject { }, DataEnvelope.serializer(PageWatch.serializer())).data
+
+    /** Suppression : confirmation explicite exigée par le serveur. */
+    suspend fun deleteWatch(uuid: String): OkOnly =
+        call(Request.Builder().url(url("/watches/${enc(uuid)}?confirm=true")).delete().build()) {
+            DevForgeJson.decodeFromString(OkOnly.serializer(), it)
+        }
+
+    suspend fun markWatchAlertsRead(): OkOnly =
+        send("POST", "/watch-alerts/read", buildJsonObject { }, OkOnly.serializer())
+
     suspend fun memoryList(tier: String): MemoryList = get("/memory?tier=${enc(tier)}", MemoryList.serializer())
 
     suspend fun memoryCorrect(uuid: String, content: String): MemoryWriteResult =

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
+import { Eye } from 'lucide-preact';
 import { api, type InstanceDomain } from '../lib/api';
 import { AcmeEmailTile } from './AcmeEmailTile';
 import { AppShell } from './AppShell';
@@ -271,6 +272,13 @@ function SettingsPageInner() {
             description="Qui a validé quoi, quand, et l’issue"
             icon={<HubIcon name="shield" />}
           />
+          <HubTile
+            index={3}
+            href="/app/watches"
+            title="Surveillance"
+            description="Pages relues pour toi : changement, texte, prix"
+            icon={<Eye size={24} aria-hidden />}
+          />
           {SETTINGS_CARDS.map((card, i) => (
             <SettingCard
               key={card.key}
@@ -279,10 +287,10 @@ function SettingsPageInner() {
                   ? { ...card, description: `Principal · ${principal}` }
                   : card
               }
-              index={i + 3}
+              index={i + 4}
             />
           ))}
-          {isAdmin && <AcmeEmailTile index={SETTINGS_CARDS.length + 3} />}
+          {isAdmin && <AcmeEmailTile index={SETTINGS_CARDS.length + 4} />}
         </HubGrid>
       </AppShell>
     );

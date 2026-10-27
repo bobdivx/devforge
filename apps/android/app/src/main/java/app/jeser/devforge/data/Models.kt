@@ -697,3 +697,53 @@ data class ReceiptList(
     val data: List<ApprovalReceipt> = emptyList(),
     @SerialName("next_before") val nextBefore: String? = null,
 )
+
+/** P3 : surveillance de page (changement, texte, prix). */
+@Serializable
+data class PageWatch(
+    val uuid: String,
+    val name: String = "",
+    val url: String = "",
+    val kind: String = "change",
+    val needle: String? = null,
+    @SerialName("text_mode") val textMode: String? = null,
+    @SerialName("price_op") val priceOp: String? = null,
+    val threshold: Double? = null,
+    val currency: String? = null,
+    @SerialName("interval_minutes") val intervalMinutes: Int = 60,
+    val status: String = "active",
+    @SerialName("paused_reason") val pausedReason: String? = null,
+    @SerialName("failure_streak") val failureStreak: Int = 0,
+    @SerialName("last_check_at") val lastCheckAt: String? = null,
+    @SerialName("next_check_at") val nextCheckAt: String? = null,
+    @SerialName("last_error") val lastError: String? = null,
+    @SerialName("last_value") val lastValue: String? = null,
+    @SerialName("last_summary") val lastSummary: String? = null,
+    @SerialName("condition_met") val conditionMet: Boolean = false,
+    @SerialName("last_alert_at") val lastAlertAt: String? = null,
+    @SerialName("created_at") val createdAt: String = "",
+)
+
+@Serializable
+data class WatchCheck(
+    val uuid: String,
+    @SerialName("checked_at") val checkedAt: String = "",
+    val outcome: String = "",
+    @SerialName("http_status") val httpStatus: Int? = null,
+    val value: String? = null,
+    val summary: String? = null,
+    val error: String? = null,
+    val alerted: Boolean = false,
+)
+
+@Serializable
+data class WatchList(
+    val data: List<PageWatch> = emptyList(),
+    @SerialName("unread_alerts") val unreadAlerts: Int = 0,
+)
+
+@Serializable
+data class WatchDetail(
+    val data: PageWatch,
+    val checks: List<WatchCheck> = emptyList(),
+)

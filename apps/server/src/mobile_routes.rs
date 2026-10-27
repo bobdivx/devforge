@@ -121,6 +121,23 @@ pub fn spec_waiting_event(
     })
 }
 
+/// Alerte de surveillance de page → événement de la boîte de réception (pas de projet).
+pub fn watch_alert_event(a: &crate::page_watch::WatchAlert, watch_name: &str) -> InboxEvent {
+    InboxEvent {
+        id: format!("watch:{}", a.uuid),
+        kind: if a.kind == "watch_paused" {
+            "watch_paused"
+        } else {
+            "watch_alert"
+        },
+        project_uuid: String::new(),
+        project_name: watch_name.to_string(),
+        title: a.title.clone(),
+        body: a.body.clone(),
+        created_at: a.created_at.to_rfc3339(),
+    }
+}
+
 async fn inbox(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -206,6 +223,14 @@ async fn inbox(
 
     // 4. Corrections : proposée, en ligne, échec.
     events.extend(crate::correction::inbox_events(&state.pool, &projects, &since).await);
+
+    // 5. Surveillance de pages (P3) : alertes et pauses automatiques.
+    events.extend(
+        crate::page_watch::alerts_since(&state.pool, &workspace.uuid, &since)
+            .await
+            .into_iter()
+            .map(|(a, name)| watch_alert_event(&a, &name)),
+    );
 
     events.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(Json(json!({

@@ -55,6 +55,10 @@ mod project_oidc;
 mod project_oidc_routes;
 mod project_pg;
 mod project_pg_routes;
+mod page_watch;
+mod page_watch_routes;
+#[cfg(test)]
+mod page_watch_tests;
 mod receipts;
 mod rich_chat;
 mod routes;
@@ -263,6 +267,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     routes::resume_agent_runs(state.clone());
     memory_routes::spawn_maintenance(state.clone());
     rich_chat::install_routine_runner(state.clone());
+    // P3 : surveillance de pages, sur le tic du planificateur cron (baux SQL par surveillance).
+    page_watch::install(state.pool.clone());
 
     // Background sync for GitHub runners (Docker + Actions status → SQLite snapshot).
     {
@@ -380,6 +386,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(memory_routes::router())
         .merge(run_routes::router())
         .merge(receipts::router())
+        .merge(page_watch_routes::router())
         .merge(rich_chat::router())
         .merge(wake_gate::router())
         .merge(backup_routes::router())

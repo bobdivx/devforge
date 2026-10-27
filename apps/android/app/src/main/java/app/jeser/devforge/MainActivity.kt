@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
     /** Projet à ouvrir (notification touchée). Observé via Compose — jamais écrit pendant la composition. */
     private var deepLinkProject by mutableStateOf<String?>(null)
     private var deepLinkCorrections by mutableStateOf<String?>(null)
+    private var deepLinkWatches by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
@@ -103,6 +104,8 @@ class MainActivity : ComponentActivity() {
                         onSignOut = { graph.signOut() },
                         openCorrectionsFor = deepLinkCorrections,
                         onCorrectionsOpened = { deepLinkCorrections = null },
+                        openWatches = deepLinkWatches,
+                        onWatchesOpened = { deepLinkWatches = false },
                     )
                 }
             }
@@ -138,9 +141,12 @@ class MainActivity : ComponentActivity() {
             return
         }
         intent.getStringExtra(Notifier.EXTRA_PROJECT)?.let { uuid ->
-            if (intent.getStringExtra(Notifier.EXTRA_OPEN) == Notifier.OPEN_CORRECTIONS) {
+            val open = intent.getStringExtra(Notifier.EXTRA_OPEN)
+            if (open == Notifier.OPEN_WATCHES) {
+                deepLinkWatches = true
+            } else if (open == Notifier.OPEN_CORRECTIONS) {
                 deepLinkCorrections = uuid
-            } else {
+            } else if (uuid.isNotBlank()) {
                 deepLinkProject = uuid
             }
             intent.removeExtra(Notifier.EXTRA_PROJECT)

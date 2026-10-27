@@ -9,6 +9,7 @@ enum class NotifKind(val key: String, val title: String, val description: String
     AppDown("app_down", "App qui ne répond plus", "Phare 🗼 a repéré une app en panne."),
     SpecWaiting("spec_waiting", "Braise attend ton OK", "Une spec est prête à relire."),
     Corrections("corrections", "Corrections", "Correction prête, en ligne ou en échec."),
+    WatchAlerts("watch_alerts", "Pages surveillées", "Une page a changé, un texte ou un prix est au rendez-vous."),
 }
 
 interface NotifSettings {

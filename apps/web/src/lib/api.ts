@@ -128,6 +128,70 @@ export type ApprovalReceipt = {
   updated_at: string;
 };
 
+/** P3 : surveillance de page. */
+export type WatchKind = 'change' | 'text' | 'price';
+export type PageWatch = {
+  uuid: string;
+  workspace_uuid: string;
+  name: string;
+  url: string;
+  kind: WatchKind | string;
+  needle?: string | null;
+  text_mode?: 'appears' | 'disappears' | string | null;
+  price_op?: 'below' | 'above' | string | null;
+  threshold?: number | null;
+  currency?: string | null;
+  interval_minutes: number;
+  status: 'active' | 'paused' | string;
+  paused_reason?: 'user' | 'failures' | string | null;
+  failure_streak: number;
+  last_check_at?: string | null;
+  next_check_at: string;
+  last_success_at?: string | null;
+  last_error?: string | null;
+  last_http_status?: number | null;
+  last_value?: string | null;
+  last_summary?: string | null;
+  condition_met: boolean;
+  last_hash?: string | null;
+  alert_seq: number;
+  last_alert_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+export type WatchCheck = {
+  uuid: string;
+  watch_uuid: string;
+  checked_at: string;
+  outcome: 'baseline' | 'unchanged' | 'changed' | 'met' | 'not_met' | 'error' | string;
+  http_status?: number | null;
+  duration_ms?: number | null;
+  value?: string | null;
+  summary?: string | null;
+  error?: string | null;
+  alerted: boolean;
+};
+export type WatchAlert = {
+  uuid: string;
+  watch_uuid: string;
+  kind: 'watch_alert' | 'watch_paused' | string;
+  title: string;
+  body: string;
+  created_at: string;
+  read_at?: string | null;
+};
+export type WatchInput = {
+  name?: string;
+  url?: string;
+  kind?: WatchKind;
+  text?: string;
+  text_mode?: 'appears' | 'disappears';
+  price_op?: 'below' | 'above';
+  threshold?: number;
+  currency?: string;
+  interval_minutes?: number;
+};
+
 export type ReceiptQuery = {
   project?: string;
   status?: ReceiptStatus[];
@@ -966,6 +1030,36 @@ export const api = {
       body: JSON.stringify(body ?? { git_message: 'Manual deploy' }),
     }),
   deployment: (uuid: string) => request<{ data: Deployment }>(`/deployments/${uuid}`),
+  /** P3 : surveillance de page. */
+  watches: () => request<{ data: PageWatch[]; unread_alerts?: number }>('/watches'),
+  watch: (uuid: string) =>
+    request<{ data: PageWatch; checks: WatchCheck[] }>(`/watches/${encodeURIComponent(uuid)}`),
+  createWatch: (body: WatchInput) =>
+    request<{ data: PageWatch }>('/watches', { method: 'POST', body: JSON.stringify(body) }),
+  updateWatch: (uuid: string, body: WatchInput) =>
+    request<{ data: PageWatch }>(`/watches/${encodeURIComponent(uuid)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  pauseWatch: (uuid: string) =>
+    request<{ data: PageWatch }>(`/watches/${encodeURIComponent(uuid)}/pause`, { method: 'POST' }),
+  resumeWatch: (uuid: string) =>
+    request<{ data: PageWatch }>(`/watches/${encodeURIComponent(uuid)}/resume`, { method: 'POST' }),
+  runWatch: (uuid: string) =>
+    request<{ data: PageWatch; check?: WatchCheck | null }>(
+      `/watches/${encodeURIComponent(uuid)}/run`,
+      { method: 'POST' },
+    ),
+  /** Suppression : le serveur exige la confirmation explicite. */
+  deleteWatch: (uuid: string) =>
+    request<{ ok: boolean }>(`/watches/${encodeURIComponent(uuid)}?confirm=true`, { method: 'DELETE' }),
+  watchAlerts: (unread = false) =>
+    request<{ data: WatchAlert[]; unread: number }>(`/watch-alerts${unread ? '?unread=true' : ''}`),
+  markWatchAlertsRead: (uuids?: string[]) =>
+    request<{ ok: boolean; marked: number }>('/watch-alerts/read', {
+      method: 'POST',
+      body: JSON.stringify(uuids ? { uuids } : {}),
+    }),
   /** P2 : historique des validations (reçus d'approbation) de l'espace. */
   receipts: (q: ReceiptQuery = {}) => {
     const p = new URLSearchParams();
