@@ -9,3 +9,6 @@
 ## 2024-10-25 - [Optimize `cn` utility string concatenation]
 **Learning:** In Preact/Astro, hot-path functions like `cn` (className merging) that are called repeatedly during render cycles suffer from intermediate array allocations when using `.filter(Boolean).join(' ')`. Refactoring to use standard `for` loops and string concatenation avoids GC overhead and improves execution time significantly (~50% reduction).
 **Action:** Prefer direct string manipulation and loops over intermediate array methods on performance-critical hot paths.
+## 2024-10-25 - [Rejected optimization: manual loop in `cn` function]
+**Learning:** Optimizing `cn` (className merging) from `.filter().join()` to a manual loop in Astro/Preact, while theoretically reducing GC overhead, has no measurable impact at this call frequency and significantly hurts readability. This is a recurring pattern (duplicates #275, similar to reasoning in #269).
+**Action:** Do not micro-optimize simple array methods like `filter` and `join` into manual loops unless there is a proven, measurable bottleneck that cannot be solved by architecture changes. Prioritize readability.
