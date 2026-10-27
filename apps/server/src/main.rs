@@ -320,7 +320,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // Déploiements orphelins (aucune tâche vivante) → échec, toutes les 5 min.
+    // Déploiements orphelins (aucune tâche vivante) → échec, puis verrous projet
+    // `deploying` sans déploiement actif → libérés. Toutes les 5 min (et au boot).
     {
         let state_reap = state.clone();
         tokio::spawn(async move {
@@ -335,6 +336,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .await;
                 if n > 0 {
                     tracing::info!(count = n, "Déploiements orphelins nettoyés");
+                }
+                // Premier tick immédiat : couvre aussi le démarrage.
+                let freed = deploy_queue::release_orphan_project_locks(
+                    &state_reap.pool,
+                    chrono::Duration::minutes(2),
+                )
+                .await;
+                if !freed.is_empty() {
+                    tracing::info!(count = freed.len(), "Verrous projet orphelins libérés");
                 }
             }
         });

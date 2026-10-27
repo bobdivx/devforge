@@ -998,6 +998,9 @@ pub async fn teardown(state: &AppState, project: &Project, pr: i64, reason: &str
     for (u,) in &active {
         state.deploy_queue.signal_cancel(u).await;
     }
+    // Le projet ne repasse à un statut stable que si plus rien n'est actif
+    // (un déploiement prod lancé par la fusion garde son verrou).
+    crate::deploy_queue::release_deploying_if_no_active(&state.pool, project.id).await;
     let server = project
         .server_id
         .as_deref()
