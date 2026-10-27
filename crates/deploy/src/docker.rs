@@ -556,7 +556,7 @@ fn container_name_ok(name: &str) -> bool {
 
 /// Dernières lignes des logs d’exécution du conteneur (stdout + stderr, horodatées).
 pub fn docker_runtime_logs(name: &str, tail: u32) -> String {
-    let tail = tail.clamp(1, 1000);
+    let tail = tail.clamp(1, crate::runtime_logs::MAX_TAIL);
     format!(
         "docker logs --tail {tail} --timestamps {} 2>&1",
         shell_escape(name)

@@ -790,10 +790,23 @@ async fn project_status(
 
 #[derive(Debug, Deserialize, Default)]
 struct RuntimeLogsQuery {
-    tail: Option<u32>,
+    tail: Option<u64>,
+    /// Durée (`30m`, `2h`, `1h30m`, `1d`), RFC 3339 ou epoch.
+    since: Option<String>,
+    /// Filtre texte insensible à la casse.
+    grep: Option<String>,
+    /// `error` | `warn` | `info` | `debug` | `all`.
+    level: Option<String>,
+    /// Horodatage Docker en tête de ligne (défaut : oui).
+    timestamps: Option<bool>,
+    /// Service annexe (conteneur `<app>-<service>`).
+    service: Option<String>,
+    /// Taille max de la sortie en octets (défaut 256 Kio, max 400 Kio).
+    max_bytes: Option<u64>,
 }
 
-/// Logs d’exécution du conteneur (lecture seule) : utilisés par l’app Android (bouton Logs).
+/// Logs d’exécution du conteneur (lecture seule, secrets masqués) : app Android (bouton Logs),
+/// agents et outil MCP `get_container_logs`.
 async fn project_runtime_logs(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -801,10 +814,24 @@ async fn project_runtime_logs(
     axum::extract::Query(q): axum::extract::Query<RuntimeLogsQuery>,
 ) -> Result<Json<Value>, (axum::http::StatusCode, Json<Value>)> {
     let project = auth_project(&state, &headers, &uuid).await?;
-    let out = state
-        .deploy
-        .runtime_logs(&ctx(&project), q.tail.unwrap_or(200))
-        .await;
+    let opts = devforge_deploy::runtime_logs::RuntimeLogsOptions::from_params(
+        &devforge_deploy::runtime_logs::RuntimeLogsParams {
+            tail: q.tail,
+            since: q.since.as_deref(),
+            grep: q.grep.as_deref(),
+            level: q.level.as_deref(),
+            timestamps: q.timestamps,
+            service: q.service.as_deref(),
+            max_bytes: q.max_bytes,
+        },
+    )
+    .map_err(|e| {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({"error": e})),
+        )
+    })?;
+    let out = state.deploy.runtime_logs_with(&ctx(&project), &opts).await;
     Ok(Json(json!({"data": out})))
 }
 

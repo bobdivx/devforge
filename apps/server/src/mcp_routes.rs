@@ -539,8 +539,8 @@ async fn mcp_jsonrpc(
         Ok(found) => found,
         Err(res) => return res,
     };
-    match user_team(&state, &user.uuid).await {
-        Ok(Some(_)) => {}
+    let workspace = match user_team(&state, &user.uuid).await {
+        Ok(Some(team)) => team.uuid,
         Ok(None) => {
             return ApiError {
                 status: axum::http::StatusCode::FORBIDDEN,
@@ -549,7 +549,7 @@ async fn mcp_jsonrpc(
             .into_response()
         }
         Err(err) => return ApiError::from_auth(err).into_response(),
-    }
+    };
     if !has_ability(&abilities, ABILITY_READ) {
         return ApiError {
             status: axum::http::StatusCode::FORBIDDEN,
@@ -576,7 +576,7 @@ async fn mcp_jsonrpc(
     if let Value::Array(items) = parsed {
         let mut out = Vec::new();
         for item in items {
-            if let Some(resp) = mcp_handle_one(&state, &abilities, item).await {
+            if let Some(resp) = mcp_handle_one(&state, &abilities, &workspace, item).await {
                 out.push(resp);
             }
         }
@@ -585,14 +585,19 @@ async fn mcp_jsonrpc(
         }
         return Json(Value::Array(out)).into_response();
     }
-    match mcp_handle_one(&state, &abilities, parsed).await {
+    match mcp_handle_one(&state, &abilities, &workspace, parsed).await {
         Some(resp) => Json(resp).into_response(),
         None => axum::http::StatusCode::ACCEPTED.into_response(),
     }
 }
 
 /// Traite un message JSON-RPC. `None` = notification (réponse HTTP 202 sans corps).
-async fn mcp_handle_one(state: &AppState, abilities: &[String], raw: Value) -> Option<Value> {
+async fn mcp_handle_one(
+    state: &AppState,
+    abilities: &[String],
+    workspace: &str,
+    raw: Value,
+) -> Option<Value> {
     let body: JsonRpcRequest = match serde_json::from_value(raw) {
         Ok(b) => b,
         Err(e) => {
@@ -678,7 +683,23 @@ async fn mcp_handle_one(state: &AppState, abilities: &[String], raw: Value) -> O
             if name.is_empty() {
                 return rpc_err(-32602, "params.name requis");
             }
-            let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+            let mut arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+            if name == devforge_agent::GET_CONTAINER_LOGS {
+                match scope_project_argument(state, workspace, &arguments).await {
+                    Ok(uuid) => {
+                        if let Some(obj) = arguments.as_object_mut() {
+                            obj.remove("project");
+                            obj.insert("project_uuid".into(), json!(uuid));
+                        }
+                    }
+                    Err(msg) => {
+                        return rpc_ok(json!({
+                            "content": [{ "type": "text", "text": msg }],
+                            "isError": true,
+                        }))
+                    }
+                }
+            }
             match state.registry.execute(&name, arguments).await {
                 Ok(result) => {
                     crate::spec_routes::schedule_started_worker(state.clone(), &result);
@@ -698,6 +719,42 @@ async fn mcp_handle_one(state: &AppState, abilities: &[String], raw: Value) -> O
         }
         other => rpc_err(-32601, &format!("Method not found: {other}")),
     }
+}
+
+/// Résout `project` / `project_uuid` (UUID, slug ou nom) parmi les projets du workspace
+/// de l'appelant : un outil MCP ne lit jamais un projet d'un autre workspace.
+async fn scope_project_argument(
+    state: &AppState,
+    workspace: &str,
+    arguments: &Value,
+) -> Result<String, String> {
+    let wanted = arguments
+        .get("project_uuid")
+        .or_else(|| arguments.get("project"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if wanted.is_empty() {
+        return Err("project (UUID, slug ou nom) requis".into());
+    }
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT uuid, COALESCE(workspace_uuid, '') FROM projects \
+         WHERE uuid = $1 OR slug = $1 OR LOWER(name) = LOWER($1) \
+         ORDER BY CASE WHEN uuid = $1 THEN 0 WHEN slug = $1 THEN 1 ELSE 2 END",
+    )
+    .bind(wanted)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| format!("lecture projets : {e}"))?;
+    pick_workspace_project(&rows, workspace)
+        .ok_or_else(|| format!("Projet introuvable dans ce workspace : {wanted}"))
+}
+
+/// Premier projet visible depuis `workspace` (workspace vide = projet historique partagé).
+pub(crate) fn pick_workspace_project(rows: &[(String, String)], workspace: &str) -> Option<String> {
+    rows.iter()
+        .find(|(_, ws)| ws.is_empty() || ws == workspace)
+        .map(|(uuid, _)| uuid.clone())
 }
 
 async fn list_mcp_resources(
@@ -1962,4 +2019,32 @@ async fn link_turso_via_platform_api(
         .map_err(|e| ApiError::message(e.to_string()))?;
 
     Ok((hostname, jwt, org.clone()))
+}
+
+#[cfg(test)]
+mod container_logs_scope_tests {
+    use super::pick_workspace_project;
+
+    #[test]
+    fn project_from_another_workspace_is_invisible() {
+        let rows = vec![("p-other".to_string(), "ws-b".to_string())];
+        assert_eq!(pick_workspace_project(&rows, "ws-a"), None);
+    }
+
+    #[test]
+    fn own_and_legacy_projects_are_visible() {
+        let rows = vec![
+            ("p-other".to_string(), "ws-b".to_string()),
+            ("p-mine".to_string(), "ws-a".to_string()),
+        ];
+        assert_eq!(
+            pick_workspace_project(&rows, "ws-a").as_deref(),
+            Some("p-mine")
+        );
+        let legacy = vec![("p-legacy".to_string(), String::new())];
+        assert_eq!(
+            pick_workspace_project(&legacy, "ws-a").as_deref(),
+            Some("p-legacy")
+        );
+    }
 }

@@ -83,6 +83,7 @@ pub fn tool_label(name: &str, args: &Value) -> String {
         "cancel_deployment" => "Annulation du déploiement".into(),
         "list_deployments" => "Liste des déploiements".into(),
         "get_deployment_logs" => "Logs de déploiement".into(),
+        "get_container_logs" => "Logs du conteneur".into(),
         "http_smoke" => {
             let u = arg(args, "url");
             if u.is_empty() {

@@ -1,3 +1,4 @@
+pub mod log_redact;
 pub mod redact;
 
 use async_trait::async_trait;

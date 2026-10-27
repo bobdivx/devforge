@@ -11,6 +11,7 @@ pub const ALL_TOOLS: &[&str] = &[
     "create_routine",
     "delegate_task",
     "delete_routine",
+    "get_container_logs",
     "get_deployment_logs",
     "get_project",
     "github_list_prs",
@@ -90,6 +91,7 @@ const WORKER: &[&str] = &[
 const DEPLOY: &[&str] = &[
     "get_project",
     "list_deployments",
+    "get_container_logs",
     "get_deployment_logs",
     "trigger_deploy",
     "cancel_deployment",
@@ -115,6 +117,7 @@ const DEPLOY: &[&str] = &[
 const REPAIR: &[&str] = &[
     "get_project",
     "list_deployments",
+    "get_container_logs",
     "get_deployment_logs",
     "list_env_vars",
     "list_project_files",
@@ -134,6 +137,7 @@ const OPS: &[&str] = &[
     "list_routines",
     "delete_routine",
     "get_project",
+    "get_container_logs",
     "get_deployment_logs",
     "list_deployments",
     "list_env_vars",
@@ -211,6 +215,17 @@ mod tests {
                 assert!(ALL_TOOLS.contains(t), "{t} absent de ALL_TOOLS");
             }
         }
+    }
+
+    #[test]
+    fn diagnostic_roles_can_read_container_logs() {
+        for role in ["ops", "deploy", "repair", "coordinator"] {
+            assert!(
+                role_allows(role, None, "get_container_logs", false),
+                "{role}"
+            );
+        }
+        assert!(!role_allows("reviewer", None, "get_container_logs", false));
     }
 
     #[test]
