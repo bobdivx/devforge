@@ -54,18 +54,6 @@ pub fn cors_layer() -> CorsLayer {
 pub async fn static_cache_headers(req: Request<Body>, next: Next) -> Response<Body> {
     let path = req.uri().path().to_string();
     let mut res = next.run(req).await;
-
-    // Ajout des en-têtes de sécurité de base pour toutes les requêtes interceptées
-    if let Ok(v) = HeaderValue::from_str("DENY") {
-        res.headers_mut().insert(header::X_FRAME_OPTIONS, v);
-    }
-    if let Ok(v) = HeaderValue::from_str("nosniff") {
-        res.headers_mut().insert(header::X_CONTENT_TYPE_OPTIONS, v);
-    }
-    if let Ok(v) = HeaderValue::from_str("max-age=31536000; includeSubDomains") {
-        res.headers_mut().insert(header::STRICT_TRANSPORT_SECURITY, v);
-    }
-
     let value = if path.starts_with("/_astro/") {
         "public, max-age=31536000, immutable"
     } else if path.ends_with(".html")
@@ -79,6 +67,5 @@ pub async fn static_cache_headers(req: Request<Body>, next: Next) -> Response<Bo
     if let Ok(v) = HeaderValue::from_str(value) {
         res.headers_mut().insert(header::CACHE_CONTROL, v);
     }
-
     res
 }
