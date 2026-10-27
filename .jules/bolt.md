@@ -6,6 +6,6 @@
 **Learning:** In the chat component (`useThreadList`), derived state that requires filtering and sorting large arrays (like generating nested agent lists) was running synchronously on every render. Given that chat polling triggers frequent re-renders, this caused unnecessary CPU strain on lists that only rarely change.
 **Action:** Use `useMemo` for derived states like `rows` and `current` in custom hooks when they involve `.filter()`, `.map()`, or `.sort()` and depend on data that updates less frequently than the component renders.
 
-## 2026-10-27 - [Performance] Optimize Chat Thread Autoscroll Signature Generation
-**Learning:** During chat polling and streaming, \`useStickToBottom\` in \`ChatThread.tsx\` generates a signature \`sig\` on every render to detect if the chat content has grown and needs to be autoscrolled. It was using \`[...].join('|')\`. In \`chat-messages.ts\`, \`messagesSignature\` was also using \`[...].join('|')\` for a similar purpose. \`Array.prototype.join()\` allocates an intermediate array and then creates the string, causing CPU and memory overhead on hot paths like frequent polling and streaming renders.
-**Action:** Replaced \`[...].join('|')\` with direct template string concatenation (\`\` `${a}|${b}|...` \`\`) to avoid the intermediate array allocation and improve performance. Prefer direct string concatenation over \`Array.prototype.join()\` on hot paths.
+## 2026-10-27 - [Performance] Rejected Optimization: Template Literals over Array.join()
+**Learning:** Swapping `Array.prototype.join()` for template literals on small fixed-size signatures has no measurable performance impact and was rejected because it hurts readability.
+**Action:** Avoid micro-optimizations like replacing `join()` with template strings on small arrays, as the readability cost outweighs any theoretical performance benefit.

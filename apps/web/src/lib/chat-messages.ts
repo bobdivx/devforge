@@ -50,7 +50,13 @@ export function messagesSignature(messages: IdentifiedMessage[]): string {
     }
   }
 
-  return `${messages.length}|${last?.id ?? ''}|${last?.content.length ?? 0}|${last?.toolCalls?.length ?? 0}|${reactionsSig}`;
+  return [
+    messages.length,
+    last?.id ?? '',
+    last?.content.length ?? 0,
+    last?.toolCalls?.length ?? 0,
+    reactionsSig,
+  ].join('|');
 }
 
 /**
