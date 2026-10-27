@@ -136,6 +136,42 @@ pub struct DeployToken {
     pub token: Option<String>,
     /// `true` = token d'installation éphémère : à passer en en-tête, jamais dans `.git/config`.
     pub ephemeral: bool,
+    /// Note sans secret pour les logs de déploiement : pourquoi ce mode d'auth a été retenu
+    /// (et, en cas de repli, la raison de l'échec du jeton d'installation, code HTTP inclus).
+    pub note: String,
+}
+
+/// Pourquoi le déploiement n'utilise pas un jeton d'installation limité au dépôt.
+enum Fallback<'a> {
+    NotLinked,
+    CredentialsUnavailable(&'a str),
+    MintFailed(&'a TokenError),
+}
+
+fn fallback_note(reason: Fallback<'_>, has_pat: bool) -> String {
+    let why = match reason {
+        Fallback::NotLinked => "projet non lié à la GitHub App".to_string(),
+        Fallback::CredentialsUnavailable(e) => format!(
+            "identifiants de la GitHub App indisponibles ({})",
+            devforge_github::app_auth::redact_tokens(e)
+        ),
+        Fallback::MintFailed(e) => format!(
+            "création du jeton d'installation échouée : {}",
+            devforge_github::app_auth::redact_tokens(&e.to_string())
+        ),
+    };
+    if has_pat {
+        format!("repli sur le jeton classique — {why}")
+    } else {
+        format!("aucun jeton classique configuré — {why}")
+    }
+}
+
+fn installation_note(id: i64, repo_id: Option<i64>) -> String {
+    match repo_id {
+        Some(r) => format!("installation {id}, dépôt {r}, contents:read"),
+        None => format!("installation {id}, contents:read"),
+    }
 }
 
 /// Déploiement : token d'installation restreint au dépôt (`contents:read`, TTL GitHub ≤ 1 h),
@@ -145,20 +181,24 @@ pub async fn deploy_token(
     project_uuid: &str,
     instance_pat: Option<String>,
 ) -> DeployToken {
-    let legacy = DeployToken {
+    let has_pat = instance_pat
+        .as_deref()
+        .is_some_and(|t| !t.trim().is_empty());
+    let legacy = |reason: Fallback<'_>| DeployToken {
         token: instance_pat.clone(),
         ephemeral: false,
+        note: fallback_note(reason, has_pat),
     };
     let GithubAuth::Installation { id, repo_id } =
         for_project(&state.pool, project_uuid, String::new()).await
     else {
-        return legacy;
+        return legacy(Fallback::NotLinked);
     };
     let creds = match crate::github_app_routes::load_credentials(&state.pool).await {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!("GitHub App indisponible pour le déploiement : {e}");
-            return legacy;
+            return legacy(Fallback::CredentialsUnavailable(&e));
         }
     };
     let scope = TokenScope {
@@ -169,13 +209,14 @@ pub async fn deploy_token(
         Ok(t) => DeployToken {
             token: Some(t.token.expose().to_string()),
             ephemeral: true,
+            note: installation_note(id, repo_id),
         },
         Err(e) => {
             if e == TokenError::Suspended {
                 mark_suspended(&state.pool, id).await;
             }
             note_error(id, &e);
-            legacy
+            legacy(Fallback::MintFailed(&e))
         }
     }
 }
@@ -183,6 +224,27 @@ pub async fn deploy_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deploy_notes_explain_fallback_without_secret() {
+        let e = TokenError::Other("HTTP 422 : repository not accessible".into());
+        let n = fallback_note(Fallback::MintFailed(&e), true);
+        assert!(n.starts_with("repli sur le jeton classique"), "{n}");
+        assert!(n.contains("HTTP 422"), "{n}");
+        let n = fallback_note(Fallback::MintFailed(&TokenError::Unauthorized), false);
+        assert!(n.contains("aucun jeton classique"), "{n}");
+        assert!(n.contains("401"), "{n}");
+        let n = fallback_note(
+            Fallback::CredentialsUnavailable("bad ghs_abcdefghijklmnopqrstuvwxyz0123"),
+            true,
+        );
+        assert!(!n.contains("ghs_abcdefghijklmnop"), "{n}");
+        assert!(fallback_note(Fallback::NotLinked, true).contains("non lié"));
+        assert_eq!(
+            installation_note(171, Some(42)),
+            "installation 171, dépôt 42, contents:read"
+        );
+    }
 
     #[test]
     fn flag_parsing() {
