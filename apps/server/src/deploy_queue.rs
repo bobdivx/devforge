@@ -25,6 +25,15 @@ impl<T> SlotOutcome<T> {
     }
 }
 
+fn slot_key(server_id: &str) -> String {
+    let trimmed = server_id.trim();
+    if trimmed.is_empty() {
+        "default".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct DeployQueue {
     slots: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
@@ -41,14 +50,7 @@ impl DeployQueue {
 
     /// Bloque tant qu'un autre déploiement tient le nœud.
     pub async fn acquire(&self, server_id: &str) -> OwnedMutexGuard<()> {
-        let key = {
-            let trimmed = server_id.trim();
-            if trimmed.is_empty() {
-                "default".to_string()
-            } else {
-                trimmed.to_string()
-            }
-        };
+        let key = slot_key(server_id);
         let slot = {
             let mut map = self.slots.lock().await;
             map.entry(key)
@@ -56,6 +58,16 @@ impl DeployQueue {
                 .clone()
         };
         slot.lock_owned().await
+    }
+
+    /// Vrai si un déploiement tient déjà le slot de ce nœud (sans le prendre).
+    pub async fn is_busy(&self, server_id: &str) -> bool {
+        let key = slot_key(server_id);
+        let slot = {
+            let map = self.slots.lock().await;
+            map.get(&key).cloned()
+        };
+        slot.is_some_and(|m| m.try_lock().is_err())
     }
 
     /// Enregistre un token d'annulation pour ce déploiement (à appeler juste après l'INSERT).
@@ -222,11 +234,12 @@ pub async fn recompute_project_status_after_deploy_change(
     .unwrap_or((0,));
 
     if active.0 > 0 {
-        let _ = sqlx::query("UPDATE projects SET status = 'deploying', updated_at = $1 WHERE id = $2")
-            .bind(&now)
-            .bind(project_id)
-            .execute(pool)
-            .await;
+        let _ =
+            sqlx::query("UPDATE projects SET status = 'deploying', updated_at = $1 WHERE id = $2")
+                .bind(&now)
+                .bind(project_id)
+                .execute(pool)
+                .await;
         return Ok(());
     }
 
@@ -307,6 +320,11 @@ where
         }
     }
 
+    // Slot occupé : on le dit dans les logs du déploiement en file (sinon « queued » muet).
+    if queue.is_busy(server_id).await {
+        note_waiting_for_node(pool, server_id, deployment_uuid).await;
+    }
+
     let acquire = queue.acquire(server_id);
     let _guard = if let Some(rx) = cancel_rx.clone() {
         tokio::select! {
@@ -338,6 +356,47 @@ where
         }
     } else {
         SlotOutcome::Completed(work_fut.await)
+    }
+}
+
+/// Ajoute aux logs d'un déploiement encore `queued` qu'il attend le slot du nœud,
+/// avec le déploiement qui l'occupe quand on peut l'identifier.
+async fn note_waiting_for_node(pool: &PgPool, server_id: &str, deployment_uuid: &str) {
+    let holder: Option<(String, String, String)> = sqlx::query_as(
+        r#"SELECT p.name, d.environment, d.uuid
+             FROM deployments d JOIN projects p ON p.id = d.project_id
+            WHERE d.status IN ('running', 'building')
+              AND d.uuid <> $1
+              AND COALESCE(NULLIF(TRIM(p.server_id), ''), 'default') = $2
+            ORDER BY d.updated_at DESC
+            LIMIT 1"#,
+    )
+    .bind(deployment_uuid)
+    .bind(slot_key(server_id))
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    let note = waiting_note(&slot_key(server_id), holder.as_ref());
+    let _ = sqlx::query(
+        r#"UPDATE deployments SET logs = COALESCE(logs, '') || $1
+            WHERE uuid = $2 AND status = 'queued'"#,
+    )
+    .bind(&note)
+    .bind(deployment_uuid)
+    .execute(pool)
+    .await;
+}
+
+pub(crate) fn waiting_note(server: &str, holder: Option<&(String, String, String)>) -> String {
+    match holder {
+        Some((name, env, uuid)) => format!(
+            "[devforge] en attente du nœud « {server} » : occupé par {name} ({env}, {}) — un seul build à la fois par nœud.\n",
+            uuid.chars().take(8).collect::<String>()
+        ),
+        None => format!(
+            "[devforge] en attente du nœud « {server} » : un autre déploiement est en cours — un seul build à la fois par nœud.\n"
+        ),
     }
 }
 
@@ -389,10 +448,7 @@ pub async fn set_live_logs(pool: &PgPool, deployment_uuid: &str, logs: &str) {
 pub fn spawn_live_log_flusher(
     pool: PgPool,
     deployment_uuid: String,
-) -> (
-    devforge_deploy::DeployLogHook,
-    tokio::task::JoinHandle<()>,
-) {
+) -> (devforge_deploy::DeployLogHook, tokio::task::JoinHandle<()>) {
     let (tx, mut rx) = watch::channel(String::new());
     let handle = tokio::spawn(async move {
         loop {
@@ -508,6 +564,64 @@ pub async fn reap_orphans(queue: &DeployQueue, pool: &PgPool, older_than: chrono
         .await;
     }
     reaped
+}
+
+/// Statut projet recalculé quand plus rien n'est actif : `live` si une révision prod
+/// a réussi, `failed` si un échec prod n'est pas acquitté, sinon `idle`.
+const SETTLED_STATUS_SQL: &str = r#"CASE
+       WHEN EXISTS (SELECT 1 FROM deployments d WHERE d.project_id = p.id
+                      AND d.environment = 'production'
+                      AND d.status IN ('success', 'deployed', 'ok')) THEN 'live'
+       WHEN EXISTS (SELECT 1 FROM deployments d WHERE d.project_id = p.id
+                      AND d.environment = 'production'
+                      AND d.status IN ('failed', 'error')
+                      AND (d.dismissed_at IS NULL OR d.dismissed_at = '')) THEN 'failed'
+       ELSE 'idle' END"#;
+
+/// Aucun déploiement actif du projet, tous environnements confondus (prod, dev, previews).
+const NO_ACTIVE_DEPLOYMENT_SQL: &str = r#"NOT EXISTS (
+       SELECT 1 FROM deployments d WHERE d.project_id = p.id
+         AND d.status IN ('queued', 'running', 'building', 'pending', 'deploying'))"#;
+
+/// Libère `projects.status = 'deploying'` seulement si plus aucun déploiement du projet
+/// n'est actif. Une seule requête : un déploiement prod inséré entre-temps garde le verrou.
+/// Retourne `true` si le statut a été recalculé.
+pub async fn release_deploying_if_no_active(pool: &PgPool, project_id: i64) -> bool {
+    let sql = format!(
+        "UPDATE projects p SET status = {SETTLED_STATUS_SQL}, updated_at = $1
+          WHERE p.id = $2 AND p.status = 'deploying' AND {NO_ACTIVE_DEPLOYMENT_SQL}"
+    );
+    let res = sqlx::query(&sql)
+        .bind(now_str())
+        .bind(project_id)
+        .execute(pool)
+        .await;
+    matches!(res, Ok(r) if r.rows_affected() == 1)
+}
+
+/// Garde-fou (boot + boucle de nettoyage) : projets restés `deploying` alors qu'aucun
+/// déploiement actif ne leur correspond (verrou orphelin). `older_than` laisse le temps
+/// à un démarrage en cours d'insérer sa ligne. Retourne les ids libérés.
+pub async fn release_orphan_project_locks(pool: &PgPool, older_than: chrono::Duration) -> Vec<i64> {
+    let cutoff = (chrono::Utc::now() - older_than).to_rfc3339();
+    let sql = format!(
+        "UPDATE projects p SET status = {SETTLED_STATUS_SQL}, updated_at = $1
+          WHERE p.status = 'deploying'
+            AND (p.updated_at IS NULL OR p.updated_at < $2)
+            AND {NO_ACTIVE_DEPLOYMENT_SQL}
+          RETURNING p.id"
+    );
+    let rows: Vec<(i64,)> = sqlx::query_as(&sql)
+        .bind(now_str())
+        .bind(&cutoff)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    let ids: Vec<i64> = rows.into_iter().map(|(id,)| id).collect();
+    for id in &ids {
+        tracing::warn!(project_id = id, "Verrou « deploying » orphelin libéré");
+    }
+    ids
 }
 
 /// Un build coupé par l’arrêt du processus redevient `queued`.
@@ -1074,10 +1188,12 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query("UPDATE deployments SET dismissed_at = '2026-01-02T00:00:00Z' WHERE uuid = 'fail'")
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE deployments SET dismissed_at = '2026-01-02T00:00:00Z' WHERE uuid = 'fail'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         recompute_project_status_after_deploy_change(&pool, 7)
             .await
             .unwrap();
@@ -1248,5 +1364,238 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(st.0, "live");
+    }
+
+    async fn lock_tables(pool: &PgPool) {
+        sqlx::query(
+            r#"CREATE TABLE projects (
+                id BIGINT PRIMARY KEY,
+                uuid TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                server_id TEXT,
+                status TEXT NOT NULL,
+                updated_at TEXT
+            )"#,
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"CREATE TABLE deployments (
+                uuid TEXT PRIMARY KEY,
+                project_id BIGINT NOT NULL,
+                status TEXT NOT NULL,
+                environment TEXT NOT NULL DEFAULT 'production',
+                logs TEXT,
+                dismissed_at TEXT,
+                updated_at TEXT
+            )"#,
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn project_status(pool: &PgPool, id: i64) -> String {
+        let st: (String,) = sqlx::query_as("SELECT status FROM projects WHERE id = $1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        st.0
+    }
+
+    /// Fusion d'une PR : la preview est annulée pendant que le push prod est en file.
+    /// Le verrou du projet doit rester tant que la prod n'est pas terminée.
+    #[tokio::test]
+    async fn preview_cancel_keeps_lock_while_prod_is_active() {
+        let pool = devforge_database::ephemeral_pg().await;
+        lock_tables(&pool).await;
+        sqlx::query("INSERT INTO projects (id, uuid, status) VALUES (20, 'p', 'deploying')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"INSERT INTO deployments (uuid, project_id, status, environment) VALUES
+               ('old-ok', 20, 'success', 'production'),
+               ('prev', 20, 'cancelled', 'preview-3'),
+               ('prod', 20, 'queued', 'production')"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(!release_deploying_if_no_active(&pool, 20).await);
+        assert_eq!(project_status(&pool, 20).await, "deploying");
+
+        sqlx::query("UPDATE deployments SET status = 'running' WHERE uuid = 'prod'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(!release_deploying_if_no_active(&pool, 20).await);
+        assert_eq!(project_status(&pool, 20).await, "deploying");
+    }
+
+    /// Preview annulée et plus rien d'actif : le projet quitte `deploying`.
+    #[tokio::test]
+    async fn preview_cancel_releases_lock_when_nothing_active() {
+        let pool = devforge_database::ephemeral_pg().await;
+        lock_tables(&pool).await;
+        sqlx::query(
+            r#"INSERT INTO projects (id, uuid, status) VALUES
+               (21, 'with-success', 'deploying'),
+               (22, 'never-deployed', 'deploying'),
+               (23, 'already-live', 'live')"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"INSERT INTO deployments (uuid, project_id, status, environment) VALUES
+               ('ok', 21, 'success', 'production'),
+               ('prev-21', 21, 'cancelled', 'preview-3'),
+               ('prev-22', 22, 'cancelled', 'preview-1')"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(release_deploying_if_no_active(&pool, 21).await);
+        assert_eq!(project_status(&pool, 21).await, "live");
+        assert!(release_deploying_if_no_active(&pool, 22).await);
+        assert_eq!(project_status(&pool, 22).await, "idle");
+        // Statut autre que `deploying` : on n'y touche pas.
+        assert!(!release_deploying_if_no_active(&pool, 23).await);
+        assert_eq!(project_status(&pool, 23).await, "live");
+    }
+
+    /// Une preview encore active d'une autre PR garde aussi le verrou.
+    #[tokio::test]
+    async fn other_active_environment_keeps_lock() {
+        let pool = devforge_database::ephemeral_pg().await;
+        lock_tables(&pool).await;
+        sqlx::query("INSERT INTO projects (id, uuid, status) VALUES (24, 'p', 'deploying')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"INSERT INTO deployments (uuid, project_id, status, environment) VALUES
+               ('prev-3', 24, 'cancelled', 'preview-3'),
+               ('prev-4', 24, 'building', 'preview-4')"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(!release_deploying_if_no_active(&pool, 24).await);
+        assert_eq!(project_status(&pool, 24).await, "deploying");
+    }
+
+    /// Garde-fou périodique : seuls les verrous sans déploiement actif et assez anciens
+    /// sont libérés ; un échec prod non acquitté redonne `failed`.
+    #[tokio::test]
+    async fn orphan_sweep_frees_only_stale_unbacked_locks() {
+        let pool = devforge_database::ephemeral_pg().await;
+        lock_tables(&pool).await;
+        let old = (chrono::Utc::now() - chrono::Duration::minutes(30)).to_rfc3339();
+        let fresh = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            r#"INSERT INTO projects (id, uuid, status, updated_at) VALUES
+               (30, 'orphan-live', 'deploying', $1),
+               (31, 'orphan-failed', 'deploying', $1),
+               (32, 'backed', 'deploying', $1),
+               (33, 'just-started', 'deploying', $2),
+               (34, 'idle', 'idle', $1)"#,
+        )
+        .bind(&old)
+        .bind(&fresh)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"INSERT INTO deployments (uuid, project_id, status, environment) VALUES
+               ('ok-30', 30, 'success', 'production'),
+               ('prev-30', 30, 'cancelled', 'preview-3'),
+               ('fail-31', 31, 'failed', 'production'),
+               ('q-32', 32, 'queued', 'production')"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut freed = release_orphan_project_locks(&pool, chrono::Duration::minutes(2)).await;
+        freed.sort();
+        assert_eq!(freed, vec![30, 31]);
+        assert_eq!(project_status(&pool, 30).await, "live");
+        assert_eq!(project_status(&pool, 31).await, "failed");
+        assert_eq!(project_status(&pool, 32).await, "deploying");
+        assert_eq!(project_status(&pool, 33).await, "deploying");
+        assert_eq!(project_status(&pool, 34).await, "idle");
+    }
+
+    #[test]
+    fn waiting_note_names_the_holder() {
+        let holder = (
+            "popcornn-server".to_string(),
+            "preview-201".to_string(),
+            "7974710e-aaaa".to_string(),
+        );
+        let n = waiting_note("default", Some(&holder));
+        assert!(n.contains("« default »"));
+        assert!(n.contains("popcornn-server (preview-201, 7974710e)"));
+        assert!(waiting_note("default", None).contains("un autre déploiement est en cours"));
+    }
+
+    /// Déploiement en file derrière un autre build du même nœud : la file n'est pas muette.
+    #[tokio::test]
+    async fn queued_deploy_logs_who_holds_the_node() {
+        let pool = devforge_database::ephemeral_pg().await;
+        lock_tables(&pool).await;
+        sqlx::query(
+            r#"INSERT INTO projects (id, uuid, name, server_id, status) VALUES
+               (40, 'a', 'jeser', NULL, 'deploying'),
+               (41, 'b', 'popcornn-server', 'default', 'live')"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"INSERT INTO deployments (uuid, project_id, status, environment, logs, updated_at) VALUES
+               ('waiting', 40, 'queued', 'production', '[devforge] webhook push…\n', 't1'),
+               ('holder', 41, 'running', 'preview-201', '', 't0')"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let queue = DeployQueue::new();
+        let hold = queue.acquire("default").await;
+        assert!(queue.is_busy("default").await);
+        assert!(!queue.is_busy("node-b").await);
+        let _rx = queue.register_cancel("waiting").await;
+        let (q2, p2) = (queue.clone(), pool.clone());
+        let task = tokio::spawn(async move {
+            run_in_node_slot(&q2, &p2, "", "waiting", || async { "built" }).await
+        });
+        let mut logs = String::new();
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let row: (String,) =
+                sqlx::query_as("SELECT logs FROM deployments WHERE uuid = 'waiting'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            logs = row.0;
+            if logs.contains("en attente") {
+                break;
+            }
+        }
+        assert!(logs.contains("en attente du nœud « default »"), "{logs}");
+        assert!(logs.contains("popcornn-server (preview-201"), "{logs}");
+        assert!(!task.is_finished());
+        drop(hold);
+        match task.await.unwrap() {
+            SlotOutcome::Completed(v) => assert_eq!(v, "built"),
+            SlotOutcome::Cancelled => panic!("ne doit pas être annulé"),
+        }
     }
 }
