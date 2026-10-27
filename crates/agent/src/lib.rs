@@ -38,6 +38,7 @@ pub use tools::{
     ask_user_answer_text, memory_item_json, post_deploy_verdict, set_worker_launcher, smoke_url,
     DelegateTaskTool, WorkerLauncher, ASK_USER, MAX_ACTIVE_WORKERS,
 };
+pub use tools::{container_logs_options, GetContainerLogsTool, GET_CONTAINER_LOGS};
 pub mod memory_ctx;
 
 pub struct ToolRegistry {
@@ -181,6 +182,10 @@ pub fn build_core_registry(
         store: store.clone(),
     }));
     registry.register(Arc::new(GetDeploymentLogsTool {
+        store: store.clone(),
+    }));
+    registry.register(Arc::new(GetContainerLogsTool {
+        deploy: deploy.clone(),
         store: store.clone(),
     }));
     registry.register(Arc::new(ListDeploymentsTool {

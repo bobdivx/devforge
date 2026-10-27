@@ -1,5 +1,6 @@
 mod agent_threads;
 pub mod ask_user;
+mod container_logs;
 mod delegate;
 mod deploy;
 mod deploy_logs;
@@ -26,6 +27,7 @@ pub use agent_threads::{
     CreateProjectAgentTool, ListAgentMessagesTool, ListAgentToolFailuresTool, ListProjectAgentsTool,
 };
 pub use ask_user::{answer_text as ask_user_answer_text, AskUserTool, ASK_USER};
+pub use container_logs::{container_logs_options, GetContainerLogsTool, GET_CONTAINER_LOGS};
 pub use delegate::{
     set_worker_launcher, DelegateTaskTool, WorkerLauncher, DELEGATED_REFUSAL, MAX_ACTIVE_WORKERS,
 };

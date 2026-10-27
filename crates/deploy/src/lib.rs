@@ -9,6 +9,7 @@ pub mod builders;
 pub mod docker;
 pub mod error_parser;
 pub mod runtime;
+pub mod runtime_logs;
 pub mod ssh;
 
 pub use runtime::{app_http_is_up, classify_public_response, PublicReach, RuntimeSpec};
@@ -2249,16 +2250,54 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         }
     }
 
-    /// Logs d’exécution du conteneur (lecture seule), tronqués côté serveur.
+    /// Logs d’exécution du conteneur (lecture seule), `tail` lignes, options par défaut.
     pub async fn runtime_logs(&self, project: &ProjectTestContext, tail: u32) -> Value {
-        let name = Self::container_name(&project.project_uuid);
-        let cmd = docker::docker_runtime_logs(&name, tail);
-        match self.run_lifecycle(project, &cmd).await {
+        let opts = runtime_logs::RuntimeLogsOptions {
+            tail: tail.clamp(1, runtime_logs::MAX_TAIL),
+            ..Default::default()
+        };
+        self.runtime_logs_with(project, &opts).await
+    }
+
+    /// Logs d’exécution du conteneur (lecture seule) : `tail`, `since`, `grep`, `level`,
+    /// service annexe. Sortie masquée (secrets) et bornée (`truncated`).
+    pub async fn runtime_logs_with(
+        &self,
+        project: &ProjectTestContext,
+        opts: &runtime_logs::RuntimeLogsOptions,
+    ) -> Value {
+        let app = Self::container_name(&project.project_uuid);
+        let name = opts.container(&app);
+        let server_id = project.server_id.trim();
+        let workdir = project.workdir.trim();
+        if server_id.is_empty() || workdir.is_empty() {
+            return json!({
+                "ok": false,
+                "container": name,
+                "error": "server_id et workdir requis pour lire les logs",
+                "logs": "",
+            });
+        }
+        let cmd = runtime_logs::docker_logs_command(&name, opts);
+        match self.executor.exec(server_id, workdir, &cmd, 90).await {
             Ok(r) => {
-                let logs = truncate_runtime_logs(&r.output, 96 * 1024);
-                json!({"ok": r.ok, "container": name, "logs": logs})
+                let out = runtime_logs::finalize_logs(&r.output, opts);
+                json!({
+                    "ok": r.ok,
+                    "container": name,
+                    "logs": out.logs,
+                    "lines": out.lines,
+                    "bytes": out.bytes,
+                    "truncated": out.truncated,
+                    "query": runtime_logs::options_json(opts),
+                })
             }
-            Err(e) => json!({"ok": false, "error": e.to_string(), "logs": ""}),
+            Err(e) => json!({
+                "ok": false,
+                "container": name,
+                "error": devforge_shared::log_redact::redact_log_text(&e.to_string()),
+                "logs": "",
+            }),
         }
     }
 
@@ -2521,8 +2560,8 @@ mod runtime_logs_tests {
 
     #[test]
     fn runtime_logs_command_is_escaped_and_clamped() {
-        let cmd = docker::docker_runtime_logs("devforge-abc", 5000);
-        assert!(cmd.contains("--tail 1000"));
+        let cmd = docker::docker_runtime_logs("devforge-abc", 50_000);
+        assert!(cmd.contains("--tail 5000"));
         assert!(cmd.contains("devforge-abc"));
     }
 }
