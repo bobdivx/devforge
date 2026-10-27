@@ -224,3 +224,44 @@ fn redacts_tokens_in_logs() {
     assert_eq!(redact_tokens("ghp_short"), "ghp_short");
     assert_eq!(redact_tokens("rien à masquer — é"), "rien à masquer — é");
 }
+
+#[test]
+fn classify_token_response_keeps_http_code_and_github_message() {
+    assert!(classify_token_response(201, "{}").is_ok());
+    assert_eq!(
+        classify_token_response(401, ""),
+        Err(TokenError::Unauthorized)
+    );
+    assert_eq!(
+        classify_token_response(403, r#"{"message":"This installation has been suspended"}"#),
+        Err(TokenError::Suspended)
+    );
+    assert_eq!(classify_token_response(404, ""), Err(TokenError::NotFound));
+    let e = classify_token_response(
+        422,
+        r#"{"message":"There is at least one repository that does not exist or is not accessible to the parent installation."}"#,
+    )
+    .unwrap_err();
+    let shown = e.to_string();
+    assert!(shown.contains("HTTP 422"), "{shown}");
+    assert!(shown.contains("not accessible"), "{shown}");
+    let e = classify_token_response(
+        403,
+        r#"{"message":"Resource not accessible by integration"}"#,
+    )
+    .unwrap_err();
+    assert!(e.to_string().contains("HTTP 403"));
+    let e = classify_token_response(500, "<html>boom</html>").unwrap_err();
+    assert_eq!(e.to_string(), "GitHub App : HTTP 500");
+    // Jamais de jeton recopié depuis la réponse.
+    let e = classify_token_response(
+        422,
+        r#"{"message":"bad ghs_abcdefghijklmnopqrstuvwxyz0123456789"}"#,
+    )
+    .unwrap_err();
+    assert!(!e.to_string().contains("ghs_abcdefghijklmnop"), "{e}");
+    assert_eq!(
+        TokenError::NotFound.to_string(),
+        "GitHub App : installation introuvable (404)"
+    );
+}

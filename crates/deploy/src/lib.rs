@@ -140,6 +140,9 @@ pub struct DeployRequest {
     /// Token d'installation GitHub App éphémère : passé en en-tête HTTP à git,
     /// jamais écrit dans l'URL du remote ni dans `.git/config`.
     pub github_token_ephemeral: bool,
+    /// Note lisible (sans secret) sur l'authentification GitHub choisie côté serveur :
+    /// mode utilisé et, en cas de repli, raison de l'échec du jeton d'installation.
+    pub github_auth_note: Option<String>,
     /// SHA exact à déployer (relance GitHub « Re-run ») ; `None` = tête de branche.
     pub pin_sha: Option<String>,
     pub env_file: Option<String>,
@@ -179,6 +182,7 @@ impl std::fmt::Debug for DeployRequest {
                 &self.github_token.as_ref().map(|_| "[redacted]"),
             )
             .field("github_token_ephemeral", &self.github_token_ephemeral)
+            .field("github_auth_note", &self.github_auth_note)
             .field("pin_sha", &self.pin_sha)
             .field("env_file", &self.env_file.as_ref().map(|_| "[set]"))
             .field("proxy_labels", &self.proxy_labels)
@@ -400,13 +404,32 @@ fn git_clone_url(repo: &str, token: Option<&str>) -> String {
     }
 }
 
+/// Source du `git fetch` quand le workdir contient déjà un `.git`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FetchFrom<'a> {
+    /// `git fetch origin` : uniquement sans jeton (dépôt public, ou remote géré à la main).
+    Origin,
+    /// `git fetch <url> +refs/heads/<b>:refs/remotes/origin/<b>` : l'authentification ne
+    /// dépend jamais des identifiants (éventuellement absents) du remote `origin`.
+    Url(&'a str),
+}
+
 /// Commande shell pour synchroniser Git : fetch/pull si .git existe, sinon clone.
 ///
 /// IMPORTANT : Gère le cas du workdir non-vide sans .git (issue #2) :
 /// - Si .git existe : fetch + checkout + reset
 /// - Si .git n'existe pas mais le workdir a des fichiers : clone dans .tmp puis move
 /// - Si le workdir est vide : clone directement
-fn git_sync_command(workdir: &str, clone_url: &str, branch: &str) -> String {
+///
+/// `clean_remote` : si fourni, `origin` est réécrit sur cette URL (sans jeton) après la
+/// synchro — un jeton passé dans `clone_url` ne reste jamais dans `.git/config`.
+fn git_sync_command(
+    workdir: &str,
+    clone_url: &str,
+    branch: &str,
+    fetch_from: FetchFrom<'_>,
+    clean_remote: Option<&str>,
+) -> String {
     let w = shell_single_quote(workdir);
     let url = shell_single_quote(clone_url);
     let b = shell_single_quote(branch);
@@ -415,9 +438,23 @@ fn git_sync_command(workdir: &str, clone_url: &str, branch: &str) -> String {
         let wp = workdir.replace('\'', "''");
         let up = clone_url.replace('\'', "''").replace('"', "");
         let bp = branch.replace('\'', "''");
+        let fetch = match fetch_from {
+            FetchFrom::Origin => format!("git -C '{wp}' fetch origin"),
+            FetchFrom::Url(u) => {
+                let fp = u.replace('\'', "''").replace('"', "");
+                format!("git -C '{wp}' fetch '{fp}' '+refs/heads/{bp}:refs/remotes/origin/{bp}'")
+            }
+        };
+        let clean = match clean_remote {
+            Some(c) => {
+                let cp = c.replace('\'', "''").replace('"', "");
+                format!("git -C '{wp}' remote set-url origin '{cp}' 2>$null; ")
+            }
+            None => String::new(),
+        };
         format!(
             "if (Test-Path -LiteralPath '{wp}\\.git') {{ \
-                git -C '{wp}' fetch origin; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}; \
+                {clean}{fetch}; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}; \
                 git -C '{wp}' checkout '{bp}'; if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}; \
                 git -C '{wp}' reset --hard origin/{bp}; exit $LASTEXITCODE \
             }} else {{ \
@@ -429,16 +466,27 @@ fn git_sync_command(workdir: &str, clone_url: &str, branch: &str) -> String {
                         if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}; \
                         Get-ChildItem -Path $tmp -Force | Move-Item -Destination '{wp}' -Force; \
                         Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue; \
-                        exit 0 \
+                        {clean}exit 0 \
                     }} \
                 }}; \
-                git clone --branch '{bp}' --single-branch '{up}' '{wp}'; exit $LASTEXITCODE \
+                git clone --branch '{bp}' --single-branch '{up}' '{wp}'; $rc = $LASTEXITCODE; \
+                if ($rc -eq 0) {{ {clean}}}; exit $rc \
             }}"
         )
     } else {
-        format!(
+        let fetch = match fetch_from {
+            FetchFrom::Origin => format!("git -C {w} fetch origin"),
+            FetchFrom::Url(u) => format!(
+                "git -C {w} fetch {} {}",
+                shell_single_quote(u),
+                shell_single_quote(&format!(
+                    "+refs/heads/{branch}:refs/remotes/origin/{branch}"
+                ))
+            ),
+        };
+        let sync = format!(
             "if [ -d {w}/.git ]; then \
-                git -C {w} fetch origin && git -C {w} checkout {b} && git -C {w} reset --hard origin/{b}; \
+                {fetch} && git -C {w} checkout {b} && git -C {w} reset --hard origin/{b}; \
             else \
                 if [ -d {w} ] && [ \"$(ls -A {w} 2>/dev/null)\" ]; then \
                     tmp=\"{w}.tmp.git\"; \
@@ -451,25 +499,35 @@ fn git_sync_command(workdir: &str, clone_url: &str, branch: &str) -> String {
                     git clone --branch {b} --single-branch {url} {w}; \
                 fi; \
             fi"
-        )
+        );
+        match clean_remote {
+            // Le remote est nettoyé quoi qu'il arrive (succès ou échec), le code
+            // de sortie reste celui de la synchro.
+            Some(c) => format!(
+                "{{ {sync}; }}; rc=$?; \
+                 if [ -d {w}/.git ]; then git -C {w} remote set-url origin {} 2>/dev/null; fi; \
+                 (exit $rc)",
+                shell_single_quote(c)
+            ),
+            None => sync,
+        }
     }
 }
 
-/// Variante « token éphémère » (GitHub App) : l'authentification passe par
-/// `http.<github>.extraheader` via les variables `GIT_CONFIG_*` (git ≥ 2.31),
-/// le remote est (ré)écrit sans token : rien n'est persisté dans `.git/config`.
+/// Variante authentifiée (GitHub App **ou** jeton classique) : l'authentification passe par
+/// `http.<github>.extraheader` via les variables `GIT_CONFIG_*` (git ≥ 2.31), le remote est
+/// (ré)écrit sans token et le fetch vise l'URL explicite : rien n'est persisté dans
+/// `.git/config` et la synchro ne dépend jamais d'identifiants stockés dans `origin`.
 fn git_sync_command_header_auth(
     workdir: &str,
     clean_url: &str,
     branch: &str,
     token: &str,
 ) -> String {
-    use base64::Engine;
-    let basic = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
     let w = shell_single_quote(workdir);
     let url = shell_single_quote(clean_url);
-    let header = shell_single_quote(&format!("AUTHORIZATION: basic {basic}"));
-    let base = git_sync_command(workdir, clean_url, branch);
+    let header = shell_single_quote(&format!("AUTHORIZATION: basic {}", basic_auth_value(token)));
+    let base = git_sync_command(workdir, clean_url, branch, FetchFrom::Url(clean_url), None);
     format!(
         "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0={header} GIT_TERMINAL_PROMPT=0; \
          if [ -d {w}/.git ]; then git -C {w} remote set-url origin {url}; fi; \
@@ -477,15 +535,58 @@ fn git_sync_command_header_auth(
     )
 }
 
+fn basic_auth_value(token: &str) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"))
+}
+
+/// Masque le jeton (en clair, en Basic base64, dans une URL) d'une sortie git avant les logs.
+fn redact_git_output(text: &str, token: Option<&str>) -> String {
+    let mut out = text.to_string();
+    if let Some(t) = token.map(str::trim).filter(|t| t.len() >= 4) {
+        out = out.replace(&basic_auth_value(t), "***");
+        out = out.replace(t, "***");
+    }
+    devforge_shared::redact::redact_urls_in_text(&out)
+}
+
+/// Ligne `[git] auth : …` des logs de déploiement (jamais de secret).
+fn git_auth_log_line(token: Option<&str>, ephemeral: bool, note: Option<&str>) -> String {
+    let has_token = token.map(|t| !t.trim().is_empty()).unwrap_or(false);
+    let mode = match (has_token, ephemeral) {
+        (false, _) => "aucun jeton (accès anonyme : dépôts publics uniquement)",
+        (true, true) => "GitHub App (jeton d'installation limité au dépôt)",
+        (true, false) => "jeton classique (PAT d'instance)",
+    };
+    let transport = if !has_token {
+        ""
+    } else if cfg!(windows) {
+        ", URL explicite puis remote nettoyé"
+    } else {
+        ", en-tête HTTP, jamais écrit dans .git/config"
+    };
+    let mut line = format!("[git] auth : {mode}{transport}");
+    if let Some(n) = note.map(str::trim).filter(|n| !n.is_empty()) {
+        line.push_str(" — ");
+        line.push_str(&redact_git_output(n, token));
+    }
+    line.push('\n');
+    line
+}
+
 /// Suffixe shell qui fixe le dépôt sur un commit précis (après la synchro de branche).
-fn pin_sha_suffix(workdir: &str, sha: &str) -> Option<String> {
+fn pin_sha_suffix(workdir: &str, sha: &str, fetch_from: FetchFrom<'_>) -> Option<String> {
     let sha = sha.trim();
     if !(7..=40).contains(&sha.len()) || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
         return None;
     }
     let w = shell_single_quote(workdir);
+    let src = match fetch_from {
+        FetchFrom::Origin => "origin".to_string(),
+        FetchFrom::Url(u) => shell_single_quote(u),
+    };
     Some(format!(
-        " && git -C {w} fetch origin {sha} && git -C {w} reset --hard {sha}"
+        " && git -C {w} fetch {src} {sha} && git -C {w} reset --hard {sha}"
     ))
 }
 
@@ -833,22 +934,44 @@ impl DeployFacade {
         } else {
             req.git_branch.trim()
         };
-        let sync_cmd = match req
+        // Jeton (App ou classique) : toujours en en-tête + fetch sur l'URL explicite, jamais
+        // `git fetch origin` sur un remote sans identifiants, jamais de jeton dans .git/config.
+        let token = req
             .github_token
             .as_deref()
-            .filter(|t| req.github_token_ephemeral && !t.is_empty() && !cfg!(windows))
-        {
+            .map(str::trim)
+            .filter(|t| !t.is_empty());
+        logs.push_str(&git_auth_log_line(
+            token,
+            req.github_token_ephemeral,
+            req.github_auth_note.as_deref(),
+        ));
+        let clean = git_clone_url(&req.git_repository, None);
+        let (sync_cmd, pin_from) = match token {
+            Some(tok) if !cfg!(windows) => (
+                git_sync_command_header_auth(&workdir, &clean, branch, tok),
+                FetchFrom::Url(clean.as_str()),
+            ),
             Some(tok) => {
-                let clean = git_clone_url(&req.git_repository, None);
-                git_sync_command_header_auth(&workdir, &clean, branch, tok)
+                let auth_url = git_clone_url(&req.git_repository, Some(tok));
+                (
+                    git_sync_command(
+                        &workdir,
+                        &auth_url,
+                        branch,
+                        FetchFrom::Url(&auth_url),
+                        Some(&clean),
+                    ),
+                    FetchFrom::Origin,
+                )
             }
-            None => {
-                let clone_url = git_clone_url(&req.git_repository, req.github_token.as_deref());
-                git_sync_command(&workdir, &clone_url, branch)
-            }
+            None => (
+                git_sync_command(&workdir, &clean, branch, FetchFrom::Origin, None),
+                FetchFrom::Origin,
+            ),
         };
         let sync_cmd = match req.pin_sha.as_deref() {
-            Some(sha) if !cfg!(windows) => match pin_sha_suffix(&workdir, sha) {
+            Some(sha) if !cfg!(windows) => match pin_sha_suffix(&workdir, sha, pin_from) {
                 Some(suffix) => {
                     logs.push_str(&format!("[git] commit demandé : {sha}\n"));
                     format!("{sync_cmd}{suffix}")
@@ -869,7 +992,7 @@ impl DeployFacade {
                 logs.push_str(&format!(
                     "[git] exit={} {}\n",
                     r.exit_code,
-                    devforge_shared::redact::redact_urls_in_text(&trim_out(&r.output))
+                    redact_git_output(&trim_out(&r.output), token)
                 ));
                 if !r.ok {
                     return DeployResult {
@@ -882,7 +1005,7 @@ impl DeployFacade {
             Err(e) => {
                 logs.push_str(&format!(
                     "[git] error: {}\n",
-                    devforge_shared::redact::redact_urls_in_text(&e.to_string())
+                    redact_git_output(&e.to_string(), token)
                 ));
                 return DeployResult {
                     ok: false,
@@ -2402,11 +2525,19 @@ mod tests {
 
     #[test]
     fn pin_sha_is_validated() {
-        let s = pin_sha_suffix("/data/w", "6dcb09b5b57875f334f61aebed695e2e4193db5e").unwrap();
+        let sha = "6dcb09b5b57875f334f61aebed695e2e4193db5e";
+        let s = pin_sha_suffix("/data/w", sha, FetchFrom::Origin).unwrap();
         assert!(s.contains("fetch origin 6dcb09b5b57875f334f61aebed695e2e4193db5e"));
         assert!(s.contains("reset --hard 6dcb09b5b57875f334f61aebed695e2e4193db5e"));
-        assert!(pin_sha_suffix("/w", "main; rm -rf /").is_none());
-        assert!(pin_sha_suffix("/w", "abc").is_none());
+        let s =
+            pin_sha_suffix("/data/w", sha, FetchFrom::Url("https://github.com/o/r.git")).unwrap();
+        assert!(
+            s.contains("fetch 'https://github.com/o/r.git' 6dcb09b5b"),
+            "{s}"
+        );
+        assert!(!s.contains("fetch origin"), "{s}");
+        assert!(pin_sha_suffix("/w", "main; rm -rf /", FetchFrom::Origin).is_none());
+        assert!(pin_sha_suffix("/w", "abc", FetchFrom::Origin).is_none());
     }
 
     #[cfg(not(windows))]
@@ -2419,8 +2550,132 @@ mod tests {
         assert!(!cmd.contains("x-access-token:"));
         assert!(cmd.contains("GIT_CONFIG_KEY_0=http.https://github.com/.extraheader"));
         assert!(cmd.contains("remote set-url origin 'https://github.com/bobdivx/devforge.git'"));
-        // Le PAT historique garde l'URL avec token (comportement inchangé).
+        // Fetch sur l'URL explicite : ne dépend pas des identifiants stockés dans `origin`.
+        assert!(
+            cmd.contains("fetch 'https://github.com/bobdivx/devforge.git' '+refs/heads/main:refs/remotes/origin/main'"),
+            "{cmd}"
+        );
+        assert!(!cmd.contains("fetch origin"), "{cmd}");
         assert!(git_clone_url("bobdivx/devforge", Some("ghp_x")).contains("x-access-token:ghp_x@"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn classic_pat_also_uses_header_auth_without_fetch_origin() {
+        // Repli « jeton classique » (jeton d'installation indisponible) : même chemin
+        // en-tête que la GitHub App — plus jamais `git fetch origin` sur un remote nettoyé.
+        let clean = git_clone_url("https://github.com/bobdivx/popcorn-web", None);
+        let cmd = git_sync_command_header_auth("/data/w", &clean, "main", "ghp_classic_pat_123");
+        assert!(!cmd.contains("ghp_classic_pat_123"), "{cmd}");
+        assert!(!cmd.contains("fetch origin"), "{cmd}");
+        assert!(cmd.contains(&basic_auth_value("ghp_classic_pat_123")));
+    }
+
+    #[test]
+    fn no_token_keeps_fetch_origin() {
+        let clean = git_clone_url("bobdivx/public-repo", None);
+        let cmd = git_sync_command("/data/w", &clean, "main", FetchFrom::Origin, None);
+        assert!(cmd.contains("fetch origin"), "{cmd}");
+        assert!(!cmd.contains("set-url"), "{cmd}");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn token_url_variant_cleans_remote_and_fetches_explicit_url() {
+        let auth = git_clone_url("bobdivx/devforge", Some("ghp_tok_abcdef"));
+        let clean = git_clone_url("bobdivx/devforge", None);
+        let cmd = git_sync_command(
+            "/data/w",
+            &auth,
+            "main",
+            FetchFrom::Url(&auth),
+            Some(&clean),
+        );
+        assert!(!cmd.contains("fetch origin"), "{cmd}");
+        assert!(
+            cmd.contains("remote set-url origin 'https://github.com/bobdivx/devforge.git'"),
+            "{cmd}"
+        );
+    }
+
+    #[test]
+    fn git_output_redaction_hides_token_and_basic_header() {
+        let tok = "ghs_secretinstallation42";
+        let raw = format!(
+            "fatal: https://x-access-token:{tok}@github.com/o/r.git\nAUTHORIZATION: basic {}\nbare {tok}",
+            basic_auth_value(tok)
+        );
+        let out = redact_git_output(&raw, Some(tok));
+        assert!(!out.contains(tok), "{out}");
+        assert!(!out.contains(&basic_auth_value(tok)), "{out}");
+        // Sans jeton connu, les URL avec identifiants restent masquées.
+        let out = redact_git_output("https://user:pw123456@github.com/o/r", None);
+        assert!(!out.contains("pw123456"), "{out}");
+    }
+
+    #[test]
+    fn git_auth_log_line_names_mode_and_reason_without_secret() {
+        let l = git_auth_log_line(Some("ghs_x1234567"), true, Some("installation 171677569"));
+        assert!(l.starts_with("[git] auth : GitHub App"), "{l}");
+        assert!(l.contains("installation 171677569"), "{l}");
+        let l = git_auth_log_line(
+            Some("ghp_pat1234567"),
+            false,
+            Some("repli : jeton d'installation indisponible (HTTP 422) ghp_pat1234567"),
+        );
+        assert!(l.contains("jeton classique"), "{l}");
+        assert!(l.contains("HTTP 422"), "{l}");
+        assert!(!l.contains("ghp_pat1234567"), "{l}");
+        let l = git_auth_log_line(None, false, None);
+        assert!(l.contains("aucun jeton"), "{l}");
+    }
+
+    /// Bout en bout avec un vrai git : `origin` pointe sur une URL inaccessible (remote
+    /// « nettoyé »), la synchro réussit quand même via l'URL explicite, et un remote
+    /// propre est posé quand on le demande.
+    #[cfg(unix)]
+    #[test]
+    fn sync_with_explicit_url_ignores_broken_origin() {
+        use std::process::Command;
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!(
+            "df-git-sync-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let sh = |cmd: &str| {
+            let o = Command::new("sh").arg("-c").arg(cmd).output().unwrap();
+            assert!(
+                o.status.success(),
+                "{cmd}\n{}{}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr)
+            );
+            String::from_utf8_lossy(&o.stdout).to_string()
+        };
+        let r = root.display();
+        sh(&format!(
+            "set -e; cd {r}; git init -q -b main src; cd src; \
+             git -c user.email=t@t -c user.name=t commit -q --allow-empty -m one; \
+             cd ..; git clone -q --bare src bare.git; git clone -q bare.git work; \
+             git -C work remote set-url origin https://127.0.0.1:9/nope/repo.git; \
+             cd src; git -c user.email=t@t -c user.name=t commit -q --allow-empty -m two; \
+             git push -q ../bare.git main"
+        ));
+        let bare = format!("{r}/bare.git");
+        let work = format!("{r}/work");
+        let clean = "https://github.com/o/r.git";
+        let cmd = git_sync_command(&work, &bare, "main", FetchFrom::Url(&bare), Some(clean));
+        sh(&cmd);
+        let head = sh(&format!("git -C {work} log -1 --format=%s"));
+        assert_eq!(head.trim(), "two");
+        let remote = sh(&format!("git -C {work} remote get-url origin"));
+        assert_eq!(remote.trim(), clean);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -2542,6 +2797,7 @@ mod runtime_logs_tests {
             is_static: true,
             github_token: Some("ghp_supersecret_token_value".into()),
             github_token_ephemeral: true,
+            github_auth_note: Some("GitHub App".into()),
             pin_sha: None,
             env_file: Some("SECRET=1".into()),
             proxy_labels: None,

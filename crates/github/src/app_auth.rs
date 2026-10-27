@@ -74,8 +74,8 @@ impl fmt::Display for TokenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TokenError::Unauthorized => f.write_str("GitHub App : authentification refusée (401)"),
-            TokenError::Suspended => f.write_str("GitHub App : installation suspendue"),
-            TokenError::NotFound => f.write_str("GitHub App : installation introuvable"),
+            TokenError::Suspended => f.write_str("GitHub App : installation suspendue (403)"),
+            TokenError::NotFound => f.write_str("GitHub App : installation introuvable (404)"),
             TokenError::Other(m) => write!(f, "GitHub App : {m}"),
         }
     }
@@ -173,13 +173,7 @@ pub async fn fetch_installation_token(
         .map_err(|e| TokenError::Other(format!("GitHub injoignable : {}", e.without_url())))?;
     let status = res.status().as_u16();
     let text = res.text().await.unwrap_or_default();
-    match status {
-        200 | 201 => {}
-        401 => return Err(TokenError::Unauthorized),
-        403 if text.to_lowercase().contains("suspended") => return Err(TokenError::Suspended),
-        404 => return Err(TokenError::NotFound),
-        s => return Err(TokenError::Other(format!("réponse {s}"))),
-    }
+    classify_token_response(status, &text)?;
     let v: Value =
         serde_json::from_str(&text).map_err(|_| TokenError::Other("réponse inattendue".into()))?;
     let token = v
@@ -310,6 +304,38 @@ impl InstallationTokenCache {
     pub async fn seed(&self, installation_id: i64, token: InstallationToken) {
         let slot = self.slot(installation_id).await;
         *slot.lock().await = Some(token);
+    }
+}
+
+/// Statut HTTP de `POST /app/installations/{id}/access_tokens` → erreur typée.
+/// Hors cas connus, conserve le code HTTP et le champ `message` de GitHub (tronqué,
+/// jetons masqués) : c'est lui qui explique un refus du jeton limité au dépôt
+/// (ex. 422 « repository not accessible », 403 « permissions not granted »).
+pub fn classify_token_response(status: u16, body: &str) -> Result<(), TokenError> {
+    match status {
+        200 | 201 => Ok(()),
+        401 => Err(TokenError::Unauthorized),
+        403 if body.to_lowercase().contains("suspended") => Err(TokenError::Suspended),
+        404 => Err(TokenError::NotFound),
+        s => {
+            let msg = serde_json::from_str::<Value>(body)
+                .ok()
+                .and_then(|v| v.get("message").and_then(Value::as_str).map(str::to_string))
+                .map(|m| {
+                    let m = redact_tokens(m.trim());
+                    let short: String = m.chars().take(160).collect();
+                    if short.len() < m.len() {
+                        format!("{short}…")
+                    } else {
+                        short
+                    }
+                })
+                .filter(|m| !m.is_empty());
+            Err(TokenError::Other(match msg {
+                Some(m) => format!("HTTP {s} : {m}"),
+                None => format!("HTTP {s}"),
+            }))
+        }
     }
 }
 

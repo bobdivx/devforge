@@ -587,6 +587,7 @@ pub(crate) async fn run_dev_deploy(
         docker_build_context: project.docker_build_context.clone(),
         publish_directory: project.publish_directory.clone(),
         is_static: project.is_static != 0,
+        github_auth_note: Some(deploy_tok.note),
         github_token: deploy_tok.token,
         github_token_ephemeral: deploy_tok.ephemeral,
         pin_sha: None,
