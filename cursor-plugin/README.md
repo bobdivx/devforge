@@ -52,3 +52,13 @@ Les plugins du marketplace doivent être open source et relus par l’équipe du
 
 Créer un jeton `dfat_…` dans **Compte → Tokens** et l’ajouter en en-tête
 `Authorization: Bearer …` dans le `mcp.json` local du client. Ne jamais le committer.
+
+## Licence
+
+Les dossiers `cursor-plugin/devforge/` et `cursor-plugin/devforge-self-hosted/` sont sous
+licence MIT (fichier `LICENSE` dans chacun, champ `"license": "MIT"` dans leur
+`plugin.json`). **Cette licence MIT ne couvre que ces deux dossiers.** Le reste du dépôt
+(serveur, interface web, applications, `Cargo.toml`) n’est pas concerné et garde sa licence
+propre (`proprietary`).
+
+Dossier de soumission prêt à copier : [SUBMISSION.md](SUBMISSION.md).
