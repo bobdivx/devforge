@@ -5,7 +5,3 @@
 ## 2026-10-15 - [Performance] Prevent unnecessary UI array recalculations
 **Learning:** In the chat component (`useThreadList`), derived state that requires filtering and sorting large arrays (like generating nested agent lists) was running synchronously on every render. Given that chat polling triggers frequent re-renders, this caused unnecessary CPU strain on lists that only rarely change.
 **Action:** Use `useMemo` for derived states like `rows` and `current` in custom hooks when they involve `.filter()`, `.map()`, or `.sort()` and depend on data that updates less frequently than the component renders.
-
-## 2026-10-18 - [Performance] Optimize CodeBlock tokens serialization during streaming
-**Learning:** During chat streaming, the `code` prop updates frequently while `tokens` trails behind due to debouncing. The reactive fallback check `tokens.map(l => l.map(t => t.content).join('')).join('\n') === code` inside `CodeBlock.tsx` was firing on every keystroke render. This deep nested array mapping created massive intermediate array allocations and garbage collection overhead, leading to noticeable FPS drops during streaming on large code blocks.
-**Action:** Always wrap heavy data serialization steps in `useMemo`, and replace nested `Array.prototype.map().join()` calls with straightforward `for` loop string concatenations when stringifying large recursive structures on hot paths to minimize temporary allocations.
