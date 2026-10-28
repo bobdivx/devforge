@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState, useMemo } from 'preact/hooks';
 import { Check, Copy } from 'lucide-preact';
 import { copyText } from '../../lib/clipboard';
 import { highlightCode, normalizeLang, type CodeToken } from '../../lib/highlight';
@@ -26,7 +26,19 @@ export function CodeBlock({ code, lang }: { code: string; lang?: string }) {
       window.clearTimeout(t);
     };
   }, [code, lang]);
-  const shown = tokens && tokens.map((l) => l.map((t) => t.content).join('')).join('\n') === code ? tokens : null;
+
+  const shown = useMemo(() => {
+    if (!tokens) return null;
+    let text = '';
+    for (let i = 0; i < tokens.length; i++) {
+      const line = tokens[i];
+      for (let j = 0; j < line.length; j++) {
+        text += line[j].content;
+      }
+      if (i < tokens.length - 1) text += '\n';
+    }
+    return text === code ? tokens : null;
+  }, [tokens, code]);
 
   async function onCopy() {
     const ok = await copyText(code);
