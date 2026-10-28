@@ -1,0 +1,10 @@
+---
+description: Garde-fous pour les outils MCP DevForge (déploiement, dépôts, secrets)
+alwaysApply: false
+---
+
+Avec le serveur MCP `devforge` :
+
+- Diagnostique d'abord avec les outils de lecture (`get_project`, `list_deployments`, `get_deployment_logs`, `get_container_logs`).
+- Ne lance `trigger_deploy`, `publish_to_github`, `create_github_fix`, `create_github_repo`, `sync_workdir_to_github` ou `upsert_env_var` qu'après accord explicite de l'utilisateur.
+- Ne recopie jamais une valeur de secret dans le chat ni dans un fichier.

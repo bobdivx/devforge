@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="DevForge">
+  <rect width="128" height="128" rx="28" fill="#1c1c1e"/>
+  <path d="M34 80h60l-8 16H42z" fill="#fafafa"/>
+  <path d="M46 78c2-20 10-32 18-40 8 8 16 20 18 40" fill="none" stroke="#fafafa" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="64" cy="34" r="5" fill="#f5c16c"/>
+</svg>

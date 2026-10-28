@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { api } from '../lib/api';
 import { cn } from '../lib/cn';
+import { copyText } from '../lib/clipboard';
+import {
+  cursorInstallLink,
+  cursorWebInstallLink,
+  GROK_BOT_PLUGIN_URL,
+  grokBotConnectPrompt,
+} from '../lib/connect-links';
 import { AppShell } from './AppShell';
 import {
   Alert,
@@ -169,14 +176,16 @@ export function TokensPage() {
     }
   }
 
-  async function copy(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.push({ title: 'Copié', tone: 'ok' });
-    } catch {
+  async function copy(text: string, detail?: string) {
+    if (await copyText(text)) {
+      toast.push({ title: 'Copié', detail, tone: 'ok' });
+    } else {
       toast.push({ title: 'Copie manuelle', detail: text, tone: 'warn' });
     }
   }
+
+  const cursorLink = useMemo(() => cursorInstallLink(mcpUrl), [mcpUrl]);
+  const cursorWebLink = useMemo(() => cursorWebInstallLink(mcpUrl), [mcpUrl]);
 
   const cursorSnippet = createdPlain
     ? `{
@@ -295,20 +304,45 @@ export function TokensPage() {
         </div>
       )}
 
-      <div class="mt-8">
-        <h2 class="mb-2 text-sm font-medium tracking-tight">Connecteur Grok / applications OAuth</h2>
+      <div class="mt-8" data-df-connect-agents>
+        <h2 class="mb-2 text-sm font-medium tracking-tight">Connecter un agent</h2>
         <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
-          Dans Grok (Connecteurs → Nouveau → Personnalisé), colle l’URL{' '}
-          <code class="text-xs">{mcpUrl}</code>. La connexion passe par ton compte DevForge : aucun
-          token à copier, laisse Client ID / Secret vides.
+          Un clic suffit : l’agent s’enregistre seul sur DevForge puis ouvre la page de
+          consentement. Aucun token à copier, aucune configuration.
         </p>
-        <Button size="sm" variant="outline" onClick={() => copy(mcpUrl)}>
-          Copier l’URL MCP
-        </Button>
+        <div class="flex flex-wrap gap-2">
+          <Button size="sm" variant="primary" href={cursorLink}>
+            Connecter à Cursor
+          </Button>
+          {GROK_BOT_PLUGIN_URL ? (
+            <Button size="sm" variant="secondary" href={GROK_BOT_PLUGIN_URL} target="_blank">
+              Connecter à Grok Bot
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => copy(grokBotConnectPrompt(mcpUrl), 'Colle ce message dans Grok Bot')}
+            >
+              Connecter à Grok Bot
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={() => copy(mcpUrl)}>
+            Copier l’URL MCP
+          </Button>
+        </div>
+        <p class="mt-3 text-xs text-[var(--color-ink-faint)]">
+          Cursor ne s’ouvre pas ?{' '}
+          <a class="underline" href={cursorWebLink} target="_blank" rel="noreferrer">
+            Passer par cursor.com
+          </a>
+          . Grok (Connecteurs → Nouveau → Personnalisé) : colle l’URL{' '}
+          <code class="text-[11px]">{mcpUrl}</code>, laisse Client ID / Secret vides.
+        </p>
       </div>
 
       <div class="mt-8">
-        <h2 class="mb-2 text-sm font-medium tracking-tight">Connexion MCP (Cursor)</h2>
+        <h2 class="mb-2 text-sm font-medium tracking-tight">Connexion manuelle (token API)</h2>
         <p class="mb-3 text-sm text-[var(--color-ink-muted)]">
           Endpoint JSON-RPC : <code class="text-xs">{mcpUrl}</code>
         </p>

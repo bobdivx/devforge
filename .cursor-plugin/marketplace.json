@@ -4,15 +4,32 @@
     "name": "DevForge"
   },
   "metadata": {
-    "description": "Plugin MCP pour une instance DevForge auto-hébergée."
+    "description": "Plugins MCP DevForge : connexion en un clic à web.jeser.app, ou à ton instance auto-hébergée."
   },
   "plugins": [
     {
-      "name": "devforge-mcp",
+      "name": "devforge",
       "source": "cursor-plugin/devforge",
-      "description": "Connecte Cursor au serveur MCP d’une instance DevForge.",
-      "keywords": ["mcp", "devforge", "paas", "self-hosted"],
+      "description": "Connexion en un clic au MCP DevForge (OAuth, aucune configuration).",
+      "keywords": [
+        "mcp",
+        "devforge",
+        "paas",
+        "deploy"
+      ],
       "logo": "cursor-plugin/devforge/assets/logo.svg"
+    },
+    {
+      "name": "devforge-self-hosted",
+      "source": "cursor-plugin/devforge-self-hosted",
+      "description": "MCP d’une instance DevForge auto-hébergée (URL de l’instance demandée une fois).",
+      "keywords": [
+        "mcp",
+        "devforge",
+        "paas",
+        "self-hosted"
+      ],
+      "logo": "cursor-plugin/devforge-self-hosted/assets/logo.svg"
     }
   ]
 }
