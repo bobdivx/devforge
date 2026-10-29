@@ -18,22 +18,16 @@ export function useStickToBottom(messages: ChatMessage[], resetKey: unknown) {
     if (!box) return;
     // On ne défile que si le contenu a réellement changé.
     const last = messages[messages.length - 1];
-    const sig =
-      messages.length +
-      '|' +
-      (last?.content.length ?? 0) +
-      '|' +
-      (last?.toolCalls?.length ?? 0) +
-      '|' +
-      (last?.actions?.length ?? 0) +
-      '|' +
-      (last?.reflections?.length ?? 0) +
-      '|' +
-      (last?.milestones?.length ?? 0) +
-      '|' +
-      (last?.liveLabel ?? '') +
-      '|' +
-      (last?.streaming ? 1 : 0);
+    const sig = [
+      messages.length,
+      last?.content.length ?? 0,
+      last?.toolCalls?.length ?? 0,
+      last?.actions?.length ?? 0,
+      last?.reflections?.length ?? 0,
+      last?.milestones?.length ?? 0,
+      last?.liveLabel ?? '',
+      last?.streaming ? 1 : 0,
+    ].join('|');
     if (sig === lastSig.current) return;
     const first = lastSig.current === '';
     lastSig.current = sig;

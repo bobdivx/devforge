@@ -6,6 +6,6 @@
 **Learning:** In the chat component (`useThreadList`), derived state that requires filtering and sorting large arrays (like generating nested agent lists) was running synchronously on every render. Given that chat polling triggers frequent re-renders, this caused unnecessary CPU strain on lists that only rarely change.
 **Action:** Use `useMemo` for derived states like `rows` and `current` in custom hooks when they involve `.filter()`, `.map()`, or `.sort()` and depend on data that updates less frequently than the component renders.
 
-## 2026-10-29 - [Performance] Optimize Chat Signature Generation Hot Paths
-**Learning:** In chat signature generation functions (like `messagesSignature` and `useStickToBottom`), array instantiation combined with `.join('|')` causes unnecessary memory allocation overhead during frequent polling or render cycles.
-**Action:** Replace `Array.prototype.join()` with direct string concatenation on hot paths where signatures are generated frequently.
+## 2026-10-29 - [Performance] Array joining vs String Concatenation Micro-optimization Rejected
+**Learning:** Replacing small array `.join('|')` implementations with manual string concatenation is considered a micro-optimization with no measurable gain that makes code harder to read. It should be avoided.
+**Action:** Do not propose micro-optimizations (like replacing `.join` with string concatenation) if they sacrifice readability and offer no measurable performance benefit, as such changes will be rejected.
