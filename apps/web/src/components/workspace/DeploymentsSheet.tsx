@@ -5,6 +5,7 @@ import { api, type Deployment } from '../../lib/api';
 import { Badge, Button, Portal, Spinner } from '../ui';
 import { cn } from '../../lib/cn';
 import { DeployTimeline } from './DeployTimeline';
+import { WakeGrokButton } from '../WakeGrokButton';
 
 type Props = {
   open: boolean;
@@ -427,6 +428,7 @@ export function DeploymentsSheet({ open, onClose, projectUuid, variant = 'sheet'
                       {retryError && (
                         <span class="text-xs text-[var(--color-danger)]">{retryError}</span>
                       )}
+                      <WakeGrokButton projectUuid={projectUuid} deploymentUuid={selected.uuid} />
                     </div>
                   )}
                 </div>

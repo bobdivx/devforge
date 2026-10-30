@@ -51,12 +51,13 @@ struct RunInfo {
     error: Option<String>,
     created_at: String,
     updated_at: String,
+    playbook: Option<String>,
 }
 
 async fn load_run(state: &AppState, run_uuid: &str) -> Option<RunInfo> {
     sqlx::query_as::<_, RunInfo>(
         r#"SELECT uuid, project_uuid, agent_uuid, status, kind, title, progress::text AS progress, summary,
-                  parent_run_uuid, cancel_requested, attempts, error, created_at, updated_at
+                  parent_run_uuid, cancel_requested, attempts, error, created_at, updated_at, playbook
            FROM agent_runs WHERE uuid = $1"#,
     )
     .bind(run_uuid)
@@ -104,6 +105,7 @@ async fn run_json(state: &AppState, r: &RunInfo) -> Value {
         "started_at": r.created_at,
         "updated_at": r.updated_at,
         "live": run_events::is_live(&r.uuid),
+        "playbook": r.playbook,
     })
 }
 
@@ -332,7 +334,7 @@ async fn active_runs(
         r#"SELECT r.uuid FROM agent_runs r JOIN projects p ON p.uuid = r.project_uuid
            WHERE p.workspace_uuid = $1
              AND (r.status IN ('pending','queued','running','paused')
-                  OR (r.status = 'failed' AND r.kind = 'worker' AND r.updated_at >= $2))
+                  OR (r.status = 'failed' AND (r.kind = 'worker' OR r.playbook IS NOT NULL) AND r.updated_at >= $2))
            ORDER BY r.created_at DESC LIMIT 20"#,
     )
     .bind(&workspace.uuid)

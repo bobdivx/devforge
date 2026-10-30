@@ -37,6 +37,9 @@ mod github_auth;
 mod github_checks;
 mod github_migration;
 mod github_repos;
+mod grok_bot;
+#[cfg(test)]
+mod grok_bot_tests;
 mod group_routes;
 mod infra_routes;
 mod infra_sqlite;
@@ -46,6 +49,9 @@ mod mcp_routes;
 mod memory_routes;
 mod mobile_routes;
 mod paths;
+mod playbooks;
+#[cfg(test)]
+mod playbooks_tests;
 mod platform_sso;
 #[cfg(test)]
 mod platform_sso_tests;
@@ -396,6 +402,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(memory_routes::router())
         .merge(run_routes::router())
         .merge(receipts::router())
+        .merge(playbooks::router())
+        .merge(grok_bot::router())
         .merge(page_watch_routes::router())
         .merge(rich_chat::router())
         .merge(wake_gate::router())

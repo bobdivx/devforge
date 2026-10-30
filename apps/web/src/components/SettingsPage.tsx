@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { Eye } from 'lucide-preact';
 import { api, type InstanceDomain } from '../lib/api';
 import { AcmeEmailTile } from './AcmeEmailTile';
+import { GrokBotTile } from './GrokBotTile';
 import { AppShell } from './AppShell';
 import { GithubAppSettingsPanel } from './GithubAppSettingsPanel';
 import { LlmProvidersPanel } from './LlmProvidersPanel';
@@ -291,6 +292,7 @@ function SettingsPageInner() {
             />
           ))}
           {isAdmin && <AcmeEmailTile index={SETTINGS_CARDS.length + 4} />}
+          <GrokBotTile index={SETTINGS_CARDS.length + 5} />
         </HubGrid>
       </AppShell>
     );

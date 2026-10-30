@@ -104,6 +104,13 @@ data class ProjectUiState(
     val undo: DraftUndo? = null,
     /** P5-02 : images du composer (envoyées dès l'ajout). */
     val pendingImages: List<app.jeser.devforge.data.PendingImage> = emptyList(),
+    /** Modèles d'agent : catalogue (chargé à l'ouverture), run suivi en direct, réveil du bot Grok. */
+    val playbooks: List<app.jeser.devforge.data.Playbook>? = null,
+    val playbookRun: app.jeser.devforge.data.RunLive? = null,
+    val playbookBusy: String? = null,
+    val playbookError: String? = null,
+    val grokWaking: Boolean = false,
+    val grokWake: app.jeser.devforge.data.GrokWakeResult? = null,
 ) {
     /** Dernière mise en ligne de la prod (la dev a sa propre section Branches). */
     val latest: Deployment? get() = deployments.firstOrNull { !it.isDev } ?: deployments.firstOrNull()
@@ -686,6 +693,66 @@ class ProjectViewModel(private val graph: AppGraph, val uuid: String) : ViewMode
     fun undoShown() = _state.update { it.copy(undo = null) }
     private suspend fun refreshCorrections() {
         runCatching { api.corrections(uuid) }.onSuccess { c -> _state.update { s -> if (s.corrections == c) s else s.copy(corrections = c) } }
+    }
+
+    /* ---------------- Modèles d'agent ---------------- */
+
+    private var livePoll: Job? = null
+    private var liveRunUuid: String? = null
+
+    fun openPlaybooks() {
+        _state.update { it.copy(playbookError = null) }
+        if (_state.value.playbooks == null) {
+            viewModelScope.launch {
+                runCatching { api.playbooks() }
+                    .onSuccess { list -> _state.update { it.copy(playbooks = list) } }
+                    .onFailure { e -> _state.update { it.copy(playbookError = e.message ?: "Modèles indisponibles") } }
+            }
+        }
+        liveRunUuid?.let { followRun(it) }
+    }
+
+    fun closePlaybooks() {
+        livePoll?.cancel()
+        livePoll = null
+    }
+
+    fun runPlaybook(id: String, goal: String?) {
+        if (_state.value.playbookBusy != null) return
+        _state.update { it.copy(playbookBusy = id, playbookError = null, grokWake = null) }
+        viewModelScope.launch {
+            runCatching { api.runPlaybook(uuid, id, goal) }
+                .onSuccess { r ->
+                    _state.update { it.copy(playbookBusy = null, notice = "${r.title ?: id} lancé") }
+                    followRun(r.runUuid)
+                }
+                .onFailure { e -> _state.update { it.copy(playbookBusy = null, playbookError = e.message ?: "Lancement impossible") } }
+        }
+    }
+
+    /** Sonde la carte live toutes les 2,5 s tant que le run (ou un worker) travaille. */
+    private fun followRun(runUuid: String) {
+        liveRunUuid = runUuid
+        livePoll?.cancel()
+        livePoll = viewModelScope.launch {
+            while (isActive) {
+                val live = runCatching { api.runLive(runUuid) }.getOrNull()
+                if (live != null) _state.update { s -> if (s.playbookRun == live) s else s.copy(playbookRun = live) }
+                if (live != null && !live.live) break
+                delay(if (live == null) 5_000 else 2_500)
+            }
+        }
+    }
+
+    fun wakeGrok() {
+        if (_state.value.grokWaking) return
+        val run = _state.value.playbookRun?.runUuid
+        _state.update { it.copy(grokWaking = true, grokWake = null) }
+        viewModelScope.launch {
+            val r = runCatching { api.wakeGrokBot(uuid, run) }
+                .getOrElse { e -> app.jeser.devforge.data.GrokWakeResult(ok = false, message = e.message ?: "Réveil impossible") }
+            _state.update { it.copy(grokWaking = false, grokWake = r) }
+        }
     }
 
     fun openCorrections() {

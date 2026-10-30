@@ -224,6 +224,7 @@ pub fn build_core_registry(
     registry.register(Arc::new(ReadProjectFileTool { pool: pool.clone() }));
     registry.register(Arc::new(ListProjectFilesTool { pool: pool.clone() }));
     registry.register(Arc::new(ProposePlanTool));
+    registry.register(Arc::new(tools::RecordDecisionTool));
     registry.register(Arc::new(tools::AskUserTool));
     registry.register(Arc::new(SyncWorkdirToGitHubTool {
         github: github.clone(),
@@ -278,6 +279,11 @@ pub struct AgentReply {
 }
 
 pub use events::MilestoneStatus;
+
+/// Journal « montre-moi ton travail » : règle de preuve partagée avec le serveur.
+pub mod decision {
+    pub use crate::tools::decision::{is_evidence, normalize_outcome, EVIDENCE_RULE};
+}
 
 /// Événements d'un run (SSE `/agent/chat`, P2-01). Champs ajoutés avec `#[serde(default)]` :
 /// les anciens clients et anciens flux restent compatibles.

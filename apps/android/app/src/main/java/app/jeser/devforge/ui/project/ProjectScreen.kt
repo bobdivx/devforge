@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Subject
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
@@ -71,6 +72,7 @@ import app.jeser.devforge.data.ContainerState
 import app.jeser.devforge.data.DeployPlan
 import app.jeser.devforge.data.Deployment
 import app.jeser.devforge.data.SpecFeature
+import app.jeser.devforge.data.needsHelp
 import app.jeser.devforge.ui.apps.hostOf
 import app.jeser.devforge.ui.components.AppIcon
 import app.jeser.devforge.ui.components.ConfirmActionSheet
@@ -125,10 +127,15 @@ data class ProjectActions(
     val onAttachImage: (ByteArray, String, String) -> Unit = { _, _, _ -> },
     val onRemoveImage: (String) -> Unit = {},
     val attachmentUrl: (String) -> String? = { null },
+    /* Modèles d'agent : un bouton par modèle, carte live, réveil du bot Grok. */
+    val onOpenPlaybooks: () -> Unit = {},
+    val onClosePlaybooks: () -> Unit = {},
+    val onRunPlaybook: (String, String?) -> Unit = { _, _ -> },
+    val onWakeGrok: () -> Unit = {},
 )
 
 /** Feuilles de la page app (une seule ouverte à la fois). */
-enum class ProjectSheet { None, Details, Deploys, Stop, Restart, Deploy, NewFeature, Workspace, Draft, DraftFile, DraftValidate, DraftDiscard, Chat, Corrections }
+enum class ProjectSheet { None, Details, Deploys, Stop, Restart, Deploy, NewFeature, Workspace, Draft, DraftFile, DraftValidate, DraftDiscard, Chat, Corrections, Playbooks }
 
 private data class Chip(val key: String, val label: String, val danger: Boolean = false)
 
@@ -247,6 +254,7 @@ fun ProjectScreen(
                             cols = cols,
                             showBraise = showBraise,
                             onBraise = { sheet = ProjectSheet.Chat },
+                            onPlaybooks = { actions.onOpenPlaybooks(); sheet = ProjectSheet.Playbooks },
                             onWorkspace = openCorrections,
                             onPreview = actions.onOpenPreview,
                             onDeploys = { sheet = ProjectSheet.Deploys },
@@ -330,6 +338,12 @@ fun ProjectScreen(
                 onUpdate = actions.onDraftUpdate,
                 onRestore = actions.onDraftRestore,
                 onOpenPreview = { actions.onOpenPreview(); close() },
+            )
+            ProjectSheet.Playbooks -> PlaybooksSheet(
+                state,
+                onDismiss = { actions.onClosePlaybooks(); close() },
+                onRun = actions.onRunPlaybook,
+                onWake = actions.onWakeGrok,
             )
             ProjectSheet.Corrections -> CorrectionsSheet(
                 state,
@@ -584,6 +598,7 @@ fun ProjectTiles(
     onDeploys: () -> Unit,
     onSettings: () -> Unit,
     onPreview: () -> Unit = {},
+    onPlaybooks: () -> Unit = {},
 ) {
     val draft = state.draft
     val latest = state.latest
@@ -604,6 +619,13 @@ fun ProjectTiles(
         val when_ = latest?.let { relativeTime(it.createdAt) }?.takeIf { it.isNotEmpty() }
         add(TileSpec("deploys", "Déploiements", listOfNotNull(dl, when_).joinToString(" · "), Icons.Filled.History,
             dc, latest?.isFailed == true, onDeploys))
+        val pb = state.playbookRun
+        val (pbSub, pbTone) = when {
+            pb == null -> "Déployer, enquêter, essaim…" to DfColors.InkMuted
+            pb.live -> pb.statusText.ifBlank { "En cours…" } to DfColors.Accent
+            else -> app.jeser.devforge.data.verdictLabel(pb.verdict) to playbookVerdictTone(pb.verdict)
+        }
+        add(TileSpec("playbooks", "Modèles", pbSub, Icons.Filled.AutoAwesome, pbTone, pb?.needsHelp == true, onPlaybooks))
         add(TileSpec("settings", "Paramètres", "Domaine, GitHub, équipe", Icons.Filled.Settings, DfColors.InkMuted, false, onSettings))
     }
     Column(Modifier.fillMaxWidth().testTag("tiles"), verticalArrangement = Arrangement.spacedBy(10.dp)) {

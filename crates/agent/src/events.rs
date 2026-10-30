@@ -104,6 +104,14 @@ pub fn tool_label(name: &str, args: &Value) -> String {
         "publish_to_github" => "Publication GitHub".into(),
         "create_github_repo" => "Création du dépôt GitHub".into(),
         "propose_plan" => "Plan".into(),
+        "record_decision" => {
+            let w = arg(args, "what");
+            if w.is_empty() {
+                "Décision".into()
+            } else {
+                format!("Décision « {} »", clip(w, 50))
+            }
+        }
         "ask_user" => "Question".into(),
         "create_routine" => "Routine programmée".into(),
         "list_routines" => "Routines".into(),

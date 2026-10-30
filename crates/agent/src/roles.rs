@@ -36,6 +36,7 @@ pub const ALL_TOOLS: &[&str] = &[
     "publish_to_github",
     "read_github_file",
     "read_project_file",
+    "record_decision",
     "review_project_security",
     "run_application_tests",
     "run_workdir_command",
@@ -57,6 +58,8 @@ pub const ALWAYS: &[&str] = &[
     "memory_write",
     "memory_forget",
     "ask_user",
+    // Journal « montre-moi ton travail » : chaque rôle note ses décisions avec une preuve.
+    "record_decision",
 ];
 
 const WORKER: &[&str] = &[

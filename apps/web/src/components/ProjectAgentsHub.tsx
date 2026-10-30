@@ -23,6 +23,7 @@ import {
 } from '../lib/launched-agents';
 import { ProjectAgentsPanel } from './ProjectAgentsPanel';
 import { ProjectSpecsTile } from './ProjectSpecsModal';
+import { PlaybooksTile } from './PlaybooksTile';
 import {
   Alert,
   Badge,
@@ -396,6 +397,7 @@ export function ProjectAgentsHub({
         <FadeIn>
           <HubGrid cols={4}>
             <ProjectSpecsTile projectUuid={projectUuid} index={0} />
+            <PlaybooksTile projectUuid={projectUuid} index={1} />
             {gridAgents.map((agent, i) => {
               const status = statusOf(agent);
               const isCoord = agent.role === 'coordinator';

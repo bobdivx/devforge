@@ -545,7 +545,82 @@ export type AgentRunInfo = {
   started_at: string;
   updated_at: string;
   live?: boolean;
+  /** Modèle d'agent lancé (`deploy-verify`, `swarm`…), sinon null. */
+  playbook?: string | null;
 };
+
+/** Modèle d'agent : commande, description, 3 étapes fixes, une règle (catalogue serveur). */
+export type Playbook = {
+  id: string;
+  slash: string;
+  name: string;
+  description: string;
+  steps: [string, string, string] | string[];
+  rule: string;
+  visual: string;
+  goal_label: string;
+  goal_placeholder: string;
+  uses_workers: boolean;
+};
+
+export type StepState = 'pending' | 'running' | 'ok' | 'failed' | 'skipped' | 'missing';
+
+/** Une ligne du journal « montre-moi ton travail » : preuve = lien ou chemin. */
+export type RunDecision = {
+  source: 'agent' | 'receipt' | string;
+  what: string;
+  why: string;
+  evidence: string;
+  outcome: 'ok' | 'failed' | 'skipped' | 'running' | 'unknown' | string;
+  step?: number | null;
+  agent_name?: string | null;
+  run_uuid?: string;
+  detail?: string | null;
+};
+
+/** Carte live d'un run (`GET /agent/runs/{run}/live`). */
+export type RunLive = {
+  run_uuid: string;
+  project_uuid: string;
+  status: string;
+  live: boolean;
+  verdict: 'running' | 'ok' | 'failed' | 'incomplete' | string;
+  status_text: string;
+  title?: string | null;
+  error?: string | null;
+  agent_name?: string | null;
+  playbook?: { id: string; slash: string; name: string; rule: string; visual: string } | null;
+  steps: Array<{ n: number; label: string; state: StepState }>;
+  workers: Array<{
+    run_uuid: string;
+    title?: string | null;
+    agent_name?: string | null;
+    status: string;
+    live?: boolean;
+    summary?: string | null;
+    error?: string | null;
+  }>;
+  counters: {
+    tools_ok: number;
+    tools_failed: number;
+    workers_total: number;
+    workers_done: number;
+    workers_failed: number;
+    decisions: number;
+  };
+  decisions: RunDecision[];
+};
+
+/** Réglage « Bot Grok » : jamais la clé ni l'URL complète. */
+export type GrokBotSettings = {
+  configured: boolean;
+  url_set: boolean;
+  url_hint?: string | null;
+  key_set: boolean;
+  last?: { ok?: boolean | null; status?: number | null; message?: string | null; event?: string | null; at: string } | null;
+};
+
+export type GrokBotWakeResult = { ok: boolean; status?: number | null; message: string; event: string };
 
 export type Deployment = {
   uuid: string;
@@ -1256,6 +1331,21 @@ export const api = {
       method: 'POST',
       body: '{}',
     }),
+  /** Modèles d'agents (playbooks) : catalogue, lancement en un bouton, carte live. */
+  playbooks: () => request<{ data: Playbook[] }>(`/playbooks`),
+  runPlaybook: (projectUuid: string, playbookId: string, goal?: string) =>
+    request<{ data: { run_uuid: string; agent_uuid: string; playbook: string; title: string } }>(
+      `/projects/${encodeURIComponent(projectUuid)}/playbooks/${encodeURIComponent(playbookId)}/run`,
+      { method: 'POST', body: JSON.stringify(goal ? { goal } : {}) },
+    ),
+  runLive: (runUuid: string) => request<{ data: RunLive }>(`/agent/runs/${encodeURIComponent(runUuid)}/live`),
+  /** Bot Grok : URL de webhook + clé d'envoi (scellées, jamais renvoyées). */
+  grokBotSettings: () => request<{ data: GrokBotSettings }>(`/grok-bot/settings`),
+  saveGrokBotSettings: (body: { url?: string; key?: string }) =>
+    request<{ data: GrokBotSettings }>(`/grok-bot/settings`, { method: 'PATCH', body: JSON.stringify(body) }),
+  wakeGrokBot: (body: { project_uuid: string; run_uuid?: string; deployment_uuid?: string; message?: string }) =>
+    request<{ data: GrokBotWakeResult }>(`/grok-bot/wake`, { method: 'POST', body: JSON.stringify(body) }),
+  testGrokBot: () => request<{ data: GrokBotWakeResult }>(`/grok-bot/test`, { method: 'POST', body: '{}' }),
   /** Rangée « En cours » : runs en file, en cours, en pause ou en échec récent (durable). */
   activeAgentRuns: () => request<{ data: AgentRunInfo[] }>(`/agent/runs-active`),
   clearAgentMessages: (projectUuid: string, agentUuid: string) =>
