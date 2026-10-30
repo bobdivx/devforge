@@ -56,7 +56,7 @@ export function ActiveRunRows({ runs, onPick }: { runs: AgentRunInfo[]; onPick: 
         <li key={run.run_uuid}>
           <button
             type="button"
-            class="flex min-h-[44px] w-full min-w-0 items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/5"
+            class="flex min-h-[44px] w-full min-w-0 items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
             onClick={() => onPick(run)}
           >
             <Dot status={run.status} />
@@ -110,7 +110,7 @@ export function ActiveRunsMenu() {
     <>
       <button
         type="button"
-        class="hidden min-h-[44px] shrink-0 items-center gap-2 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-3 text-sm text-[var(--color-ink)] transition hover:border-white/20 md:flex"
+        class="hidden min-h-[44px] shrink-0 items-center gap-2 rounded-full border border-[var(--color-line)] bg-white/[0.03] px-3 text-sm text-[var(--color-ink)] transition hover:border-white/20 focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] md:flex"
         aria-haspopup="dialog"
         onClick={() => setOpen(true)}
       >
