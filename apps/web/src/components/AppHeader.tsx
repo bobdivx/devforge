@@ -137,7 +137,7 @@ export function AppHeader({
       <div class="relative shrink-0" ref={menuRef}>
         <button
           type="button"
-          class="flex min-h-[44px] min-w-[44px] items-center justify-center gap-2.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] p-1 transition-[border-color,background-color,transform] duration-200 hover:border-white/20 hover:bg-white/[0.06] active:scale-[0.99] sm:justify-start sm:pr-3"
+          class="flex min-h-[44px] min-w-[44px] items-center justify-center gap-2.5 rounded-full border border-[var(--color-line)] bg-white/[0.03] p-1 transition-[border-color,background-color,transform] duration-200 hover:border-white/20 hover:bg-white/[0.06] active:scale-[0.99] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] sm:justify-start sm:pr-3"
           aria-label={`Compte : ${displayName}`}
           aria-expanded={menuOpen}
           aria-haspopup="menu"
@@ -215,7 +215,7 @@ export function AppHeader({
               type="button"
               role="menuitem"
               disabled={loggingOut}
-              class="block w-full px-3 py-2.5 text-left text-sm text-[var(--color-danger)] transition hover:bg-white/5 disabled:opacity-50"
+              class="block w-full px-3 py-2.5 text-left text-sm text-[var(--color-danger)] transition hover:bg-white/5 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
               onClick={logout}
             >
               {loggingOut ? 'Déconnexion…' : 'Se déconnecter'}

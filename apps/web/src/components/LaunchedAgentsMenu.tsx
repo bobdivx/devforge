@@ -61,7 +61,7 @@ export function LaunchedAgentRows({
             <button
               type="button"
               class={cn(
-                'flex min-w-0 flex-1 items-center gap-2.5 text-left transition hover:bg-white/5',
+                'flex min-w-0 flex-1 items-center gap-2.5 text-left transition hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]',
                 dense ? 'px-3 py-2' : 'min-h-[44px] px-3 py-2.5',
               )}
               onClick={() => {
@@ -81,7 +81,7 @@ export function LaunchedAgentRows({
             </button>
             <button
               type="button"
-              class="shrink-0 px-3 text-sm text-[var(--color-ink-faint)] transition hover:bg-white/5 hover:text-[var(--color-ink)]"
+              class="shrink-0 px-3 text-sm text-[var(--color-ink-faint)] transition hover:bg-white/5 hover:text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
               aria-label={`Retirer ${agent.title}`}
               onClick={() => dismissLaunchedAgent(agent.uuid)}
             >
@@ -131,7 +131,7 @@ export function LaunchedAgentsMenu() {
       <div class="flex min-h-[44px] items-center rounded-full border border-[var(--color-line)] bg-white/[0.03]">
         <button
           type="button"
-          class="flex min-w-0 items-center gap-2 py-1 pl-2.5 pr-2 transition hover:text-[var(--color-ink)]"
+          class="flex min-w-0 items-center gap-2 py-1 pl-2.5 pr-2 transition hover:text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
           onClick={openLatest}
           title={latest.projectName ? `${latest.title} · ${latest.projectName}` : latest.title}
         >
@@ -143,7 +143,7 @@ export function LaunchedAgentsMenu() {
         {agents.length > 1 ? (
           <button
             type="button"
-            class="flex h-8 items-center gap-1 border-l border-[var(--color-line)] px-2.5 text-[11px] font-medium text-[var(--color-ink-muted)] transition hover:text-[var(--color-ink)]"
+            class="flex h-8 items-center gap-1 border-l border-[var(--color-line)] px-2.5 text-[11px] font-medium text-[var(--color-ink-muted)] transition hover:text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
             aria-expanded={open}
             aria-haspopup="menu"
             aria-label="Agents lancés"
@@ -166,7 +166,7 @@ export function LaunchedAgentsMenu() {
         ) : (
           <button
             type="button"
-            class="pr-2.5 text-sm text-[var(--color-ink-faint)] transition hover:text-[var(--color-ink)]"
+            class="pr-2.5 text-sm text-[var(--color-ink-faint)] transition hover:text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
             aria-label={`Retirer ${latest.title}`}
             onClick={() => dismissLaunchedAgent(latest.uuid)}
           >
