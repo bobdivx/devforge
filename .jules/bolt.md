@@ -5,7 +5,3 @@
 ## 2026-10-15 - [Performance] Prevent unnecessary UI array recalculations
 **Learning:** In the chat component (`useThreadList`), derived state that requires filtering and sorting large arrays (like generating nested agent lists) was running synchronously on every render. Given that chat polling triggers frequent re-renders, this caused unnecessary CPU strain on lists that only rarely change.
 **Action:** Use `useMemo` for derived states like `rows` and `current` in custom hooks when they involve `.filter()`, `.map()`, or `.sort()` and depend on data that updates less frequently than the component renders.
-
-## 2026-10-30 - [Performance] Optimize className merging utility (cn)
-**Learning:** The `cn` function (used for className merging) is called extremely frequently during React/Preact renders. The previous implementation used `parts.filter(Boolean).join(' ')` which allocates intermediate arrays and causes unnecessary garbage collection overhead on a highly-trafficked hot path. Benchmarks showed it to be a bottleneck.
-**Action:** Replaced the array methods with a simple `for` loop and string concatenation in `apps/web/src/lib/cn.ts`. When creating highly trafficked utility functions, avoid array methods that allocate intermediate arrays (`map`, `filter`) and prefer manual iteration and direct string concatenation. This is ~4x faster for typical use cases.
