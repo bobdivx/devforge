@@ -112,12 +112,6 @@ fn validate_command(raw: &str) -> std::result::Result<Vec<String>, String> {
             return Err(format!("token interdit dans la commande : {bad}"));
         }
     }
-    for part in &parts {
-        let lower_part = part.to_ascii_lowercase();
-        if lower_part == "rm" {
-            return Err("token interdit dans la commande : rm".to_string());
-        }
-    }
     let bin = parts[0].as_str();
     let bin_base = Path::new(bin)
         .file_name()
