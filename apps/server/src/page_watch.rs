@@ -573,8 +573,10 @@ pub async fn fetch(raw_url: &str, policy: &FetchPolicy) -> Result<Fetched, Fetch
     }
 }
 
-async fn fetch_inner(raw_url: &str, policy: &FetchPolicy) -> Result<Fetched, FetchError> {
-    let client = reqwest::Client::builder()
+/// Client HTTP gardé : résolution DNS filtrée (pas d'adresse interne, pas de rebinding),
+/// aucune redirection suivie, aucun proxy système. Réutilisé par le réveil du bot Grok.
+pub fn guarded_client(policy: &FetchPolicy, user_agent: &str) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
         .dns_resolver(Arc::new(GuardedResolver {
             policy: policy.clone(),
         }))
@@ -582,9 +584,18 @@ async fn fetch_inner(raw_url: &str, policy: &FetchPolicy) -> Result<Fetched, Fet
         .no_proxy()
         .connect_timeout(Duration::from_secs(5))
         .timeout(policy.timeout)
-        .user_agent(USER_AGENT)
+        .user_agent(user_agent)
         .build()
-        .map_err(|_| FetchError::msg("Client HTTP indisponible."))?;
+        .map_err(|_| "Client HTTP indisponible.".to_string())
+}
+
+/// Vrai si l'erreur vient du filtre d'adresses (adresse interne refusée).
+pub fn is_blocked_error(e: &reqwest::Error) -> bool {
+    error_chain(e).0
+}
+
+async fn fetch_inner(raw_url: &str, policy: &FetchPolicy) -> Result<Fetched, FetchError> {
+    let client = guarded_client(policy, USER_AGENT).map_err(FetchError::msg)?;
 
     let mut url = validate_url(raw_url, policy).map_err(|m| FetchError {
         blocked: m == BLOCKED_MESSAGE,

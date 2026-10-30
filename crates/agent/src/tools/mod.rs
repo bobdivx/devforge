@@ -1,6 +1,7 @@
 mod agent_threads;
 pub mod ask_user;
 mod container_logs;
+pub mod decision;
 mod delegate;
 mod deploy;
 mod deploy_logs;
@@ -31,6 +32,7 @@ pub use container_logs::{container_logs_options, GetContainerLogsTool, GET_CONTA
 pub use delegate::{
     set_worker_launcher, DelegateTaskTool, WorkerLauncher, DELEGATED_REFUSAL, MAX_ACTIVE_WORKERS,
 };
+pub use decision::RecordDecisionTool;
 pub use deploy::{CancelDeploymentTool, ListDeploymentsTool, TriggerDeployTool};
 pub use deploy_logs::GetDeploymentLogsTool;
 pub use env::{ListEnvVarsTool, UpsertEnvVarsTool};

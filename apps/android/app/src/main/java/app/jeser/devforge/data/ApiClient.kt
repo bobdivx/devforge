@@ -405,6 +405,32 @@ class ApiClient(
     suspend fun agentRun(runUuid: String): AgentRunInfo =
         get("/agent/runs/${enc(runUuid)}", DataEnvelope.serializer(AgentRunInfo.serializer())).data
 
+    /* Modèles d'agent : catalogue, lancement en un bouton, carte live, réveil du bot Grok. */
+    suspend fun playbooks(): List<Playbook> =
+        get("/playbooks", DataEnvelope.serializer(ListSerializer(Playbook.serializer()))).data
+
+    suspend fun runPlaybook(projectUuid: String, playbookId: String, goal: String?): PlaybookStarted =
+        send(
+            "POST",
+            "/projects/${enc(projectUuid)}/playbooks/${enc(playbookId)}/run",
+            buildJsonObject { goal?.trim()?.takeIf { it.isNotEmpty() }?.let { put("goal", it) } },
+            DataEnvelope.serializer(PlaybookStarted.serializer()),
+        ).data
+
+    suspend fun runLive(runUuid: String): RunLive =
+        get("/agent/runs/${enc(runUuid)}/live", DataEnvelope.serializer(RunLive.serializer())).data
+
+    suspend fun wakeGrokBot(projectUuid: String, runUuid: String?): GrokWakeResult =
+        send(
+            "POST",
+            "/grok-bot/wake",
+            buildJsonObject {
+                put("project_uuid", projectUuid)
+                runUuid?.let { put("run_uuid", it) }
+            },
+            DataEnvelope.serializer(GrokWakeResult.serializer()),
+        ).data
+
     /** Bail SQL : `pause` | `resume` | `retry`. Refus (409) → exception avec le message serveur. */
     suspend fun controlRun(runUuid: String, action: String): RunCancel =
         send("POST", "/agent/runs/${enc(runUuid)}/${enc(action)}", buildJsonObject { }, DataEnvelope.serializer(RunCancel.serializer())).data

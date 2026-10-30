@@ -1026,6 +1026,8 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
     crate::run_events::migrate(pool).await?;
     crate::receipts::migrate(pool).await?;
     crate::page_watch::migrate(pool).await?;
+    crate::playbooks::migrate(pool).await?;
+    crate::grok_bot::migrate(pool).await?;
 
     // Chat riche (P5) : réactions, pièces jointes, citations, routines d'agent.
     crate::rich_chat::migrate(pool).await?;

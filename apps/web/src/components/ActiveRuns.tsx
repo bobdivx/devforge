@@ -5,6 +5,8 @@ import { cn } from '../lib/cn';
 import { jobStatusFromRun } from '../lib/jobs';
 import { JobCard } from './chat/JobCard';
 import { Modal } from './ui';
+import { RunLiveCard } from './RunLiveCard';
+import { WakeGrokButton } from './WakeGrokButton';
 
 /** Runs actifs de l'espace, relus toutes les 10 s tant que l'onglet est visible. */
 export function useActiveRuns(enabled = true, intervalMs = 10000): [AgentRunInfo[], () => void] {
@@ -74,7 +76,20 @@ export function ActiveRunRows({ runs, onPick }: { runs: AgentRunInfo[]; onPick: 
 export function ActiveRunModal({ run, onClose }: { run: AgentRunInfo | null; onClose: () => void }) {
   return (
     <Modal open={!!run} onClose={onClose} title={run ? activeRunTitle(run) : ''} size="sm">
-      {run ? <JobCard key={run.run_uuid} initial={jobFromRun(run)} /> : null}
+      {run ? (
+        run.playbook ? (
+          <RunLiveCard key={run.run_uuid} runUuid={run.run_uuid} />
+        ) : (
+          <>
+            <JobCard key={run.run_uuid} initial={jobFromRun(run)} />
+            {run.status === 'failed' && (
+              <div class="mt-3">
+                <WakeGrokButton projectUuid={run.project_uuid} runUuid={run.run_uuid} variant="primary" />
+              </div>
+            )}
+          </>
+        )
+      ) : null}
     </Modal>
   );
 }
