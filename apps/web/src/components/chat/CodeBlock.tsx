@@ -26,7 +26,30 @@ export function CodeBlock({ code, lang }: { code: string; lang?: string }) {
       window.clearTimeout(t);
     };
   }, [code, lang]);
-  const shown = tokens && tokens.map((l) => l.map((t) => t.content).join('')).join('\n') === code ? tokens : null;
+
+  let tokensMatch = false;
+  if (tokens) {
+    let expectedLen = 0;
+    for (let i = 0; i < tokens.length; i++) {
+      const line = tokens[i];
+      for (let j = 0; j < line.length; j++) {
+        expectedLen += line[j].content.length;
+      }
+      if (i < tokens.length - 1) expectedLen += 1;
+    }
+    if (expectedLen === code.length) {
+      let expectedStr = '';
+      for (let i = 0; i < tokens.length; i++) {
+        const line = tokens[i];
+        for (let j = 0; j < line.length; j++) {
+          expectedStr += line[j].content;
+        }
+        if (i < tokens.length - 1) expectedStr += '\n';
+      }
+      tokensMatch = expectedStr === code;
+    }
+  }
+  const shown = tokensMatch ? tokens : null;
 
   async function onCopy() {
     const ok = await copyText(code);
