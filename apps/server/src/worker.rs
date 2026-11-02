@@ -15,7 +15,6 @@ use devforge_cluster::{
 use devforge_deploy::{LocalShellExecutor, RemoteExecutor};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tower_http::services::{ServeDir, ServeFile};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -454,17 +453,11 @@ async fn worker_update_start(
     })))
 }
 
-pub fn with_static_fallback(mut app: Router) -> Router {
-    if let Some(root) = crate::paths::web_dir() {
-        let index = root.join("index.html");
-        if index.is_file() {
-            app =
-                app.fallback_service(ServeDir::new(&root).not_found_service(ServeFile::new(index)));
-        } else {
-            app = app.fallback_service(ServeDir::new(&root));
-        }
+pub fn with_static_fallback(app: Router) -> Router {
+    match crate::paths::web_dir() {
+        Some(root) => crate::static_web::with_static_dir(app, &root),
+        None => app,
     }
-    app
 }
 
 pub fn is_worker_role(local: &LocalClusterState) -> bool {
