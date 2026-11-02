@@ -1,0 +1,32 @@
+---
+/*
+ * Wiki public — une page par fichier `wiki/<Slug>.md`, figée au build.
+ * Les slugs sont la liste blanche des fichiers (lib/wiki.ts isValidSlug) : aucun
+ * paramètre de chemin n'est lu à l'exécution. Slug inconnu → le serveur sert
+ * l'accueil du wiki, qui l'annonce comme page absente.
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { WikiApp } from '../../components/wiki/WikiApp';
+import { loadWiki } from '../../lib/wiki-source';
+import type { WikiPage } from '../../lib/wiki';
+
+export function getStaticPaths() {
+  const wiki = loadWiki();
+  return wiki.pages.map((page) => ({ params: { slug: page.slug }, props: { page } }));
+}
+
+const { page } = Astro.props as { page: WikiPage };
+const wiki = loadWiki();
+---
+<BaseLayout title={`${page.title} · Wiki DevForge`} description={`Wiki DevForge — ${page.title}`}>
+  <WikiApp
+    client:load
+    slug={page.slug}
+    title={page.title}
+    markdown={page.markdown}
+    nav={wiki.nav}
+    known={wiki.pages.map((p) => p.slug)}
+    footer={wiki.footer}
+    embedded={wiki.embedded}
+  />
+</BaseLayout>

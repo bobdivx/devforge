@@ -1,0 +1,25 @@
+---
+/*
+ * Wiki public — accueil. Généré au build depuis `wiki/*.md` (voir lib/wiki-source.ts) :
+ * pas d'AuthGate, pas d'appel API, lisible sans connexion.
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { WikiApp } from '../../components/wiki/WikiApp';
+import { loadWiki } from '../../lib/wiki-source';
+import { WIKI_HOME } from '../../lib/wiki';
+
+const wiki = loadWiki();
+const page = wiki.pages.find((p) => p.slug === WIKI_HOME)!;
+---
+<BaseLayout title="Wiki · DevForge" description="Documentation DevForge : installation, cluster, Kubernetes, projets, déploiement.">
+  <WikiApp
+    client:load
+    slug={page.slug}
+    title={page.title}
+    markdown={page.markdown}
+    nav={wiki.nav}
+    known={wiki.pages.map((p) => p.slug)}
+    footer={wiki.footer}
+    embedded={wiki.embedded}
+  />
+</BaseLayout>

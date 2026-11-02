@@ -9,6 +9,9 @@ export function SiteFooter() {
           <a class="hover:text-[var(--color-ink)]" href="/app">
             App
           </a>
+          <a class="hover:text-[var(--color-ink)]" href="/wiki/">
+            Wiki
+          </a>
           <a
             class="hover:text-[var(--color-ink)]"
             href="https://github.com/bobdivx/devforge"

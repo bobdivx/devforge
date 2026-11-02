@@ -41,8 +41,10 @@ jobs:
         run: |
           docker run --rm \
             -v "$PWD/apps/web:/web" \
+            -v "$PWD/wiki:/wiki:ro" \
             -w /web \
             -e PUBLIC_SERVER_URL=/api/v1 \
+            -e DEVFORGE_WIKI_DIR=/wiki \
             node:22-bookworm \
             bash -lc 'npm install --include=optional && npm run build && npm test'
 

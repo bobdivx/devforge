@@ -75,6 +75,7 @@ mod runner_routes;
 mod runner_store;
 mod secret_box;
 mod security;
+mod static_web;
 mod spec_routes;
 mod sso;
 mod sso_routes;
@@ -92,7 +93,6 @@ use serde_json::{json, Value};
 use state::AppState;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -475,17 +475,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_state(state);
 
     // Front Astro : `web/` à côté du programme, share/devforge (Flatpak), ou DEVFORGE_STATIC_DIR.
-    let mut serving_web = false;
     if let Some(root) = paths::web_dir() {
-        let index = root.join("index.html");
         tracing::info!(path = %root.display(), "serving static web assets");
-        serving_web = true;
-        if index.is_file() {
-            app =
-                app.fallback_service(ServeDir::new(&root).not_found_service(ServeFile::new(index)));
-        } else {
-            app = app.fallback_service(ServeDir::new(&root));
-        }
+        app = static_web::with_static_dir(app, &root);
     }
     serve_http(app, "server").await?;
     Ok(())

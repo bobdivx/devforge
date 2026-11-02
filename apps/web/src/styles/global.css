@@ -55,6 +55,12 @@ a {
   text-decoration: none;
 }
 
+/* Wiki public : les utilitaires Tailwind (couches) reprennent la main sur la règle `a` ci-dessus. */
+.df-wiki a {
+  color: revert-layer;
+  text-decoration: revert-layer;
+}
+
 code,
 pre {
   font-family: var(--font-mono);

@@ -5,7 +5,10 @@ WORKDIR /web
 COPY apps/web/package.json apps/web/package-lock.json ./
 RUN npm install --include=optional
 COPY apps/web/ ./
-ENV PUBLIC_SERVER_URL=/api/v1
+# Wiki public (/wiki) : les pages wiki/*.md sont figées dans le build du front.
+COPY wiki/ /wiki/
+ENV PUBLIC_SERVER_URL=/api/v1 \
+    DEVFORGE_WIKI_DIR=/wiki
 RUN npm run build
 
 FROM rust:bookworm AS builder
