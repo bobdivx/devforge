@@ -13,7 +13,9 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use devforge_kube::{runtime::ImageRuntime, AppSpec, KubeDefaults, KubeError, KubeRuntime};
+use devforge_kube::{
+    runtime::ImageRuntime, spec::AppRef, AppSpec, KubeDefaults, KubeError, KubeRuntime,
+};
 use devforge_shared::runtime_backend::RuntimeBackend;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -87,6 +89,9 @@ async fn info(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<
         "runtime": backend.as_str(),
         "enabled": true,
         "namespace": d.namespace,
+        "namespace_mode": d.namespace_mode,
+        "namespace_prefix": d.namespace_prefix,
+        "pod_security": d.pod_security,
         "ingress_class": d.ingress_class,
         "image_pull_secret": d.image_pull_secret,
         "cluster_issuer": d.cluster_issuer,
@@ -111,11 +116,34 @@ async fn render(
     Ok(Json(json!({ "data": rendered.redacted() })))
 }
 
-async fn list(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Value>, ApiError> {
+/// `?project=<slug>` : app d'un projet (namespace `<préfixe><projet>` en mode per-project).
+#[derive(Deserialize, Default)]
+struct ProjectQuery {
+    project: Option<String>,
+}
+
+fn app_ref(name: String, q: &ProjectQuery) -> AppRef {
+    AppRef::new(name, q.project.as_deref())
+}
+
+async fn list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<ProjectQuery>,
+) -> Result<Json<Value>, ApiError> {
     require_admin(&state, &headers).await?;
     let rt = runtime()?;
-    let apps = rt.list().await.map_err(kube_err)?;
-    Ok(Json(json!({ "data": apps, "namespace": rt.namespace() })))
+    let project = q
+        .project
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty());
+    let apps = rt.list(project).await.map_err(kube_err)?;
+    Ok(Json(json!({
+        "data": apps,
+        "namespace_mode": rt.defaults().namespace_mode,
+        "namespace": rt.defaults().namespace_for(project),
+    })))
 }
 
 #[derive(Deserialize, Default)]
@@ -135,11 +163,14 @@ async fn deploy(
 ) -> Result<Json<Value>, ApiError> {
     require_admin(&state, &headers).await?;
     let rt = runtime()?;
+    let mut spec = spec;
+    spec.normalize()
+        .map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))))?;
     let mut outcome = rt.deploy(&spec).await.map_err(kube_err)?;
     if q.wait {
         let secs = q.timeout.unwrap_or(120).clamp(5, 600);
         outcome.status = rt
-            .wait_rollout(&outcome.name, Duration::from_secs(secs))
+            .wait_rollout(&spec.app_ref(), Duration::from_secs(secs))
             .await
             .map_err(kube_err)?;
     }
@@ -150,15 +181,20 @@ async fn status(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(name): Path<String>,
+    Query(pq): Query<ProjectQuery>,
 ) -> Result<Json<Value>, ApiError> {
     require_admin(&state, &headers).await?;
-    let st = runtime()?.status(&name).await.map_err(kube_err)?;
+    let st = runtime()?
+        .status(&app_ref(name, &pq))
+        .await
+        .map_err(kube_err)?;
     Ok(Json(json!({ "data": st })))
 }
 
 #[derive(Deserialize, Default)]
 struct LogsQuery {
     tail: Option<u32>,
+    project: Option<String>,
 }
 
 async fn logs(
@@ -169,7 +205,10 @@ async fn logs(
 ) -> Result<Json<Value>, ApiError> {
     require_admin(&state, &headers).await?;
     let out = runtime()?
-        .logs(&name, q.tail.unwrap_or(200))
+        .logs(
+            &AppRef::new(name, q.project.as_deref()),
+            q.tail.unwrap_or(200),
+        )
         .await
         .map_err(kube_err)?;
     Ok(Json(json!({ "data": out })))
@@ -179,9 +218,13 @@ async fn stop(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(name): Path<String>,
+    Query(pq): Query<ProjectQuery>,
 ) -> Result<Json<Value>, ApiError> {
     require_admin(&state, &headers).await?;
-    let st = runtime()?.stop(&name).await.map_err(kube_err)?;
+    let st = runtime()?
+        .stop(&app_ref(name, &pq))
+        .await
+        .map_err(kube_err)?;
     Ok(Json(json!({ "ok": true, "data": st })))
 }
 
@@ -189,9 +232,13 @@ async fn start(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(name): Path<String>,
+    Query(pq): Query<ProjectQuery>,
 ) -> Result<Json<Value>, ApiError> {
     require_admin(&state, &headers).await?;
-    let st = runtime()?.start(&name).await.map_err(kube_err)?;
+    let st = runtime()?
+        .start(&app_ref(name, &pq))
+        .await
+        .map_err(kube_err)?;
     Ok(Json(json!({ "ok": true, "data": st })))
 }
 
@@ -199,9 +246,13 @@ async fn restart(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(name): Path<String>,
+    Query(pq): Query<ProjectQuery>,
 ) -> Result<Json<Value>, ApiError> {
     require_admin(&state, &headers).await?;
-    let st = runtime()?.restart(&name).await.map_err(kube_err)?;
+    let st = runtime()?
+        .restart(&app_ref(name, &pq))
+        .await
+        .map_err(kube_err)?;
     Ok(Json(json!({ "ok": true, "data": st })))
 }
 
@@ -209,8 +260,12 @@ async fn remove(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(name): Path<String>,
+    Query(pq): Query<ProjectQuery>,
 ) -> Result<Json<Value>, ApiError> {
     require_admin(&state, &headers).await?;
-    let removed = runtime()?.remove(&name).await.map_err(kube_err)?;
+    let removed = runtime()?
+        .remove(&app_ref(name, &pq))
+        .await
+        .map_err(kube_err)?;
     Ok(Json(json!({ "ok": true, "removed": removed })))
 }

@@ -1,0 +1,32 @@
+# Traefik pour DevForge (chart officiel traefik/traefik, testé en 42.2.0 / Traefik v3.7) :
+#   helm repo add traefik https://traefik.github.io/charts && helm repo update
+#   helm install traefik traefik/traefik -n traefik --create-namespace \
+#     -f deploy/kubernetes/traefik-values.yaml
+# Crée l'IngressClass « traefik » (par défaut du cluster), utilisée par DevForge.
+# k3s embarque déjà Traefik : inutile de le réinstaller (IngressClass « traefik » présente).
+
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+  name: traefik
+
+providers:
+  kubernetesIngress:
+    enabled: true
+    # Rapporte l'adresse du Service dans le statut des Ingress.
+    publishedService:
+      enabled: true
+
+# Exposition : ClusterIP derrière le tunnel Cloudflare (cloudflared → traefik.traefik:80).
+# Sans tunnel : type LoadBalancer (MetalLB, cloud) ou NodePort (ports 30080/30443).
+service:
+  spec:
+    type: ClusterIP
+#    type: NodePort
+ports:
+  web:
+    exposedPort: 80
+#    nodePort: 30080
+  websecure:
+    exposedPort: 443
+#    nodePort: 30443

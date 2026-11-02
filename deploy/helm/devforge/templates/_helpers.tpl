@@ -41,6 +41,15 @@ app.kubernetes.io/component: server
 {{- default .Release.Namespace .Values.apps.namespace }}
 {{- end }}
 
+{{- /* « per-project » ou « single » (valeur normalisée pour le serveur). */}}
+{{- define "devforge.namespaceMode" -}}
+{{- $m := lower (toString .Values.apps.namespaceMode) | replace "_" "-" }}
+{{- if or (eq $m "single") (eq $m "namespace") }}single
+{{- else if or (eq $m "perproject") (eq $m "per-project") (eq $m "project") }}per-project
+{{- else }}{{ fail (printf "apps.namespaceMode invalide : %s (perProject|single)" .Values.apps.namespaceMode) }}
+{{- end }}
+{{- end }}
+
 {{- define "devforge.pgName" -}}
 {{- printf "%s-postgres" (include "devforge.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}

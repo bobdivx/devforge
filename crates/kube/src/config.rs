@@ -4,24 +4,73 @@
 //! `/var/run/secrets/kubernetes.io/serviceaccount/` + `KUBERNETES_SERVICE_HOST/PORT`.
 //!
 //! Variables (toutes optionnelles) :
-//! - `DEVFORGE_KUBE_NAMESPACE` : namespace des apps (défaut : namespace du pod, sinon `devforge-apps`)
+//! - `DEVFORGE_KUBE_NAMESPACE_MODE` : `per-project` (défaut : un namespace `<préfixe><projet>`
+//!   par projet, créé à la demande) ou `single` (toutes les apps dans `DEVFORGE_KUBE_NAMESPACE`)
+//! - `DEVFORGE_KUBE_NAMESPACE_PREFIX` : préfixe des namespaces de projet (défaut `devforge-`)
+//! - `DEVFORGE_KUBE_POD_SECURITY` : niveau PodSecurity posé sur les namespaces créés
+//!   (`restricted` par défaut, `baseline`, `privileged`)
+//! - `DEVFORGE_KUBE_NAMESPACE` : namespace des apps sans projet / mode `single`
+//!   (défaut : namespace du pod, sinon `devforge-apps`)
 //! - `DEVFORGE_KUBE_API_URL`, `DEVFORGE_KUBE_TOKEN_FILE`, `DEVFORGE_KUBE_CA_FILE` : hors cluster
 //! - `DEVFORGE_KUBE_INSECURE_SKIP_TLS_VERIFY=1` : dev uniquement
-//! - `DEVFORGE_KUBE_INGRESS_CLASS`, `DEVFORGE_KUBE_IMAGE_PULL_SECRET`,
-//!   `DEVFORGE_KUBE_CLUSTER_ISSUER` : valeurs par défaut des apps
+//! - `DEVFORGE_KUBE_INGRESS_CLASS` (défaut `traefik`, `none` → classe par défaut du cluster),
+//!   `DEVFORGE_KUBE_IMAGE_PULL_SECRET`, `DEVFORGE_KUBE_CLUSTER_ISSUER` : valeurs par défaut des apps
 
 use std::path::PathBuf;
 
 const SA_DIR: &str = "/var/run/secrets/kubernetes.io/serviceaccount";
 pub const DEFAULT_NAMESPACE: &str = "devforge-apps";
+pub const DEFAULT_NAMESPACE_PREFIX: &str = "devforge-";
+pub const DEFAULT_INGRESS_CLASS: &str = "traefik";
+pub const DEFAULT_POD_SECURITY: &str = "restricted";
+
+/// Où vivent les apps.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NamespaceMode {
+    /// Un namespace par projet (`<préfixe><projet>`), créé à la demande. Défaut.
+    #[default]
+    PerProject,
+    /// Toutes les apps dans un namespace unique (RBAC namespacé, sans droits cluster).
+    Single,
+}
+
+impl NamespaceMode {
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "per-project" | "perproject" | "project" => Some(Self::PerProject),
+            "single" => Some(Self::Single),
+            _ => None,
+        }
+    }
+}
 
 /// Valeurs appliquées quand la spec de l'app ne les précise pas.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KubeDefaults {
+    /// Namespace des apps sans projet (et de toutes les apps en mode `single`).
     pub namespace: String,
+    pub namespace_mode: NamespaceMode,
+    pub namespace_prefix: String,
+    /// Niveau PodSecurity des namespaces créés par DevForge.
+    pub pod_security: String,
     pub ingress_class: Option<String>,
     pub image_pull_secret: Option<String>,
     pub cluster_issuer: Option<String>,
+}
+
+impl Default for KubeDefaults {
+    fn default() -> Self {
+        Self {
+            namespace: DEFAULT_NAMESPACE.into(),
+            namespace_mode: NamespaceMode::default(),
+            namespace_prefix: DEFAULT_NAMESPACE_PREFIX.into(),
+            pod_security: DEFAULT_POD_SECURITY.into(),
+            ingress_class: Some(DEFAULT_INGRESS_CLASS.into()),
+            image_pull_secret: None,
+            cluster_issuer: None,
+        }
+    }
 }
 
 impl KubeDefaults {
@@ -33,15 +82,48 @@ impl KubeDefaults {
     }
 
     pub fn from_env() -> Self {
+        let ingress_class = match env_opt("DEVFORGE_KUBE_INGRESS_CLASS") {
+            None => Some(DEFAULT_INGRESS_CLASS.to_string()),
+            Some(v) if v.eq_ignore_ascii_case("none") || v == "-" => None,
+            Some(v) => Some(v),
+        };
+        let pod_security = env_opt("DEVFORGE_KUBE_POD_SECURITY")
+            .map(|v| v.to_ascii_lowercase())
+            .filter(|v| matches!(v.as_str(), "restricted" | "baseline" | "privileged"))
+            .unwrap_or_else(|| DEFAULT_POD_SECURITY.into());
         Self {
             namespace: env_opt("DEVFORGE_KUBE_NAMESPACE")
                 .or_else(|| read_trimmed(&PathBuf::from(SA_DIR).join("namespace")))
                 .unwrap_or_else(|| DEFAULT_NAMESPACE.into()),
-            ingress_class: env_opt("DEVFORGE_KUBE_INGRESS_CLASS"),
+            namespace_mode: env_opt("DEVFORGE_KUBE_NAMESPACE_MODE")
+                .and_then(|v| NamespaceMode::parse(&v))
+                .unwrap_or_default(),
+            namespace_prefix: env_opt("DEVFORGE_KUBE_NAMESPACE_PREFIX")
+                .filter(|p| valid_prefix(p))
+                .unwrap_or_else(|| DEFAULT_NAMESPACE_PREFIX.into()),
+            pod_security,
+            ingress_class,
             image_pull_secret: env_opt("DEVFORGE_KUBE_IMAGE_PULL_SECRET"),
             cluster_issuer: env_opt("DEVFORGE_KUBE_CLUSTER_ISSUER"),
         }
     }
+
+    /// Namespace d'une app. `project` doit déjà être validé (label DNS).
+    pub fn namespace_for(&self, project: Option<&str>) -> String {
+        match (self.namespace_mode, project) {
+            (NamespaceMode::PerProject, Some(p)) => format!("{}{p}", self.namespace_prefix),
+            _ => self.namespace.clone(),
+        }
+    }
+}
+
+/// Préfixe : minuscules, chiffres, '-', 1–20 caractères, commence par une lettre.
+fn valid_prefix(p: &str) -> bool {
+    !p.is_empty()
+        && p.len() <= 20
+        && p.starts_with(|c: char| c.is_ascii_lowercase())
+        && p.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Connexion à l'API server. Le jeton est relu à chaque requête (jetons projetés tournants)
@@ -139,6 +221,25 @@ fn read_trimmed(p: &std::path::Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn namespace_per_project_and_single() {
+        let d = KubeDefaults::default();
+        assert_eq!(d.namespace_for(Some("blog")), "devforge-blog");
+        assert_eq!(d.namespace_for(None), "devforge-apps");
+        assert_eq!(d.ingress_class.as_deref(), Some("traefik"));
+        let single = KubeDefaults {
+            namespace_mode: NamespaceMode::Single,
+            ..KubeDefaults::new("apps")
+        };
+        assert_eq!(single.namespace_for(Some("blog")), "apps");
+        assert_eq!(
+            NamespaceMode::parse("per_project"),
+            Some(NamespaceMode::PerProject)
+        );
+        assert_eq!(NamespaceMode::parse("SINGLE"), Some(NamespaceMode::Single));
+        assert!(valid_prefix("df-") && !valid_prefix("-x") && !valid_prefix("Df"));
+    }
 
     #[test]
     fn debug_never_prints_ca_or_token() {

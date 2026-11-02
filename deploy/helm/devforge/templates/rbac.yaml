@@ -1,13 +1,6 @@
-{{- /* Droits limités au namespace des apps : rien au niveau cluster. */}}
 {{- $ns := include "devforge.appsNamespace" . }}
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: {{ include "devforge.fullname" . }}-apps
-  namespace: {{ $ns }}
-  labels:
-    {{- include "devforge.labels" . | nindent 4 }}
-rules:
+{{- /* Règles communes : ressources des apps (Deployment, Service, Secret, Ingress) et lecture des pods/logs. */}}
+{{- define "devforge.appRules" }}
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -26,6 +19,52 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
+{{- end }}
+{{- if eq (include "devforge.namespaceMode" .) "per-project" }}
+{{- /*
+  Namespace par projet : les namespaces sont créés à la demande, donc droits au niveau
+  cluster. Garde-fou côté code : DevForge n'agit que dans `<préfixe><projet>` ou le
+  namespace par défaut, jamais dans un namespace existant non étiqueté
+  app.kubernetes.io/managed-by=devforge, et seulement sur des ressources qu'il a créées.
+  Pour un RBAC strictement namespacé : apps.namespaceMode=single.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "devforge.fullname" . }}-{{ .Release.Namespace }}-apps
+  labels:
+    {{- include "devforge.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "create", "patch"]
+  {{- include "devforge.appRules" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "devforge.fullname" . }}-{{ .Release.Namespace }}-apps
+  labels:
+    {{- include "devforge.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "devforge.fullname" . }}-{{ .Release.Namespace }}-apps
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "devforge.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+{{- /* Mode single : droits limités au namespace des apps, rien au niveau cluster. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "devforge.fullname" . }}-apps
+  namespace: {{ $ns }}
+  labels:
+    {{- include "devforge.labels" . | nindent 4 }}
+rules:
+  {{- include "devforge.appRules" . }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -42,3 +81,4 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "devforge.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- end }}

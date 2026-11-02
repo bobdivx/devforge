@@ -89,6 +89,46 @@ pub struct AppSpec {
     /// Lien optionnel vers un projet DevForge (label `devforge.io/project`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_uuid: Option<String>,
+    /// Projet (slug DNS) : en mode `per-project`, l'app vit dans le namespace
+    /// `<préfixe><projet>` (ex. `devforge-blog`). Absent → namespace par défaut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+}
+
+/// Référence d'une app existante : nom + projet (namespace).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppRef {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+}
+
+impl AppRef {
+    pub fn new(name: impl Into<String>, project: Option<&str>) -> Self {
+        Self {
+            name: name.into(),
+            project: project
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty()),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if !is_dns_label(&self.name) || self.name.len() > MAX_NAME_LEN {
+            return Err(format!("nom d'app invalide ({})", self.name));
+        }
+        validate_project(self.project.as_deref())
+    }
+}
+
+/// Slug de projet : label DNS, `MAX_NAME_LEN` caractères max (préfixe ≤ 20 → namespace ≤ 63).
+pub fn validate_project(project: Option<&str>) -> Result<(), String> {
+    match project {
+        Some(p) if !is_dns_label(p) || p.len() > MAX_NAME_LEN => Err(format!(
+            "projet invalide ({p}) — minuscules, chiffres et '-', {MAX_NAME_LEN} caractères max"
+        )),
+        _ => Ok(()),
+    }
 }
 
 impl std::fmt::Debug for AppSpec {
@@ -109,6 +149,7 @@ impl std::fmt::Debug for AppSpec {
             .field("run_as_non_root", &self.run_as_non_root)
             .field("run_as_user", &self.run_as_user)
             .field("project_uuid", &self.project_uuid)
+            .field("project", &self.project)
             .finish()
     }
 }
@@ -132,7 +173,12 @@ impl AppSpec {
             run_as_non_root: true,
             run_as_user: None,
             project_uuid: None,
+            project: None,
         }
+    }
+
+    pub fn app_ref(&self) -> AppRef {
+        AppRef::new(&self.name, self.project.as_deref())
     }
 
     pub fn secret_name(&self) -> String {
@@ -156,6 +202,10 @@ impl AppSpec {
         trim_opt(&mut self.image_pull_secret);
         trim_opt(&mut self.ingress_class);
         trim_opt(&mut self.project_uuid);
+        trim_opt(&mut self.project);
+        if let Some(p) = self.project.as_mut() {
+            *p = p.to_ascii_lowercase();
+        }
         if let Some(h) = self.host.as_mut() {
             *h = h.to_ascii_lowercase();
         }
@@ -181,6 +231,7 @@ impl AppSpec {
             ));
         }
         validate_image(&self.image)?;
+        validate_project(self.project.as_deref())?;
         if self.port == 0 {
             return Err("port invalide (1-65535)".into());
         }

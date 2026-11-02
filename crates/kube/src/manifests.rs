@@ -14,6 +14,35 @@ pub const ANNOTATION_CONFIG_HASH: &str = "devforge.io/config-hash";
 pub const ANNOTATION_REPLICAS: &str = "devforge.io/replicas";
 pub const ANNOTATION_RESTARTED_AT: &str = "kubectl.kubernetes.io/restartedAt";
 pub const LABEL_PROJECT: &str = "devforge.io/project";
+/// Slug du projet propriétaire d'un namespace créé par DevForge.
+pub const LABEL_PROJECT_NAME: &str = "devforge.io/project-name";
+
+/// Délai `preStop` avant l'arrêt d'un pod (retrait de l'endpoint côté ingress).
+pub const PRESTOP_SLEEP_SECONDS: u64 = 5;
+
+/// Namespace de projet créé à la demande (mode `per-project`), avec labels PodSecurity.
+pub fn namespace(name: &str, project: Option<&str>, pod_security: &str) -> Value {
+    let mut labels = Map::new();
+    labels.insert(LABEL_MANAGED_BY.into(), json!(FIELD_MANAGER));
+    if let Some(p) = project {
+        labels.insert(LABEL_PROJECT_NAME.into(), json!(p));
+    }
+    for mode in ["enforce", "audit", "warn"] {
+        labels.insert(
+            format!("pod-security.kubernetes.io/{mode}"),
+            json!(pod_security),
+        );
+    }
+    labels.insert(
+        "pod-security.kubernetes.io/enforce-version".into(),
+        json!("latest"),
+    );
+    json!({
+        "apiVersion": "v1",
+        "kind": "Namespace",
+        "metadata": { "name": name, "labels": labels }
+    })
+}
 
 /// Manifests d'une app. `ingress` / `secret` sont `None` quand non requis
 /// (ils sont alors supprimés du cluster au déploiement).
@@ -71,6 +100,9 @@ pub fn labels(spec: &AppSpec) -> Map<String, Value> {
     m.insert(LABEL_APP.into(), json!(spec.name));
     if let Some(p) = &spec.project_uuid {
         m.insert(LABEL_PROJECT.into(), json!(p));
+    }
+    if let Some(p) = &spec.project {
+        m.insert(LABEL_PROJECT_NAME.into(), json!(p));
     }
     m
 }
@@ -177,6 +209,10 @@ pub fn deployment(spec: &AppSpec, d: &KubeDefaults) -> Value {
         "ports": [{ "name": "http", "containerPort": spec.port, "protocol": "TCP" }],
         "readinessProbe": readiness,
         "livenessProbe": liveness,
+        // Rolling update sans coupure : le pod sortant continue de servir le temps que
+        // l'ingress controller retire son endpoint (sinon 502 / timeouts constatés sur k3s +
+        // Traefik). Action `sleep` native (Kubernetes ≥ 1.30) : marche sans shell dans l'image.
+        "lifecycle": { "preStop": { "sleep": { "seconds": PRESTOP_SLEEP_SECONDS } } },
         "securityContext": {
             "allowPrivilegeEscalation": false,
             "capabilities": { "drop": ["ALL"] }
@@ -207,6 +243,7 @@ pub fn deployment(spec: &AppSpec, d: &KubeDefaults) -> Value {
 
     let mut pod_spec = json!({
         "automountServiceAccountToken": false,
+        "terminationGracePeriodSeconds": PRESTOP_SLEEP_SECONDS + 30,
         "enableServiceLinks": false,
         "securityContext": pod_sc,
         "containers": [container],
@@ -227,7 +264,7 @@ pub fn deployment(spec: &AppSpec, d: &KubeDefaults) -> Value {
         "kind": "Deployment",
         "metadata": {
             "name": spec.name,
-            "namespace": d.namespace,
+            "namespace": d.namespace_for(spec.project.as_deref()),
             "labels": lbl,
             "annotations": { ANNOTATION_REPLICAS: spec.replicas.max(1).to_string() }
         },
@@ -255,7 +292,7 @@ pub fn service(spec: &AppSpec, d: &KubeDefaults) -> Value {
     json!({
         "apiVersion": "v1",
         "kind": "Service",
-        "metadata": { "name": spec.name, "namespace": d.namespace, "labels": labels(spec) },
+        "metadata": { "name": spec.name, "namespace": d.namespace_for(spec.project.as_deref()), "labels": labels(spec) },
         "spec": {
             "type": "ClusterIP",
             "selector": selector(spec),
@@ -299,7 +336,7 @@ pub fn ingress(spec: &AppSpec, d: &KubeDefaults) -> Option<Value> {
             json!([{ "hosts": [host], "secretName": secret }]),
         );
     }
-    let mut meta = json!({ "name": spec.name, "namespace": d.namespace, "labels": labels(spec) });
+    let mut meta = json!({ "name": spec.name, "namespace": d.namespace_for(spec.project.as_deref()), "labels": labels(spec) });
     if !annotations.is_empty() {
         meta.as_object_mut()
             .expect("metadata object")
@@ -321,7 +358,7 @@ pub fn secret(spec: &AppSpec, d: &KubeDefaults) -> Option<Value> {
         "apiVersion": "v1",
         "kind": "Secret",
         "type": "Opaque",
-        "metadata": { "name": spec.secret_name(), "namespace": d.namespace, "labels": labels(spec) },
+        "metadata": { "name": spec.secret_name(), "namespace": d.namespace_for(spec.project.as_deref()), "labels": labels(spec) },
         "stringData": spec.secrets
     }))
 }
@@ -329,7 +366,7 @@ pub fn secret(spec: &AppSpec, d: &KubeDefaults) -> Option<Value> {
 /// Rend tous les manifests (la spec doit avoir été validée).
 pub fn render(spec: &AppSpec, d: &KubeDefaults) -> RenderedManifests {
     RenderedManifests {
-        namespace: d.namespace.clone(),
+        namespace: d.namespace_for(spec.project.as_deref()),
         deployment: deployment(spec, d),
         service: service(spec, d),
         ingress: ingress(spec, d),
@@ -363,6 +400,29 @@ mod tests {
         assert_ne!(h1, h2);
         assert_eq!(h2.len(), 16);
         assert!(!h2.contains("v2"));
+    }
+
+    #[test]
+    fn project_app_goes_to_its_own_namespace_with_traefik() {
+        let mut spec = AppSpec::new("web", "nginx:1");
+        spec.project = Some("shop".into());
+        spec.host = Some("shop.example.com".into());
+        let r = render(&spec, &KubeDefaults::new("devforge-apps"));
+        assert_eq!(r.namespace, "devforge-shop");
+        assert_eq!(r.deployment["metadata"]["namespace"], "devforge-shop");
+        assert_eq!(
+            r.deployment["metadata"]["labels"][LABEL_PROJECT_NAME],
+            "shop"
+        );
+        let ing = r.ingress.expect("ingress");
+        assert_eq!(ing["metadata"]["namespace"], "devforge-shop");
+        assert_eq!(ing["spec"]["ingressClassName"], "traefik");
+        let ns = namespace("devforge-shop", Some("shop"), "restricted");
+        assert_eq!(
+            ns["metadata"]["labels"]["pod-security.kubernetes.io/enforce"],
+            "restricted"
+        );
+        assert_eq!(ns["metadata"]["labels"][LABEL_MANAGED_BY], FIELD_MANAGER);
     }
 
     #[test]

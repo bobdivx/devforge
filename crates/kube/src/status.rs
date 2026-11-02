@@ -25,6 +25,9 @@ pub struct PodStatus {
 pub struct AppStatus {
     pub name: String,
     pub namespace: String,
+    /// Projet (label `devforge.io/project-name`), si l'app en a un.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
     /// `absent` | `stopped` | `progressing` | `running` | `degraded`
     pub phase: String,
     pub healthy: bool,
@@ -129,6 +132,7 @@ pub fn app_status(
         return AppStatus {
             name: name.into(),
             namespace: namespace.into(),
+            project: None,
             phase: "absent".into(),
             healthy: false,
             rollout_complete: false,
@@ -198,9 +202,15 @@ pub fn app_status(
             format!("rollout en cours : {updated}/{desired} à jour, {available} disponibles"),
         )
     };
+    let project = dep
+        .pointer("/metadata/labels")
+        .and_then(|l| l.get(crate::manifests::LABEL_PROJECT_NAME))
+        .and_then(Value::as_str)
+        .map(String::from);
     AppStatus {
         name: name.into(),
         namespace: namespace.into(),
+        project,
         phase: phase.into(),
         healthy: phase == "running",
         rollout_complete,
