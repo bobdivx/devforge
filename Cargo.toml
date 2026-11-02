@@ -23,6 +23,7 @@ members = [
     "crates/cron",
     "crates/cluster",
     "crates/memory",
+    "crates/kube",
 ]
 
 [workspace.package]
@@ -67,6 +68,7 @@ devforge-update = { path = "crates/update" }
 devforge-runner = { path = "crates/runner" }
 devforge-cron = { path = "crates/cron" }
 devforge-cluster = { path = "crates/cluster" }
+devforge-kube = { path = "crates/kube" }
 
 [workspace.metadata.cargo-machete]
 ignored = ["idna"]

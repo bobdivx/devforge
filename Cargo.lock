@@ -777,6 +777,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "devforge-kube"
+version = "2.0.278"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "devforge-shared",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "devforge-llm"
 version = "2.0.278"
 dependencies = [
@@ -890,6 +905,7 @@ dependencies = [
  "devforge-domain",
  "devforge-env",
  "devforge-github",
+ "devforge-kube",
  "devforge-llm",
  "devforge-mcp",
  "devforge-memory",

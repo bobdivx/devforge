@@ -6,7 +6,9 @@ C’est un **PaaS self-hosted** (Docker, domaines, env, backups) **plus** un bui
 
 ## Faut-il Kubernetes / k3s ?
 
-Non. v1 = un leader SQLite + workers DevForge (process / Docker). Pas de k8s.
+Non. Le mode par défaut reste un leader + workers DevForge (process / Docker), sans Kubernetes.
+
+Kubernetes est **optionnel** et en **phase 1 (expérimental)** : chart Helm pour installer DevForge dans un cluster (Talos testé en priorité) et déploiement d'apps depuis une image déjà construite (`DEVFORGE_RUNTIME=kubernetes`). Pas encore de build dans le cluster ni d'intégration UI. [[Kubernetes]]
 
 ## Comment ajouter une deuxième machine ?
 

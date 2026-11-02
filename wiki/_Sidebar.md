@@ -5,6 +5,7 @@
 - [[USB / appliance|USB]]
 - [[Premier démarrage|Premier-demarrage]]
 - [[Cluster]]
+- [[Kubernetes]]
 
 **Produit**
 - [[Interface]]

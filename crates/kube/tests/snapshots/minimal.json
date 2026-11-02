@@ -1,0 +1,131 @@
+{
+  "apiVersion": "v1",
+  "items": [
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "annotations": {
+          "devforge.io/replicas": "1"
+        },
+        "labels": {
+          "app.kubernetes.io/instance": "hello",
+          "app.kubernetes.io/managed-by": "devforge",
+          "app.kubernetes.io/name": "hello",
+          "devforge.io/app": "hello"
+        },
+        "name": "hello",
+        "namespace": "devforge-apps"
+      },
+      "spec": {
+        "progressDeadlineSeconds": 600,
+        "replicas": 1,
+        "revisionHistoryLimit": 5,
+        "selector": {
+          "matchLabels": {
+            "devforge.io/app": "hello"
+          }
+        },
+        "strategy": {
+          "rollingUpdate": {
+            "maxSurge": 1,
+            "maxUnavailable": 0
+          },
+          "type": "RollingUpdate"
+        },
+        "template": {
+          "metadata": {
+            "annotations": {
+              "devforge.io/config-hash": "e3b0c44298fc1c14"
+            },
+            "labels": {
+              "app.kubernetes.io/instance": "hello",
+              "app.kubernetes.io/managed-by": "devforge",
+              "app.kubernetes.io/name": "hello",
+              "devforge.io/app": "hello"
+            }
+          },
+          "spec": {
+            "automountServiceAccountToken": false,
+            "containers": [
+              {
+                "image": "ghcr.io/bobdivx/hello:1.0.0",
+                "imagePullPolicy": "IfNotPresent",
+                "livenessProbe": {
+                  "failureThreshold": 3,
+                  "initialDelaySeconds": 30,
+                  "periodSeconds": 20,
+                  "tcpSocket": {
+                    "port": "http"
+                  },
+                  "timeoutSeconds": 5
+                },
+                "name": "app",
+                "ports": [
+                  {
+                    "containerPort": 8080,
+                    "name": "http",
+                    "protocol": "TCP"
+                  }
+                ],
+                "readinessProbe": {
+                  "failureThreshold": 3,
+                  "initialDelaySeconds": 5,
+                  "periodSeconds": 10,
+                  "tcpSocket": {
+                    "port": "http"
+                  },
+                  "timeoutSeconds": 5
+                },
+                "securityContext": {
+                  "allowPrivilegeEscalation": false,
+                  "capabilities": {
+                    "drop": [
+                      "ALL"
+                    ]
+                  }
+                }
+              }
+            ],
+            "enableServiceLinks": false,
+            "securityContext": {
+              "runAsNonRoot": true,
+              "seccompProfile": {
+                "type": "RuntimeDefault"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "labels": {
+          "app.kubernetes.io/instance": "hello",
+          "app.kubernetes.io/managed-by": "devforge",
+          "app.kubernetes.io/name": "hello",
+          "devforge.io/app": "hello"
+        },
+        "name": "hello",
+        "namespace": "devforge-apps"
+      },
+      "spec": {
+        "ports": [
+          {
+            "name": "http",
+            "port": 80,
+            "protocol": "TCP",
+            "targetPort": "http"
+          }
+        ],
+        "selector": {
+          "devforge.io/app": "hello"
+        },
+        "type": "ClusterIP"
+      }
+    }
+  ],
+  "kind": "List"
+}

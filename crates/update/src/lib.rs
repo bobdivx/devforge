@@ -94,6 +94,10 @@ impl UpdateConfig {
     }
 }
 
+/// En mode Kubernetes, l'auto-update Docker est désactivé : la version suit le chart Helm.
+pub const KUBERNETES_UPDATE_HINT: &str =
+    "DEVFORGE_RUNTIME=kubernetes : mise à jour via Helm (helm upgrade --set image.tag=…), pas via Docker.";
+
 fn detect_auto_mode() -> UpdateMode {
     if std::env::var("DEVFORGE_UPDATE_COMPOSE_FILE").is_ok() {
         return UpdateMode::Compose;
@@ -365,6 +369,9 @@ impl UpdateFacade {
 
     /// Prérequis manquants pour le mode courant (None = OK).
     fn mode_ready_hint(&self) -> Option<&'static str> {
+        if devforge_shared::runtime_backend::RuntimeBackend::from_env().is_kubernetes() {
+            return Some(KUBERNETES_UPDATE_HINT);
+        }
         match self.config.mode {
             UpdateMode::Compose | UpdateMode::Docker => None,
             UpdateMode::Binary => None,
@@ -464,6 +471,9 @@ impl UpdateFacade {
     }
 
     pub async fn start(&self, target: Option<String>) -> Result<UpdateJob> {
+        if devforge_shared::runtime_backend::RuntimeBackend::from_env().is_kubernetes() {
+            return Err(DevForgeError::Message(KUBERNETES_UPDATE_HINT.into()));
+        }
         {
             let guard = self.job.read().await;
             if let Some(j) = guard.as_ref() {

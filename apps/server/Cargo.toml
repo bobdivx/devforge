@@ -30,6 +30,7 @@ devforge-update = { workspace = true }
 devforge-runner = { workspace = true }
 devforge-cron = { workspace = true }
 devforge-cluster = { workspace = true }
+devforge-kube = { workspace = true }
 axum = { workspace = true }
 tower-http = { workspace = true }
 tokio = { workspace = true }

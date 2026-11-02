@@ -1,0 +1,237 @@
+{
+  "apiVersion": "v1",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Secret",
+      "metadata": {
+        "labels": {
+          "app.kubernetes.io/instance": "shop",
+          "app.kubernetes.io/managed-by": "devforge",
+          "app.kubernetes.io/name": "shop",
+          "devforge.io/app": "shop",
+          "devforge.io/project": "0b6f0c1e-1111-4222-8333-944445555666"
+        },
+        "name": "shop-env",
+        "namespace": "devforge-apps"
+      },
+      "stringData": {
+        "DATABASE_URL": "***"
+      },
+      "type": "Opaque"
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "annotations": {
+          "devforge.io/replicas": "2"
+        },
+        "labels": {
+          "app.kubernetes.io/instance": "shop",
+          "app.kubernetes.io/managed-by": "devforge",
+          "app.kubernetes.io/name": "shop",
+          "devforge.io/app": "shop",
+          "devforge.io/project": "0b6f0c1e-1111-4222-8333-944445555666"
+        },
+        "name": "shop",
+        "namespace": "devforge-apps"
+      },
+      "spec": {
+        "progressDeadlineSeconds": 600,
+        "replicas": 2,
+        "revisionHistoryLimit": 5,
+        "selector": {
+          "matchLabels": {
+            "devforge.io/app": "shop"
+          }
+        },
+        "strategy": {
+          "rollingUpdate": {
+            "maxSurge": 1,
+            "maxUnavailable": 0
+          },
+          "type": "RollingUpdate"
+        },
+        "template": {
+          "metadata": {
+            "annotations": {
+              "devforge.io/config-hash": "c1e42ffe0bb4eb06"
+            },
+            "labels": {
+              "app.kubernetes.io/instance": "shop",
+              "app.kubernetes.io/managed-by": "devforge",
+              "app.kubernetes.io/name": "shop",
+              "devforge.io/app": "shop",
+              "devforge.io/project": "0b6f0c1e-1111-4222-8333-944445555666"
+            }
+          },
+          "spec": {
+            "automountServiceAccountToken": false,
+            "containers": [
+              {
+                "env": [
+                  {
+                    "name": "NODE_ENV",
+                    "value": "production"
+                  },
+                  {
+                    "name": "PORT",
+                    "value": "3000"
+                  }
+                ],
+                "envFrom": [
+                  {
+                    "secretRef": {
+                      "name": "shop-env"
+                    }
+                  }
+                ],
+                "image": "ghcr.io/bobdivx/shop:sha-abc1234",
+                "imagePullPolicy": "IfNotPresent",
+                "livenessProbe": {
+                  "failureThreshold": 3,
+                  "httpGet": {
+                    "path": "/healthz",
+                    "port": "http"
+                  },
+                  "initialDelaySeconds": 30,
+                  "periodSeconds": 20,
+                  "timeoutSeconds": 5
+                },
+                "name": "app",
+                "ports": [
+                  {
+                    "containerPort": 3000,
+                    "name": "http",
+                    "protocol": "TCP"
+                  }
+                ],
+                "readinessProbe": {
+                  "failureThreshold": 3,
+                  "httpGet": {
+                    "path": "/healthz",
+                    "port": "http"
+                  },
+                  "initialDelaySeconds": 10,
+                  "periodSeconds": 10,
+                  "timeoutSeconds": 5
+                },
+                "resources": {
+                  "limits": {
+                    "cpu": "0.5",
+                    "memory": "512Mi"
+                  },
+                  "requests": {
+                    "memory": "512Mi"
+                  }
+                },
+                "securityContext": {
+                  "allowPrivilegeEscalation": false,
+                  "capabilities": {
+                    "drop": [
+                      "ALL"
+                    ]
+                  }
+                }
+              }
+            ],
+            "enableServiceLinks": false,
+            "imagePullSecrets": [
+              {
+                "name": "ghcr-pull"
+              }
+            ],
+            "securityContext": {
+              "runAsNonRoot": true,
+              "runAsUser": 1000,
+              "seccompProfile": {
+                "type": "RuntimeDefault"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "labels": {
+          "app.kubernetes.io/instance": "shop",
+          "app.kubernetes.io/managed-by": "devforge",
+          "app.kubernetes.io/name": "shop",
+          "devforge.io/app": "shop",
+          "devforge.io/project": "0b6f0c1e-1111-4222-8333-944445555666"
+        },
+        "name": "shop",
+        "namespace": "devforge-apps"
+      },
+      "spec": {
+        "ports": [
+          {
+            "name": "http",
+            "port": 80,
+            "protocol": "TCP",
+            "targetPort": "http"
+          }
+        ],
+        "selector": {
+          "devforge.io/app": "shop"
+        },
+        "type": "ClusterIP"
+      }
+    },
+    {
+      "apiVersion": "networking.k8s.io/v1",
+      "kind": "Ingress",
+      "metadata": {
+        "annotations": {
+          "cert-manager.io/cluster-issuer": "letsencrypt-prod"
+        },
+        "labels": {
+          "app.kubernetes.io/instance": "shop",
+          "app.kubernetes.io/managed-by": "devforge",
+          "app.kubernetes.io/name": "shop",
+          "devforge.io/app": "shop",
+          "devforge.io/project": "0b6f0c1e-1111-4222-8333-944445555666"
+        },
+        "name": "shop",
+        "namespace": "devforge-apps"
+      },
+      "spec": {
+        "ingressClassName": "traefik",
+        "rules": [
+          {
+            "host": "shop.example.com",
+            "http": {
+              "paths": [
+                {
+                  "backend": {
+                    "service": {
+                      "name": "shop",
+                      "port": {
+                        "number": 80
+                      }
+                    }
+                  },
+                  "path": "/",
+                  "pathType": "Prefix"
+                }
+              ]
+            }
+          }
+        ],
+        "tls": [
+          {
+            "hosts": [
+              "shop.example.com"
+            ],
+            "secretName": "shop-tls"
+          }
+        ]
+      }
+    }
+  ],
+  "kind": "List"
+}

@@ -109,6 +109,10 @@ L’écran Mise à jour de DevForge fait la même chose à partir de la release 
 
 Pour transformer une machine en nœud (leader ou worker) en bootant depuis une USB : [[USB]] et le kit [`deploy/usb/`](../deploy/usb/README.md) (`bootstrap.sh`, `prepare-kit.sh`, image `.img`).
 
+## Kubernetes (Helm) — phase 1
+
+Chart Helm `deploy/helm/devforge` pour installer DevForge dans un cluster (Talos, k3s, kind…) et déployer des apps depuis une image déjà construite. Expérimental : [[Kubernetes]].
+
 ## Réseau Docker / Traefik
 
 Pour que Traefik route les apps déployées, DevForge et les conteneurs `df-*` doivent partager un réseau :

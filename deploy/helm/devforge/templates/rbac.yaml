@@ -1,0 +1,44 @@
+{{- /* Droits limités au namespace des apps : rien au niveau cluster. */}}
+{{- $ns := include "devforge.appsNamespace" . }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "devforge.fullname" . }}-apps
+  namespace: {{ $ns }}
+  labels:
+    {{- include "devforge.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "devforge.fullname" . }}-apps
+  namespace: {{ $ns }}
+  labels:
+    {{- include "devforge.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "devforge.fullname" . }}-apps
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "devforge.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
