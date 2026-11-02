@@ -1106,3 +1106,85 @@ async fn images_go_multimodal_only_for_vision_models() {
         last.content
     );
 }
+
+/// Gate de test : aucun accord de 15 min, publication autonome activée ou non.
+struct AutonomousOnly(bool);
+
+#[async_trait]
+impl guard::PublishGate for AutonomousOnly {
+    async fn allowed(&self, _project_uuid: &str) -> bool {
+        false
+    }
+    async fn autonomous(&self, _project_uuid: &str) -> bool {
+        self.0
+    }
+}
+
+#[tokio::test]
+async fn autonomous_publish_lets_only_the_deploy_through() {
+    let mut reg = ToolRegistry::new();
+    reg.set_publish_gate(Arc::new(AutonomousOnly(true)));
+    let deploy = spy(
+        &mut reg,
+        "trigger_deploy",
+        json!({"ok": true, "deployment_uuid": "d1"}),
+    );
+    let sync = spy(&mut reg, "sync_workdir_to_github", json!({"ok": true}));
+    let env = spy(&mut reg, "upsert_env_var", json!({"ok": true}));
+    let cancel = spy(&mut reg, "cancel_deployment", json!({"ok": true}));
+    let turns = vec![
+        ScriptedLlmProvider::tool("c1", "trigger_deploy", json!({})),
+        ScriptedLlmProvider::tool("c2", "sync_workdir_to_github", json!({})),
+        ScriptedLlmProvider::tool("c3", "upsert_env_var", json!({"key": "A", "value": "b"})),
+        ScriptedLlmProvider::tool("c4", "cancel_deployment", json!({"deployment_uuid": "d1"})),
+        ScriptedLlmProvider::text("Mise en ligne lancée."),
+    ];
+    let (reply, _) = run(reg, turns, "publie la dernière version", ctx("coordinator")).await;
+    assert_eq!(deploy.load(Ordering::SeqCst), 1);
+    assert_eq!(sync.load(Ordering::SeqCst), 0);
+    assert_eq!(env.load(Ordering::SeqCst), 0);
+    assert_eq!(cancel.load(Ordering::SeqCst), 0);
+    for r in reply
+        .tool_calls
+        .iter()
+        .filter(|r| r.name != "trigger_deploy")
+    {
+        assert_eq!(r.result["code"], "publish_approval_required", "{}", r.name);
+    }
+}
+
+#[tokio::test]
+async fn autonomous_publish_also_covers_unattended_runs() {
+    let mut reg = ToolRegistry::new();
+    reg.set_publish_gate(Arc::new(AutonomousOnly(true)));
+    let deploy = spy(
+        &mut reg,
+        "trigger_deploy",
+        json!({"ok": true, "deployment_uuid": "d1"}),
+    );
+    let turns = vec![
+        ScriptedLlmProvider::tool("c1", "trigger_deploy", json!({})),
+        ScriptedLlmProvider::text("Mise en ligne lancée."),
+    ];
+    let mut c = ctx("coordinator");
+    c.unattended = true;
+    run(reg, turns, "réveil : nouvelle version", c).await;
+    assert_eq!(deploy.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn autonomous_publish_off_keeps_the_lock() {
+    let mut reg = ToolRegistry::new();
+    reg.set_publish_gate(Arc::new(AutonomousOnly(false)));
+    let deploy = spy(&mut reg, "trigger_deploy", json!({"ok": true}));
+    let turns = vec![
+        ScriptedLlmProvider::tool("c1", "trigger_deploy", json!({})),
+        ScriptedLlmProvider::text("Bloqué."),
+    ];
+    let (reply, _) = run(reg, turns, "publie", ctx("coordinator")).await;
+    assert_eq!(deploy.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        reply.tool_calls[0].result["code"],
+        "publish_approval_required"
+    );
+}

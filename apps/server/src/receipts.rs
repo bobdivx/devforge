@@ -112,6 +112,8 @@ pub fn action_label(action: &str) -> &'static str {
         "build" => "Reconstruire l'image",
         "cancel_deploy" => "Arrêter un déploiement",
         "publish_approval" => "Accord de publication à l'agent",
+        "autonomous_publish" => "Publication autonome de l'agent",
+        "autonomous_publish_setting" => "Réglage « publication autonome »",
         _ => "Action",
     }
 }
@@ -208,6 +210,80 @@ pub async fn record_publish_approval(
     };
     if let Err(e) = core::record_done(pool, &r).await {
         tracing::warn!(error = %e, "reçu d'accord non enregistré");
+    }
+}
+
+/// Journal d'une mise en ligne lancée par l'agent grâce à la publication autonome du projet :
+/// qui a activé le réglage, quand, et le déploiement (son issue finale est réconciliée).
+pub async fn record_autonomous_publish(
+    pool: &PgPool,
+    project: &Project,
+    setting: &devforge_agent::guard::AutonomousPublish,
+    deployment_uuid: &str,
+) -> Option<String> {
+    let enabled_by = setting
+        .enabled_by_label
+        .clone()
+        .unwrap_or_else(|| "un admin".into());
+    let r = NewReceipt {
+        workspace_uuid: Some(project.workspace_uuid.clone()),
+        project_uuid: Some(project.uuid.clone()),
+        project_name: Some(project.name.clone()),
+        action: "autonomous_publish".into(),
+        action_label: action_label("autonomous_publish").into(),
+        target: project.name.clone(),
+        version: project.git_branch.clone().filter(|b| !b.trim().is_empty()),
+        source: "agent".into(),
+        approved_by: setting.enabled_by.clone(),
+        approved_by_label: Some(format!("Publication autonome (activée par {enabled_by})")),
+        approved_at: chrono::DateTime::parse_from_rfc3339(setting.enabled_at.trim())
+            .ok()
+            .map(|d| d.with_timezone(&chrono::Utc)),
+        tool_name: Some("trigger_deploy".into()),
+        detail: Some(format!(
+            "Mise en ligne lancée par l'agent sans accord de 15 min (réglage activé par {enabled_by})."
+        )),
+        ..Default::default()
+    };
+    match core::begin(pool, &r).await {
+        Ok(uuid) => {
+            let _ = core::link_deployment(pool, &uuid, deployment_uuid).await;
+            Some(uuid)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "reçu de publication autonome non enregistré");
+            None
+        }
+    }
+}
+
+/// Changement du réglage « publication autonome » d'un projet (qui, quand, activé ou non).
+pub async fn record_autonomous_setting(
+    pool: &PgPool,
+    headers: &HeaderMap,
+    user: &UserRow,
+    project: &Project,
+    enabled: bool,
+) {
+    let r = NewReceipt {
+        workspace_uuid: Some(project.workspace_uuid.clone()),
+        project_uuid: Some(project.uuid.clone()),
+        project_name: Some(project.name.clone()),
+        action: "autonomous_publish_setting".into(),
+        action_label: action_label("autonomous_publish_setting").into(),
+        target: project.name.clone(),
+        source: source_from_headers(headers),
+        approved_by: Some(user.uuid.clone()),
+        approved_by_label: Some(user_label(user)),
+        detail: Some(if enabled {
+            "Activée : l'agent peut mettre ce projet en ligne sans accord de 15 min.".into()
+        } else {
+            "Désactivée : chaque mise en ligne de l'agent demande de nouveau un accord.".into()
+        }),
+        ..Default::default()
+    };
+    if let Err(e) = core::record_done(pool, &r).await {
+        tracing::warn!(error = %e, "reçu du réglage de publication autonome non enregistré");
     }
 }
 
@@ -354,6 +430,138 @@ mod tests {
     async fn deployment(pool: &PgPool, uuid: &str, status: &str, err: Option<&str>) {
         sqlx::query("INSERT INTO deployments (uuid, project_id, status, git_sha, error_summary, created_at, updated_at) VALUES ($1, 1, $2, 'abc1234', $3, 'x', 'x')")
             .bind(uuid).bind(status).bind(err).execute(pool).await.unwrap();
+    }
+
+    async fn project(pool: &PgPool, uuid: &str) -> Project {
+        sqlx::query_as::<_, Project>("SELECT * FROM projects WHERE uuid = $1")
+            .bind(uuid)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    fn admin() -> UserRow {
+        UserRow {
+            uuid: "u1".into(),
+            email: "m@example.org".into(),
+            name: "Mathieu".into(),
+            password_hash: String::new(),
+            role: "instance_admin".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn autonomous_publish_is_journaled_with_who_and_outcome() {
+        let pool = pool_with_projects().await;
+        let p1 = project(&pool, "p1").await;
+        devforge_agent::guard::set_autonomous_publish(
+            &pool,
+            "p1",
+            true,
+            Some("u1"),
+            Some("Mathieu"),
+        )
+        .await
+        .unwrap();
+        let setting = devforge_agent::guard::autonomous_publish(&pool, "p1")
+            .await
+            .unwrap();
+        deployment(&pool, "d-auto", "running", None).await;
+        let uuid = record_autonomous_publish(&pool, &p1, &setting, "d-auto")
+            .await
+            .unwrap();
+        let r = core::get(&pool, &uuid).await.unwrap().unwrap();
+        assert_eq!(r.action, "autonomous_publish");
+        assert_eq!(r.source, "agent");
+        assert_eq!(r.status, "executing");
+        assert_eq!(r.approved_by.as_deref(), Some("u1"));
+        assert!(r.approved_by_label.unwrap().contains("activée par Mathieu"));
+        assert_eq!(r.deployment_uuid.as_deref(), Some("d-auto"));
+        sqlx::query("UPDATE deployments SET status = 'success' WHERE uuid = 'd-auto'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        reconcile(&pool).await.unwrap();
+        assert_eq!(
+            core::get(&pool, &uuid).await.unwrap().unwrap().status,
+            "done"
+        );
+        // Visible dans le journal du workspace du projet.
+        let list = list_for_workspace(
+            &pool,
+            "ws1",
+            &ListQuery {
+                action: Some("autonomous_publish".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(list.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn autonomous_setting_change_leaves_a_receipt() {
+        let pool = pool_with_projects().await;
+        let p1 = project(&pool, "p1").await;
+        record_autonomous_setting(&pool, &HeaderMap::new(), &admin(), &p1, true).await;
+        record_autonomous_setting(&pool, &HeaderMap::new(), &admin(), &p1, false).await;
+        let list = list_for_workspace(
+            &pool,
+            "ws1",
+            &ListQuery {
+                action: Some("autonomous_publish_setting".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list
+            .iter()
+            .all(|r| r.status == "done" && r.approved_by_label.as_deref() == Some("Mathieu")));
+        assert!(list[0].detail.as_deref().unwrap().starts_with("Désactivée"));
+        assert!(list[1].detail.as_deref().unwrap().starts_with("Activée"));
+    }
+
+    #[test]
+    fn only_an_admin_in_the_ui_can_change_autonomous_publish() {
+        use crate::routes::autonomous_edit_refusal;
+        assert!(autonomous_edit_refusal("instance_admin", true).is_none());
+        assert!(autonomous_edit_refusal("instance_admin", false)
+            .unwrap()
+            .contains("interface"));
+        assert!(autonomous_edit_refusal("member", true)
+            .unwrap()
+            .contains("admin"));
+        assert!(autonomous_edit_refusal("member", false).is_some());
+    }
+
+    #[tokio::test]
+    async fn api_tokens_are_not_ui_sessions() {
+        let pool = pool_with_projects().await;
+        let later = (chrono::Utc::now() + chrono::Duration::days(1)).to_rfc3339();
+        let earlier = (chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+        for (token, exp) in [("sess-ok", &later), ("sess-old", &earlier)] {
+            sqlx::query("INSERT INTO sessions (token, user_uuid, expires_at, created_at) VALUES ($1, 'u1', $2, 'x')")
+                .bind(token)
+                .bind(exp)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        let h = |t: &str| {
+            let mut h = HeaderMap::new();
+            h.insert(
+                axum::http::header::AUTHORIZATION,
+                format!("Bearer {t}").parse().unwrap(),
+            );
+            h
+        };
+        assert!(crate::routes::is_ui_session(&pool, &h("sess-ok")).await);
+        assert!(!crate::routes::is_ui_session(&pool, &h("sess-old")).await);
+        assert!(!crate::routes::is_ui_session(&pool, &h("dfat_abc")).await);
+        assert!(!crate::routes::is_ui_session(&pool, &HeaderMap::new()).await);
     }
 
     #[tokio::test]
