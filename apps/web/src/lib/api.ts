@@ -28,6 +28,17 @@ export function ssoAuthorizeUrl(): string {
   return `${origin}/api/v1/auth/sso/authorize`;
 }
 
+/** Réglage par projet : l'agent peut mettre en ligne sans accord de 15 min (désactivé par défaut). */
+export type AutonomousPublish = {
+  enabled: boolean;
+  enabled_by_label?: string | null;
+  enabled_at?: string | null;
+  /** Admin de l'instance connecté à l'interface. */
+  can_edit: boolean;
+  /** Outils débloqués (aujourd'hui : trigger_deploy). */
+  covers?: string[];
+};
+
 export type ProjectTemplate = {
   id: string;
   name: string;
@@ -1713,6 +1724,13 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
+  autonomousPublish: (uuid: string) =>
+    request<{ data: AutonomousPublish }>(`/projects/${uuid}/autonomous-publish`),
+  setAutonomousPublish: (uuid: string, enabled: boolean) =>
+    request<{ ok: boolean; message: string; data: AutonomousPublish }>(
+      `/projects/${uuid}/autonomous-publish`,
+      { method: 'PUT', body: JSON.stringify({ enabled }) },
+    ),
   projectOidc: (uuid: string) =>
     request<{
       ok: boolean;

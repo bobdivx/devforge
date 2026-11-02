@@ -67,6 +67,9 @@ pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
         "CREATE TABLE IF NOT EXISTS project_publish_grants (project_uuid TEXT PRIMARY KEY, granted_at TEXT NOT NULL, expires_at TEXT NOT NULL)",
         "ALTER TABLE project_publish_grants ADD COLUMN IF NOT EXISTS granted_by TEXT NULL",
         "ALTER TABLE project_publish_grants ADD COLUMN IF NOT EXISTS granted_by_label TEXT NULL",
+        // Publication autonome : réglage par projet (absent = désactivé). Seul un admin
+        // connecté à l'interface le pose ; il ne débloque que `trigger_deploy`.
+        "CREATE TABLE IF NOT EXISTS project_autonomous_publish (project_uuid TEXT PRIMARY KEY, enabled_by TEXT NULL, enabled_by_label TEXT NULL, enabled_at TEXT NOT NULL)",
     ] {
         sqlx::query(sql).execute(pool).await?;
     }

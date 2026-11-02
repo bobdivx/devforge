@@ -19,6 +19,7 @@ import { RuntimeLogsPanel } from './RuntimeLogsPanel';
 import { ProjectSpecsModal } from './ProjectSpecsModal';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
 import { ProjectGitPanel } from './ProjectGitPanel';
+import { AutonomousPublishPanel } from './AutonomousPublishPanel';
 import { ProjectPreviewsPanel } from './ProjectPreviewsPanel';
 import { ProjectOidcPanel } from './ProjectOidcPanel';
 import { EnvBadge, ProjectBranchesPanel, isDevDeployment } from './ProjectBranchesPanel';
@@ -429,13 +430,16 @@ export function ProjectDetailPage(props: Props) {
         />
       )}
       {tab === 'git' && (
-        <ProjectGitPanel
-          projectUuid={uuid}
-          project={project}
-          onDeployed={() => {
-            void api.deployments(uuid).then((r) => setDeployments(r.data ?? []));
-          }}
-        />
+        <>
+          <ProjectGitPanel
+            projectUuid={uuid}
+            project={project}
+            onDeployed={() => {
+              void api.deployments(uuid).then((r) => setDeployments(r.data ?? []));
+            }}
+          />
+          <AutonomousPublishPanel projectUuid={uuid} />
+        </>
       )}
       {tab === 'actions' && (
         <ProjectActionsPanel

@@ -55,10 +55,24 @@ pub fn is_remote_write(tool: &str, args: &Value) -> bool {
     false
 }
 
+/// Outils que la « publication autonome » d'un projet débloque sans accord de 15 min.
+/// Uniquement la mise en ligne de la branche configurée : pousser sur GitHub, créer un dépôt,
+/// toucher aux variables de prod ou annuler un déploiement restent verrouillés.
+pub const AUTONOMOUS_TOOLS: &[&str] = &["trigger_deploy"];
+
+/// Le réglage « publication autonome » couvre-t-il cet outil ?
+pub fn autonomous_covers(tool: &str) -> bool {
+    AUTONOMOUS_TOOLS.contains(&tool)
+}
+
 /// Accord de publication en cours de validité pour un projet.
 #[async_trait]
 pub trait PublishGate: Send + Sync {
     async fn allowed(&self, project_uuid: &str) -> bool;
+    /// Publication autonome activée pour ce projet (réglage admin, désactivé par défaut).
+    async fn autonomous(&self, _project_uuid: &str) -> bool {
+        false
+    }
 }
 
 /// Gate réel : lit `project_publish_grants.expires_at` (RFC 3339, comparé à maintenant).
@@ -71,6 +85,94 @@ impl PublishGate for PgPublishGate {
     async fn allowed(&self, project_uuid: &str) -> bool {
         publish_grant_valid(&self.pool, project_uuid).await
     }
+    async fn autonomous(&self, project_uuid: &str) -> bool {
+        autonomous_publish(&self.pool, project_uuid).await.is_some()
+    }
+}
+
+/// Qui a activé la publication autonome d'un projet, et quand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutonomousPublish {
+    pub enabled_by: Option<String>,
+    pub enabled_by_label: Option<String>,
+    pub enabled_at: String,
+}
+
+/// Réglage « publication autonome » du projet (`None` = désactivé, la valeur par défaut).
+/// Une erreur de lecture vaut « désactivé » : le verrou reste fermé.
+pub async fn autonomous_publish(pool: &PgPool, project_uuid: &str) -> Option<AutonomousPublish> {
+    if project_uuid.trim().is_empty() {
+        return None;
+    }
+    let row: Option<(Option<String>, Option<String>, String)> = sqlx::query_as(
+        "SELECT enabled_by, enabled_by_label, enabled_at FROM project_autonomous_publish WHERE project_uuid = $1",
+    )
+    .bind(project_uuid)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    row.map(
+        |(enabled_by, enabled_by_label, enabled_at)| AutonomousPublish {
+            enabled_by,
+            enabled_by_label,
+            enabled_at,
+        },
+    )
+}
+
+/// Ce qui autorise (ou non) une mise en ligne lancée par un agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeployGate {
+    /// Accord humain de 15 min en cours.
+    Grant,
+    /// Publication autonome activée pour ce projet (journalisée à chaque mise en ligne).
+    Autonomous(AutonomousPublish),
+    /// Verrou fermé : `publish_approval_required`.
+    Locked,
+}
+
+/// Décision du verrou de publication pour `trigger_deploy` (accord d'abord, puis réglage).
+pub async fn deploy_gate(pool: &PgPool, project_uuid: &str) -> DeployGate {
+    if publish_grant_valid(pool, project_uuid).await {
+        return DeployGate::Grant;
+    }
+    match autonomous_publish(pool, project_uuid).await {
+        Some(a) => DeployGate::Autonomous(a),
+        None => DeployGate::Locked,
+    }
+}
+
+/// Active (ou désactive) la publication autonome d'un projet. L'appelant vérifie le rôle admin.
+pub async fn set_autonomous_publish(
+    pool: &PgPool,
+    project_uuid: &str,
+    enabled: bool,
+    by: Option<&str>,
+    by_label: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    if enabled {
+        sqlx::query(
+            r#"INSERT INTO project_autonomous_publish (project_uuid, enabled_by, enabled_by_label, enabled_at)
+               VALUES ($1, $2, $3, $4)
+               ON CONFLICT(project_uuid) DO UPDATE SET
+                 enabled_by = excluded.enabled_by,
+                 enabled_by_label = excluded.enabled_by_label,
+                 enabled_at = excluded.enabled_at"#,
+        )
+        .bind(project_uuid)
+        .bind(by)
+        .bind(by_label)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .execute(pool)
+        .await?;
+    } else {
+        sqlx::query("DELETE FROM project_autonomous_publish WHERE project_uuid = $1")
+            .bind(project_uuid)
+            .execute(pool)
+            .await?;
+    }
+    Ok(())
 }
 
 /// Gate fixe (tests, ou registre sans base : refuse par défaut).
@@ -285,6 +387,102 @@ pub fn publish_intent(msg: &str) -> PublishIntent {
         PublishIntent::Negated
     } else {
         PublishIntent::None
+    }
+}
+
+#[cfg(test)]
+mod autonomous_tests {
+    use super::*;
+
+    async fn pg() -> PgPool {
+        let pool = devforge_database::ephemeral_pg().await;
+        sqlx::query(
+            "CREATE TABLE projects (uuid TEXT PRIMARY KEY, name TEXT, workspace_uuid TEXT)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        crate::receipts::migrate(&pool).await.unwrap();
+        pool
+    }
+
+    #[test]
+    fn autonomous_covers_only_the_deploy() {
+        assert!(autonomous_covers("trigger_deploy"));
+        for t in ALWAYS_REMOTE.iter().filter(|t| **t != "trigger_deploy") {
+            assert!(!autonomous_covers(t), "{t}");
+        }
+        assert!(!autonomous_covers("mcp_call_tool"));
+        assert!(!autonomous_covers("write_project_file"));
+    }
+
+    #[tokio::test]
+    async fn deploy_gate_prefers_the_grant_then_the_setting() {
+        let pool = pg().await;
+        assert_eq!(deploy_gate(&pool, "p1").await, DeployGate::Locked);
+        set_autonomous_publish(&pool, "p1", true, Some("u1"), Some("Mathieu"))
+            .await
+            .unwrap();
+        match deploy_gate(&pool, "p1").await {
+            DeployGate::Autonomous(a) => assert_eq!(a.enabled_by_label.as_deref(), Some("Mathieu")),
+            other => panic!("attendu Autonomous, reçu {other:?}"),
+        }
+        assert_eq!(deploy_gate(&pool, "p2").await, DeployGate::Locked);
+        sqlx::query("INSERT INTO project_publish_grants (project_uuid, granted_at, expires_at) VALUES ('p1', $1, $2)")
+            .bind(chrono::Utc::now().to_rfc3339())
+            .bind((chrono::Utc::now() + chrono::Duration::minutes(15)).to_rfc3339())
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(deploy_gate(&pool, "p1").await, DeployGate::Grant);
+        // Un accord expiré ne compte plus : on retombe sur le réglage.
+        sqlx::query("UPDATE project_publish_grants SET expires_at = $1 WHERE project_uuid = 'p1'")
+            .bind((chrono::Utc::now() - chrono::Duration::minutes(1)).to_rfc3339())
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(matches!(
+            deploy_gate(&pool, "p1").await,
+            DeployGate::Autonomous(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn static_gate_is_never_autonomous() {
+        assert!(!StaticGate(true).autonomous("p1").await);
+    }
+
+    #[tokio::test]
+    async fn autonomous_publish_is_off_by_default_and_per_project() {
+        let pool = pg().await;
+        let gate = PgPublishGate {
+            pool: Arc::new(pool.clone()),
+        };
+        assert!(autonomous_publish(&pool, "p1").await.is_none());
+        assert!(!gate.autonomous("p1").await);
+        assert!(autonomous_publish(&pool, "").await.is_none());
+
+        set_autonomous_publish(&pool, "p1", true, Some("u1"), Some("Mathieu"))
+            .await
+            .unwrap();
+        let a = autonomous_publish(&pool, "p1").await.unwrap();
+        assert_eq!(a.enabled_by.as_deref(), Some("u1"));
+        assert_eq!(a.enabled_by_label.as_deref(), Some("Mathieu"));
+        assert!(chrono::DateTime::parse_from_rfc3339(&a.enabled_at).is_ok());
+        assert!(gate.autonomous("p1").await);
+        // Un autre projet reste verrouillé, et l'accord de 15 min n'est pas posé pour autant.
+        assert!(!gate.autonomous("p2").await);
+        assert!(!gate.allowed("p1").await);
+
+        set_autonomous_publish(&pool, "p1", false, Some("u1"), Some("Mathieu"))
+            .await
+            .unwrap();
+        assert!(!gate.autonomous("p1").await);
+        assert_eq!(deploy_gate(&pool, "p1").await, DeployGate::Locked);
+        // Désactiver deux fois ne casse rien.
+        set_autonomous_publish(&pool, "p1", false, None, None)
+            .await
+            .unwrap();
     }
 }
 

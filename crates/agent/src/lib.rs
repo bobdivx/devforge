@@ -103,6 +103,17 @@ impl ToolRegistry {
         }
     }
 
+    /// Publication autonome du projet couvrant cet outil (réglage admin, désactivé par défaut).
+    pub async fn autonomous_allowed(&self, project_uuid: &str, tool: &str) -> bool {
+        if project_uuid.trim().is_empty() || !guard::autonomous_covers(tool) {
+            return false;
+        }
+        match &self.gate {
+            Some(gate) => gate.autonomous(project_uuid).await,
+            None => false,
+        }
+    }
+
     /// Schéma JSON des paramètres d'un outil (coercition des arguments).
     pub fn schema(&self, name: &str) -> Option<Value> {
         self.tools.get(name).map(|t| t.parameters())
@@ -1085,6 +1096,12 @@ impl AgentRunner {
             return None;
         }
         let project_uuid = remote_project(args, ctx);
+        // Publication autonome (réglage par projet, posé par un admin) : la mise en ligne
+        // passe sans accord de 15 min, y compris en exécution automatique. Le serveur
+        // revérifie le réglage et journalise la publication (qui, quand, quel projet).
+        if self.registry.autonomous_allowed(&project_uuid, tool).await {
+            return None;
+        }
         let blocked = if ctx.unattended {
             guard::remote_write_blocked_unattended(tool, args)
         } else if self.registry.publish_allowed(&project_uuid).await {
@@ -1176,6 +1193,13 @@ impl AgentRunner {
             Ok(Some(uuid)) => return Some(uuid),
             Ok(None) => {}
             Err(e) => tracing::warn!(error = %e, "reçu : validation non consommée"),
+        }
+        if !self.registry.publish_allowed(&project_uuid).await
+            && self.registry.autonomous_allowed(&project_uuid, tool).await
+        {
+            // Pas d'accord humain en cours : c'est la publication autonome qui autorise.
+            // Le reçu est écrit par `trigger_deploy` côté serveur (aussi pour les appels MCP).
+            return None;
         }
         if let Some((by, label, at)) = receipts::grant_approver(&pool, &project_uuid).await {
             r.approved_by = by;

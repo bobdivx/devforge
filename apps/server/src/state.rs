@@ -385,25 +385,20 @@ impl ProjectStore for SqliteProjectStore {
             }));
         };
 
-        // L'agent ne publie pas tout seul : accord humain (grant court) requis.
-        let grant: Option<(String,)> =
-            sqlx::query_as("SELECT expires_at FROM project_publish_grants WHERE project_uuid = $1")
-                .bind(project_uuid)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
-        let allowed = grant
-            .as_ref()
-            .map(|(exp,)| devforge_agent::guard::grant_still_valid(exp, chrono::Utc::now()))
-            .unwrap_or(false);
-        if !allowed {
-            return Ok(json!({
-                "ok": false,
-                "error": "Accord explicite requis avant publication.",
-                "hint": "POST /api/v1/projects/{uuid}/publish-approval puis relance trigger_deploy.",
-                "code": "publish_approval_required"
-            }));
-        }
+        // L'agent ne publie pas tout seul : accord humain (grant court) requis, sauf si un
+        // admin a activé la publication autonome de CE projet (journalisée plus bas).
+        let autonomous = match devforge_agent::guard::deploy_gate(&self.pool, project_uuid).await {
+            devforge_agent::guard::DeployGate::Grant => None,
+            devforge_agent::guard::DeployGate::Autonomous(a) => Some(a),
+            devforge_agent::guard::DeployGate::Locked => {
+                return Ok(json!({
+                    "ok": false,
+                    "error": "Accord explicite requis avant publication.",
+                    "hint": "POST /api/v1/projects/{uuid}/publish-approval puis relance trigger_deploy.",
+                    "code": "publish_approval_required"
+                }));
+            }
+        };
 
         // Vérifier les pré-requis
         let git_repo = project.git_repository.as_deref().unwrap_or("").trim();
@@ -444,12 +439,23 @@ impl ProjectStore for SqliteProjectStore {
         .bind(project.id)
         .bind("pending")
         .bind(message)
-        .bind("[devforge] démarrage du déploiement…\n")
+        .bind(match &autonomous {
+            Some(a) => format!(
+                "[devforge] publication autonome (sans accord de 15 min) — réglage activé par {} le {}\n[devforge] démarrage du déploiement…\n",
+                a.enabled_by_label.as_deref().unwrap_or("un admin"),
+                a.enabled_at
+            ),
+            None => "[devforge] démarrage du déploiement…\n".to_string(),
+        })
         .bind(&now)
         .bind(&now)
         .execute(&self.pool)
         .await
         .map_err(|e| devforge_shared::DevForgeError::Message(e.to_string()))?;
+
+        if let Some(a) = &autonomous {
+            crate::receipts::record_autonomous_publish(&self.pool, &project, a, &dep_uuid).await;
+        }
 
         sqlx::query("UPDATE projects SET status = 'deploying', updated_at = $1 WHERE id = $2")
             .bind(&now)

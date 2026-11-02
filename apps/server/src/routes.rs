@@ -61,6 +61,10 @@ pub fn router() -> Router<AppState> {
             "/api/v1/projects/{uuid}/publish-approval",
             post(approve_publish),
         )
+        .route(
+            "/api/v1/projects/{uuid}/autonomous-publish",
+            get(get_autonomous_publish).put(set_autonomous_publish),
+        )
         .route("/api/v1/databases", post(create_database))
         .route("/api/v1/databases/{uuid}", get(get_database))
         .route(
@@ -4337,6 +4341,118 @@ async fn approve_publish(
         "ok": true,
         "expires_in_seconds": 900,
         "message": "Accord enregistré. L'agent peut publier pendant 15 minutes."
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct AutonomousPublishBody {
+    pub enabled: bool,
+}
+
+/// Session ouverte dans l'interface (pas un jeton d'API, pas un jeton OAuth/MCP d'agent).
+pub(crate) async fn is_ui_session(pool: &sqlx::PgPool, headers: &HeaderMap) -> bool {
+    let Some(token) = crate::auth_routes::bearer_from(headers) else {
+        return false;
+    };
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query_as::<_, (i64,)>(
+        "SELECT 1::BIGINT FROM sessions WHERE token = $1 AND expires_at > $2 LIMIT 1",
+    )
+    .bind(&token)
+    .bind(&now)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .is_some()
+}
+
+/// Qui peut changer la publication autonome : un admin de l'instance, depuis l'interface.
+pub(crate) fn autonomous_edit_refusal(role: &str, ui_session: bool) -> Option<&'static str> {
+    if role != "instance_admin" {
+        return Some(
+            "Réservé à un admin de l'instance : la publication autonome se règle par un admin.",
+        );
+    }
+    if !ui_session {
+        return Some(
+            "À régler depuis l'interface DevForge : un jeton d'API ou d'agent ne peut pas changer ce réglage.",
+        );
+    }
+    None
+}
+
+fn autonomous_publish_json(
+    setting: Option<&devforge_agent::guard::AutonomousPublish>,
+    can_edit: bool,
+) -> Value {
+    json!({
+        "enabled": setting.is_some(),
+        "enabled_by_label": setting.and_then(|a| a.enabled_by_label.clone()),
+        "enabled_at": setting.map(|a| a.enabled_at.clone()),
+        "can_edit": can_edit,
+        "covers": devforge_agent::guard::AUTONOMOUS_TOOLS,
+    })
+}
+
+/// GET /api/v1/projects/{uuid}/autonomous-publish
+/// Réglage « publication autonome » du projet (désactivé par défaut).
+async fn get_autonomous_publish(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let (user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
+    let setting = devforge_agent::guard::autonomous_publish(&state.pool, &project.uuid).await;
+    let can_edit =
+        autonomous_edit_refusal(&user.role, is_ui_session(&state.pool, &headers).await).is_none();
+    Ok(Json(
+        json!({ "data": autonomous_publish_json(setting.as_ref(), can_edit) }),
+    ))
+}
+
+/// PUT /api/v1/projects/{uuid}/autonomous-publish `{ "enabled": bool }`
+/// Admin de l'instance, depuis l'interface uniquement : un jeton d'agent ne peut pas
+/// s'ouvrir le verrou lui-même. Chaque changement laisse un reçu (qui, quand).
+async fn set_autonomous_publish(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(uuid): Path<String>,
+    Json(body): Json<AutonomousPublishBody>,
+) -> Result<Json<Value>, ApiError> {
+    let (user, _ws, project) = auth_project(&state, &headers, &uuid).await?;
+    if let Some(msg) =
+        autonomous_edit_refusal(&user.role, is_ui_session(&state.pool, &headers).await)
+    {
+        return Err(ApiError::forbidden(msg));
+    }
+    let label = crate::receipts::user_label(&user);
+    devforge_agent::guard::set_autonomous_publish(
+        &state.pool,
+        &project.uuid,
+        body.enabled,
+        Some(&user.uuid),
+        Some(&label),
+    )
+    .await
+    .map_err(ApiError::from)?;
+    crate::receipts::record_autonomous_setting(
+        &state.pool,
+        &headers,
+        &user,
+        &project,
+        body.enabled,
+    )
+    .await;
+    let setting = devforge_agent::guard::autonomous_publish(&state.pool, &project.uuid).await;
+    Ok(Json(json!({
+        "ok": true,
+        "data": autonomous_publish_json(setting.as_ref(), true),
+        "message": if body.enabled {
+            "Publication autonome activée : l'agent peut mettre ce projet en ligne sans accord de 15 min."
+        } else {
+            "Publication autonome désactivée : l'accord de 15 min est de nouveau requis."
+        }
     })))
 }
 
