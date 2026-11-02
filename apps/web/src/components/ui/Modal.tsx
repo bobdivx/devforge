@@ -118,7 +118,7 @@ export function Modal({
           </div>
           <button
             type="button"
-            class="-mr-2 -mt-1.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-base text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)] lg:-mr-1 lg:-mt-0.5 lg:h-8 lg:w-8 lg:text-sm"
+            class="-mr-2 -mt-1.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-base text-[var(--color-ink-muted)] transition hover:bg-white/5 hover:text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] lg:-mr-1 lg:-mt-0.5 lg:h-8 lg:w-8 lg:text-sm"
             onClick={onClose}
             aria-label="Fermer"
           >

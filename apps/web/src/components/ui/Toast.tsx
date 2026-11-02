@@ -69,7 +69,7 @@ export function ToastProvider({ children }: { children: ComponentChildren }) {
                 {t.action && (
                   <button
                     type="button"
-                    class="mt-1.5 inline-flex min-h-[44px] items-center rounded-lg px-2 text-sm font-semibold text-[var(--color-accent)] hover:bg-white/5 sm:min-h-[32px]"
+                    class="mt-1.5 inline-flex min-h-[44px] items-center rounded-lg px-2 text-sm font-semibold text-[var(--color-accent)] transition hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] sm:min-h-[32px]"
                     onClick={() => {
                       t.action?.onClick();
                       dismiss(t.id);
@@ -81,7 +81,7 @@ export function ToastProvider({ children }: { children: ComponentChildren }) {
               </div>
               <button
                 type="button"
-                class="text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]"
+                class="rounded text-[var(--color-ink-faint)] transition hover:text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
                 aria-label="Fermer"
                 onClick={() => dismiss(t.id)}
               >

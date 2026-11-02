@@ -13,7 +13,7 @@ import { enterUp, interactiveLift, motion, settleIn } from '../../lib/motion';
  */
 
 const TILE_CLASS =
-  'group flex h-full min-h-[8.75rem] w-full min-w-0 cursor-pointer overflow-hidden flex-col items-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 text-center ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4';
+  'group flex h-full min-h-[8.75rem] w-full min-w-0 cursor-pointer overflow-hidden flex-col items-center gap-2 rounded-2xl bg-[#1c1c1e] px-2.5 py-3 text-center ring-1 ring-transparent transition-[background-color,box-shadow,ring-color] duration-200 hover:bg-[#252528] hover:ring-white/15 hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] sm:gap-3 sm:px-3 sm:py-4';
 
 const TILE_SQUARE = 'justify-center sm:aspect-square sm:min-h-[10.5rem]';
 const TILE_AUTO = 'justify-start';
@@ -178,7 +178,7 @@ export function HubAddTile({
       type="button"
       onClick={onClick}
       class={cn(
-        'group flex h-full min-h-[8.75rem] w-full cursor-pointer flex-col items-center gap-2 rounded-2xl border border-dashed border-white/15 bg-[#1c1c1e] px-2.5 py-3 transition-[background-color,border-color,box-shadow] duration-200 hover:border-white/30 hover:bg-[#252528] hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] sm:gap-3 sm:px-3 sm:py-4',
+        'group flex h-full min-h-[8.75rem] w-full cursor-pointer flex-col items-center gap-2 rounded-2xl border border-dashed border-white/15 bg-[#1c1c1e] px-2.5 py-3 transition-[background-color,border-color,box-shadow] duration-200 hover:border-white/30 hover:bg-[#252528] hover:shadow-[0_12px_40px_rgb(0_0_0/0.35)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] sm:gap-3 sm:px-3 sm:py-4',
         layout === 'auto' ? 'justify-start' : 'justify-center sm:aspect-square sm:min-h-0',
       )}
       animate={motion((settle ? settleIn : enterUp)(Math.min(index * 0.045, 0.32)), interactiveLift())}
