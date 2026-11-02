@@ -68,8 +68,7 @@ describe('Markdown riche (P5-01)', () => {
     const el = container.querySelector('code')!;
     expect(el.textContent).toBe(code);
     expect(el.querySelectorAll('span[style]').length).toBeGreaterThan(3);
-    // Coloration chargée en lazy : waitFor attend jusqu'à 10 s, le test doit aller au-delà.
-  }, 15000);
+  });
 
   it('sanitizeSvg retire scripts et gestionnaires', () => {
     const out = sanitizeSvg('<svg><script>x</script><rect onload="x" style="fill:url(javascript:x)" /><image href="https://e.x/a.png"/></svg>');
