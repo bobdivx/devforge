@@ -1,0 +1,16 @@
+{{- $ns := include "devforge.appsNamespace" . }}
+{{- if and .Values.apps.createNamespace (ne $ns .Release.Namespace) }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    {{- include "devforge.labels" . | nindent 4 }}
+    pod-security.kubernetes.io/enforce: {{ .Values.apps.podSecurity }}
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+  annotations:
+    # Ne pas supprimer les apps des utilisateurs au `helm uninstall`.
+    helm.sh/resource-policy: keep
+{{- end }}

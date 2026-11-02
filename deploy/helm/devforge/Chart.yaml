@@ -1,0 +1,13 @@
+apiVersion: v2
+name: devforge
+description: DevForge (PaaS self-hosted) sur Kubernetes — backend runtime Kubernetes, phase 1.
+type: application
+version: 0.1.0
+appVersion: "2.0.279"
+home: https://github.com/bobdivx/devforge
+sources:
+  - https://github.com/bobdivx/devforge
+keywords:
+  - paas
+  - self-hosted
+  - devforge

@@ -15,6 +15,7 @@ Pas d’Electron : tout passe par le web. Un nœud **leader** tient le control p
 | Clé USB / nœud appliance | [[USB]] |
 | Passer le wizard | [[Premier-demarrage]] |
 | Ajouter des machines | [[Cluster]] |
+| Installer sur Kubernetes (Talos, Helm) — phase 1 | [[Kubernetes]] |
 | Déployer une app | [[Projets]] · [[Deploiement]] |
 | Comprendre le produit | [[Architecture]] · [[Interface]] |
 

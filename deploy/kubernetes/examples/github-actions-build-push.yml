@@ -1,0 +1,74 @@
+# Exemple : build d'une app sur GitHub Actions, push sur GHCR, puis déploiement par DevForge
+# (backend Kubernetes, phase 1). À copier dans le dépôt de l'APP, sous
+# .github/workflows/deploy.yml — ce fichier n'est volontairement PAS dans .github/workflows
+# du dépôt DevForge.
+#
+# Secrets à créer dans le dépôt de l'app :
+#   DEVFORGE_URL    ex. https://devforge.example.com
+#   DEVFORGE_TOKEN  jeton API d'un instance_admin (Compte → Tokens)
+# Variables (optionnelles) : APP_HOST (ex. app.example.com)
+name: build-push-deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        run: |
+          # GHCR exige un nom en minuscules. Tag immuable = SHA du commit.
+          img="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]'):sha-${GITHUB_SHA::12}"
+          echo "image=$img" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Déployer via DevForge
+        env:
+          DEVFORGE_URL: ${{ secrets.DEVFORGE_URL }}
+          DEVFORGE_TOKEN: ${{ secrets.DEVFORGE_TOKEN }}
+          IMAGE: ${{ needs.build.outputs.image }}
+          APP_HOST: ${{ vars.APP_HOST }}
+        run: |
+          name="$(echo "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]' | tr '_.' '--' | cut -c1-40)"
+          body="$(jq -n --arg n "$name" --arg i "$IMAGE" --arg h "$APP_HOST" '{
+            name: $n, image: $i, port: 8080, replicas: 1,
+            health: { path: "/" }
+          } + (if $h == "" then {} else { host: $h, tls: {} } end)')"
+          # wait=true : la requête attend la fin du rollout (échec = job rouge).
+          curl -fsS -X POST "$DEVFORGE_URL/api/v1/kube/apps?wait=true&timeout=300" \
+            -H "Authorization: Bearer $DEVFORGE_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$body" | jq .

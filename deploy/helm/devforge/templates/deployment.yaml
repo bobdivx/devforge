@@ -1,0 +1,145 @@
+{{- if and (not .Values.postgresql.enabled) (not .Values.postgresql.external.existingSecret) }}
+{{- fail "postgresql.enabled=false exige postgresql.external.existingSecret (clé database-url = postgres://…)" }}
+{{- end }}
+{{- $dbSecret := ternary (printf "%s-db" (include "devforge.fullname" .)) .Values.postgresql.external.existingSecret .Values.postgresql.enabled }}
+{{- $dbKey := ternary "database-url" .Values.postgresql.external.key .Values.postgresql.enabled }}
+{{- $tag := default .Chart.AppVersion .Values.image.tag }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "devforge.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "devforge.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  replicas: {{ .Values.replicaCount }}
+  # PVC ReadWriteOnce : l'ancien pod doit libérer /data avant le nouveau.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "devforge.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "devforge.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "devforge.serviceAccountName" . }}
+      automountServiceAccountToken: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.postgresql.enabled }}
+      initContainers:
+        - name: wait-postgres
+          image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command: ["sh", "-c", "until pg_isready -h {{ include "devforge.pgName" . }} -p 5432; do echo 'attente postgres'; sleep 2; done"]
+      {{- end }}
+      containers:
+        - name: devforge
+          image: "{{ .Values.image.repository }}:{{ $tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "8000"
+            - name: DEVFORGE_DATA_DIR
+              value: /data
+            # uid 1000 = utilisateur « node » de l'image : HOME inscriptible.
+            - name: HOME
+              value: /home/node
+            - name: DEVFORGE_VERSION
+              value: {{ $tag | quote }}
+            - name: DEVFORGE_EXECUTOR
+              value: local
+            # Backend Kubernetes : déploiement d'images via l'API du cluster ;
+            # désactive Traefik Docker, le GC Docker et l'auto-update Docker.
+            - name: DEVFORGE_RUNTIME
+              value: kubernetes
+            - name: DEVFORGE_KUBE_NAMESPACE
+              value: {{ include "devforge.appsNamespace" . | quote }}
+            {{- with .Values.apps.ingressClass }}
+            - name: DEVFORGE_KUBE_INGRESS_CLASS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.apps.clusterIssuer }}
+            - name: DEVFORGE_KUBE_CLUSTER_ISSUER
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.apps.imagePullSecret }}
+            - name: DEVFORGE_KUBE_IMAGE_PULL_SECRET
+              value: {{ . | quote }}
+            {{- end }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $dbSecret }}
+                  key: {{ $dbKey }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnvFromSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          startupProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-data" (include "devforge.fullname" .)) .Values.persistence.existingClaim }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

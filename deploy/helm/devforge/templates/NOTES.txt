@@ -1,0 +1,14 @@
+DevForge {{ default .Chart.AppVersion .Values.image.tag }} installé (backend runtime : kubernetes, phase 1).
+
+{{- if .Values.ingress.enabled }}
+Interface : http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}
+{{- else }}
+Accès local :
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "devforge.fullname" . }} 8000:{{ .Values.service.port }}
+  puis http://127.0.0.1:8000
+{{- end }}
+
+Apps déployées dans le namespace : {{ include "devforge.appsNamespace" . }}
+Phase 1 : déploiement depuis une image déjà construite (POST /api/v1/kube/apps).
+Pas de build dans le cluster. Mise à jour de DevForge : helm upgrade (auto-update désactivé).
+Tuto : https://github.com/bobdivx/devforge/wiki/Kubernetes

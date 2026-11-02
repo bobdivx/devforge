@@ -43,28 +43,29 @@ mod grok_bot_tests;
 mod group_routes;
 mod infra_routes;
 mod infra_sqlite;
+mod kube_routes;
 mod llm_routes;
 mod mcp_oauth;
 mod mcp_routes;
 mod memory_routes;
 mod mobile_routes;
-mod paths;
-mod playbooks;
+mod page_watch;
+mod page_watch_routes;
 #[cfg(test)]
-mod playbooks_tests;
+mod page_watch_tests;
+mod paths;
 mod platform_sso;
 #[cfg(test)]
 mod platform_sso_tests;
+mod playbooks;
+#[cfg(test)]
+mod playbooks_tests;
 mod pocket_id;
 mod pr_previews;
 mod project_oidc;
 mod project_oidc_routes;
 mod project_pg;
 mod project_pg_routes;
-mod page_watch;
-mod page_watch_routes;
-#[cfg(test)]
-mod page_watch_tests;
 mod receipts;
 mod rich_chat;
 mod routes;
@@ -238,7 +239,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         acme_email_set = acme.is_some(),
         "email ACME du proxy résolu"
     );
-    if let Err(e) = state.proxy.ensure_traefik().await {
+    // Kubernetes : le routage passe par l'ingress controller du cluster, pas par Traefik/Docker.
+    let kube_runtime = devforge_shared::runtime_backend::RuntimeBackend::from_env().is_kubernetes();
+    if kube_runtime {
+        tracing::info!(
+            "DEVFORGE_RUNTIME=kubernetes — proxy Traefik Docker, GC Docker et auto-update désactivés"
+        );
+    } else if let Err(e) = state.proxy.ensure_traefik().await {
         tracing::error!(error = %e, "Failed to ensure Traefik container — proxy may be unavailable");
     } else {
         tracing::info!("Traefik reverse proxy ready");
@@ -247,7 +254,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Watchdog: periodic health check for Traefik (fix for 2026-09-14 outage).
     // Every 2 minutes (reduced from 5), ensure Traefik exists and is running.
     // More frequent checks catch disappearances faster after deploys or network changes.
-    {
+    if !kube_runtime {
         let proxy = state.proxy.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(120));
@@ -265,7 +272,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     crate::dns::spawn_dns_loop(state.clone());
     crate::dns_failover::spawn_loop(state.clone());
-    crate::docker_gc_routes::spawn_loop(state.clone());
+    if !kube_runtime {
+        crate::docker_gc_routes::spawn_loop(state.clone());
+    }
     // P2 : actions coupées par le redémarrage → « issue inconnue », avant toute reprise.
     receipts::recover_at_boot(&state.pool).await;
     routes::resume_deploy_queue(state.clone());
@@ -383,7 +392,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    update_routes::spawn_auto_update(state.clone());
+    if !kube_runtime {
+        // En mode k8s la mise à jour passe par Helm (`helm upgrade`), pas par Docker.
+        update_routes::spawn_auto_update(state.clone());
+    }
     cursor_worker_routes::spawn_autostart(state.clone());
 
     // Advertise agent tools on the local MCP server surface.
@@ -435,6 +447,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(mobile_routes::router())
         .merge(android_routes::router())
         .merge(cluster_routes::router())
+        .merge(kube_routes::router())
         .merge(cursor_worker_routes::router())
         .merge(worker::exec_route())
         .route("/", get(auth_routes::marketing_home))
