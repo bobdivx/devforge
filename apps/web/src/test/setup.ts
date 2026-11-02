@@ -49,3 +49,17 @@ if (typeof Element !== 'undefined' && !Element.prototype.animate) {
     return anim as unknown as Animation;
   };
 }
+
+// jsdom n'implémente pas Blob.stream() (présent dans tous les navigateurs) : shiki ≥ 4.6
+// décompresse son wasm via `new Blob([…]).stream()`. Polyfill sur arrayBuffer().
+if (typeof Blob !== 'undefined' && !Blob.prototype.stream) {
+  Blob.prototype.stream = function stream(this: Blob) {
+    const blob = this;
+    return new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(new Uint8Array(await blob.arrayBuffer()));
+        controller.close();
+      },
+    });
+  } as Blob['stream'];
+}
