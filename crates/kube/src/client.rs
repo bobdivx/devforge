@@ -231,6 +231,13 @@ fn api_error(status: StatusCode, body: &str) -> KubeError {
 
 /// Chemins REST des ressources gérées.
 pub mod paths {
+    pub fn namespace(name: &str) -> String {
+        format!("/api/v1/namespaces/{name}")
+    }
+    /// Deployments de tous les namespaces (mode `per-project`).
+    pub fn all_deployments() -> String {
+        "/apis/apps/v1/deployments".into()
+    }
     pub fn deployments(ns: &str) -> String {
         format!("/apis/apps/v1/namespaces/{ns}/deployments")
     }

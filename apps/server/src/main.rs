@@ -225,9 +225,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    // Kubernetes : le routage passe par l'ingress controller du cluster, pas par Traefik/Docker.
+    let kube_runtime = devforge_shared::runtime_backend::RuntimeBackend::from_env().is_kubernetes();
+
     worker::maybe_reclaim_preferred(&state).await;
     worker::spawn_fence_watch(state.clone());
-    cluster_routes::spawn_snapshot_loop(state.clone());
+    // Snapshot de bascule entre nœuds DevForge (pg_dump via Docker) : sans objet sous
+    // Kubernetes (Postgres du chart ou externe, sauvegardé à part) — il échouait toutes les 30 s.
+    if !kube_runtime {
+        cluster_routes::spawn_snapshot_loop(state.clone());
+    }
     cluster_routes::spawn_evacuate_watch(state.clone());
     project_pg::spawn_standby_loop(state.clone());
 
@@ -239,8 +246,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         acme_email_set = acme.is_some(),
         "email ACME du proxy résolu"
     );
-    // Kubernetes : le routage passe par l'ingress controller du cluster, pas par Traefik/Docker.
-    let kube_runtime = devforge_shared::runtime_backend::RuntimeBackend::from_env().is_kubernetes();
     if kube_runtime {
         tracing::info!(
             "DEVFORGE_RUNTIME=kubernetes — proxy Traefik Docker, GC Docker et auto-update désactivés"

@@ -51,6 +51,13 @@
               {
                 "image": "ghcr.io/bobdivx/hello:1.0.0",
                 "imagePullPolicy": "IfNotPresent",
+                "lifecycle": {
+                  "preStop": {
+                    "sleep": {
+                      "seconds": 5
+                    }
+                  }
+                },
                 "livenessProbe": {
                   "failureThreshold": 3,
                   "initialDelaySeconds": 30,
@@ -93,7 +100,8 @@
               "seccompProfile": {
                 "type": "RuntimeDefault"
               }
-            }
+            },
+            "terminationGracePeriodSeconds": 35
           }
         }
       }

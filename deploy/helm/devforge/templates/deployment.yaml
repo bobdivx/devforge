@@ -40,7 +40,9 @@ spec:
           imagePullPolicy: IfNotPresent
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          command: ["sh", "-c", "until pg_isready -h {{ include "devforge.pgName" . }} -p 5432; do echo 'attente postgres'; sleep 2; done"]
+          # -U obligatoire : l'uid 1000 n'existe pas dans l'image postgres, libpq ne peut
+          # pas deviner l'utilisateur et pg_isready répond « no attempt » indéfiniment.
+          command: ["sh", "-c", "until pg_isready -h {{ include "devforge.pgName" . }} -p 5432 -U {{ .Values.postgresql.user }} -d {{ .Values.postgresql.database }}; do echo 'attente postgres'; sleep 2; done"]
       {{- end }}
       containers:
         - name: devforge
@@ -72,10 +74,14 @@ spec:
               value: kubernetes
             - name: DEVFORGE_KUBE_NAMESPACE
               value: {{ include "devforge.appsNamespace" . | quote }}
-            {{- with .Values.apps.ingressClass }}
+            - name: DEVFORGE_KUBE_NAMESPACE_MODE
+              value: {{ include "devforge.namespaceMode" . | quote }}
+            - name: DEVFORGE_KUBE_NAMESPACE_PREFIX
+              value: {{ .Values.apps.namespacePrefix | quote }}
+            - name: DEVFORGE_KUBE_POD_SECURITY
+              value: {{ .Values.apps.podSecurity | quote }}
             - name: DEVFORGE_KUBE_INGRESS_CLASS
-              value: {{ . | quote }}
-            {{- end }}
+              value: {{ default "none" .Values.apps.ingressClass | quote }}
             {{- with .Values.apps.clusterIssuer }}
             - name: DEVFORGE_KUBE_CLUSTER_ISSUER
               value: {{ . | quote }}

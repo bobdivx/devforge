@@ -89,6 +89,13 @@
                 ],
                 "image": "ghcr.io/bobdivx/shop:sha-abc1234",
                 "imagePullPolicy": "IfNotPresent",
+                "lifecycle": {
+                  "preStop": {
+                    "sleep": {
+                      "seconds": 5
+                    }
+                  }
+                },
                 "livenessProbe": {
                   "failureThreshold": 3,
                   "httpGet": {
@@ -148,7 +155,8 @@
               "seccompProfile": {
                 "type": "RuntimeDefault"
               }
-            }
+            },
+            "terminationGracePeriodSeconds": 35
           }
         }
       }

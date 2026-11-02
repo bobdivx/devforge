@@ -8,7 +8,7 @@ C’est un **PaaS self-hosted** (Docker, domaines, env, backups) **plus** un bui
 
 Non. Le mode par défaut reste un leader + workers DevForge (process / Docker), sans Kubernetes.
 
-Kubernetes est **optionnel** et en **phase 1 (expérimental)** : chart Helm pour installer DevForge dans un cluster (Talos testé en priorité) et déploiement d'apps depuis une image déjà construite (`DEVFORGE_RUNTIME=kubernetes`). Pas encore de build dans le cluster ni d'intégration UI. [[Kubernetes]]
+Kubernetes est **optionnel** et en **phase 1 (expérimental)** : chart Helm pour installer DevForge dans un cluster (cible Talos ; testé de bout en bout sur k3s) et déploiement d'apps depuis une image déjà construite (`DEVFORGE_RUNTIME=kubernetes`). Choix par défaut : GHCR + imagePullSecret, Traefik, local-path (Longhorn en multi-nœud), tunnel Cloudflare, un namespace par projet. Pas encore de build dans le cluster ni d'intégration UI. [[Kubernetes]]
 
 ## Comment ajouter une deuxième machine ?
 

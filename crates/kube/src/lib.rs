@@ -15,10 +15,10 @@ pub mod spec;
 pub mod status;
 
 pub use client::{KubeClient, KubeError};
-pub use config::{KubeConfig, KubeDefaults};
+pub use config::{KubeConfig, KubeDefaults, NamespaceMode};
 pub use manifests::{render, RenderedManifests};
 pub use runtime::{ImageRuntime, KubeRuntime};
-pub use spec::{AppSpec, HealthSpec, ResourceSpec, TlsSpec};
+pub use spec::{AppRef, AppSpec, HealthSpec, ResourceSpec, TlsSpec};
 pub use status::{AppStatus, PodStatus};
 
 /// Gestionnaire de champs (server-side apply) et valeur du label `managed-by`.

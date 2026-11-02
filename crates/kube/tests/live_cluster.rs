@@ -2,13 +2,15 @@
 //! `DEVFORGE_KUBE_IT=1`. Variables : `DEVFORGE_KUBE_API_URL`, `DEVFORGE_KUBE_TOKEN_FILE`,
 //! `DEVFORGE_KUBE_NAMESPACE` (namespace déjà créé, RBAC du chart Helm),
 //! `DEVFORGE_KUBE_CA_FILE` ou `DEVFORGE_KUBE_INSECURE_SKIP_TLS_VERIFY=1`.
+//! `DEVFORGE_KUBE_IT_PROJECT=<slug>` : teste le mode namespace par projet
+//! (`DEVFORGE_KUBE_NAMESPACE_MODE=per-project`, RBAC ClusterRole du chart).
 //!
 //! Sans contrôleurs (envtest), les pods ne démarrent pas : on vérifie l'API (apply, prune,
 //! stop/start/restart, RBAC), pas l'exécution des conteneurs.
 
 use devforge_kube::client::paths;
 use devforge_kube::runtime::ImageRuntime;
-use devforge_kube::{AppSpec, KubeError, KubeRuntime, TlsSpec};
+use devforge_kube::{AppRef, AppSpec, KubeError, KubeRuntime, TlsSpec};
 use serde_json::json;
 
 fn enabled() -> bool {
@@ -22,11 +24,14 @@ async fn live_deploy_lifecycle() {
         return;
     }
     let rt = KubeRuntime::from_env().expect("config kube");
-    let ns = rt.namespace().to_string();
+    let project = std::env::var("DEVFORGE_KUBE_IT_PROJECT").ok();
+    let ns = rt.defaults().namespace_for(project.as_deref());
     let name = "it-web";
-    let _ = rt.remove(name).await;
+    let app = AppRef::new(name, project.as_deref());
+    let _ = rt.remove(&app).await;
 
     let mut spec = AppSpec::new(name, "nginxinc/nginx-unprivileged:1.27");
+    spec.project = project.clone();
     spec.port = 8080;
     spec.replicas = 2;
     spec.host = Some("it-web.example.test".into());
@@ -63,6 +68,7 @@ async fn live_deploy_lifecycle() {
     // Rolling update : nouvelle image, plus d'Ingress ni de Secret → élagués.
     let mut v2 = AppSpec::new(name, "nginxinc/nginx-unprivileged:1.27-alpine");
     v2.port = 8080;
+    v2.project = project.clone();
     v2.replicas = 2;
     let out = rt.deploy(&v2).await.expect("redeploy");
     assert_eq!(out.pruned, vec!["Ingress/it-web", "Secret/it-web-env"]);
@@ -77,19 +83,24 @@ async fn live_deploy_lifecycle() {
         "nginxinc/nginx-unprivileged:1.27-alpine"
     );
 
-    let st = rt.stop(name).await.expect("stop");
+    let st = rt.stop(&app).await.expect("stop");
     assert_eq!(st.phase, "stopped");
-    let st = rt.start(name).await.expect("start");
+    let st = rt.start(&app).await.expect("start");
     assert_eq!(st.replicas, 2);
-    rt.restart(name).await.expect("restart");
+    rt.restart(&app).await.expect("restart");
     let dep = c.get(&paths::deployment(&ns, name)).await.unwrap().unwrap();
     assert!(dep["spec"]["template"]["metadata"]["annotations"]
         .get("kubectl.kubernetes.io/restartedAt")
         .is_some());
 
-    let logs = rt.logs(name, 50).await.expect("logs");
+    let logs = rt.logs(&app, 50).await.expect("logs");
     assert_eq!(logs.name, name);
-    assert!(rt.list().await.unwrap().iter().any(|a| a.name == name));
+    assert!(rt
+        .list(project.as_deref())
+        .await
+        .unwrap()
+        .iter()
+        .any(|a| a.name == name && a.namespace == ns));
 
     // Une ressource non gérée par DevForge n'est jamais écrasée.
     let foreign = json!({
@@ -104,18 +115,21 @@ async fn live_deploy_lifecycle() {
     let fp = paths::deployment(&ns, "it-foreign");
     let _ = c.delete(&fp).await;
     if c.apply(&fp, &foreign).await.is_ok() {
-        let err = rt
-            .deploy(&AppSpec::new("it-foreign", "busybox:1"))
-            .await
-            .unwrap_err();
+        let mut f = AppSpec::new("it-foreign", "busybox:1");
+        f.project = project.clone();
+        let err = rt.deploy(&f).await.unwrap_err();
         assert!(matches!(err, KubeError::Invalid(_)), "{err}");
-        assert!(rt.remove("it-foreign").await.unwrap().is_empty());
+        assert!(rt
+            .remove(&AppRef::new("it-foreign", project.as_deref()))
+            .await
+            .unwrap()
+            .is_empty());
         let _ = c.delete(&fp).await;
     }
 
-    let removed = rt.remove(name).await.expect("remove");
+    let removed = rt.remove(&app).await.expect("remove");
     assert_eq!(removed, vec!["Service/it-web", "Deployment/it-web"]);
-    assert_eq!(rt.status(name).await.unwrap().phase, "absent");
+    assert_eq!(rt.status(&app).await.unwrap().phase, "absent");
 
     // RBAC : le compte de service n'a aucun droit hors de son namespace.
     if let Ok(other) = std::env::var("DEVFORGE_KUBE_IT_FORBIDDEN_NS") {

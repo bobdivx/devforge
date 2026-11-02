@@ -45,9 +45,12 @@ service:
   port: 80
 
 ingress:
+  # Désactivé par défaut : l'accès public passe par le tunnel Cloudflare (cloudflared →
+  # Traefik). Activer pour exposer l'UI DevForge via Traefik (hôte ci-dessous).
   enabled: false
-  # Ex. traefik, nginx, cilium. Vide → IngressClass par défaut du cluster.
-  className: ""
+  # Traefik par défaut (voir deploy/kubernetes/traefik-values.yaml). Vide → classe par
+  # défaut du cluster.
+  className: traefik
   annotations: {}
   #  cert-manager.io/cluster-issuer: letsencrypt-prod
   host: devforge.example.com
@@ -59,7 +62,8 @@ ingress:
 persistence:
   # /data : base SQLite historique, clés, sauvegardes locales, workspaces.
   enabled: true
-  # Vide → StorageClass par défaut du cluster (ex. local-path, longhorn, rook-ceph).
+  # Vide → StorageClass par défaut du cluster : local-path (k3s, Talos + local-path-provisioner)
+  # en mono-nœud ; « longhorn » recommandé en multi-nœud (volumes répliqués).
   storageClass: ""
   accessMode: ReadWriteOnce
   size: 10Gi
@@ -105,16 +109,43 @@ postgresql:
 
 # Backend Kubernetes : où et comment DevForge déploie les apps des utilisateurs.
 apps:
-  # Namespace des apps. Vide → même namespace que DevForge.
+  # perProject (défaut) : un namespace par projet, `<namespacePrefix><projet>`, créé à la
+  # demande avec les labels PodSecurity ci-dessous (RBAC : ClusterRole). Les apps sans
+  # projet vont dans `namespace`.
+  # single : tout dans `namespace` (RBAC : Role limité à ce namespace).
+  namespaceMode: perProject
+  namespacePrefix: devforge-
+  # Namespace par défaut des apps (apps sans projet, mode single, secret de pull source).
+  # Vide → même namespace que DevForge.
   namespace: devforge-apps
-  # Créer le namespace (avec labels PodSecurity). false si vous le gérez vous-même.
+  # Créer ce namespace (avec labels PodSecurity). false si vous le gérez vous-même.
   createNamespace: true
-  # Niveau PodSecurity appliqué au namespace des apps. « restricted » impose des images
-  # non-root ; « baseline » si vos images tournent en root (nginx officiel…).
+  # Niveau PodSecurity des namespaces d'apps. « restricted » impose des images non-root ;
+  # « baseline » si vos images tournent en root (nginx officiel…).
   podSecurity: restricted
-  # IngressClass par défaut des apps (vide → classe par défaut du cluster).
-  ingressClass: ""
-  # ClusterIssuer cert-manager par défaut quand une app demande TLS.
+  # IngressClass des apps. Traefik par défaut ; « none » → classe par défaut du cluster.
+  ingressClass: traefik
+  # ClusterIssuer cert-manager quand une app demande TLS. Vide par défaut : avec le tunnel
+  # Cloudflare, le TLS public est terminé chez Cloudflare.
   clusterIssuer: ""
-  # Secret dockerconfigjson par défaut (registre privé, ex. GHCR) dans le namespace des apps.
+  # Secret dockerconfigjson pour tirer les images des apps (GHCR privé…), à créer dans
+  # `apps.namespace` ; DevForge le recopie dans chaque namespace de projet.
+  #   kubectl -n devforge-apps create secret docker-registry ghcr-pull \
+  #     --docker-server=ghcr.io --docker-username=<user> --docker-password=<PAT read:packages>
   imagePullSecret: ""
+
+# Tunnel Cloudflare (exposition publique sans ouvrir de port) : un Deployment cloudflared.
+# Dans le tableau de bord Cloudflare (Zero Trust → Tunnels), faire pointer chaque nom
+# d'hôte public vers http://traefik.traefik.svc.cluster.local:80 (Traefik route ensuite
+# selon l'en-tête Host des Ingress).
+cloudflared:
+  enabled: false
+  image:
+    repository: cloudflare/cloudflared
+    tag: "2026.10.7"
+  replicas: 1
+  # Jeton du tunnel (« cloudflared tunnel run --token … »). Préférer existingSecret.
+  token: ""
+  # Secret existant contenant la clé `token`.
+  existingSecret: ""
+  resources: {}

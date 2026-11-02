@@ -7,9 +7,9 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::client::{paths, KubeClient, KubeError};
-use crate::config::KubeDefaults;
+use crate::config::{KubeDefaults, NamespaceMode};
 use crate::manifests::{self, ANNOTATION_REPLICAS, ANNOTATION_RESTARTED_AT};
-use crate::spec::AppSpec;
+use crate::spec::{AppRef, AppSpec};
 use crate::status::{self, AppStatus};
 use crate::{CONTAINER_NAME, FIELD_MANAGER, LABEL_APP, LABEL_MANAGED_BY};
 
@@ -45,13 +45,14 @@ pub struct AppLogs {
 pub trait ImageRuntime: Send + Sync {
     fn backend(&self) -> &'static str;
     async fn deploy(&self, spec: &AppSpec) -> Result<DeployOutcome, KubeError>;
-    async fn status(&self, name: &str) -> Result<AppStatus, KubeError>;
-    async fn list(&self) -> Result<Vec<AppStatus>, KubeError>;
-    async fn logs(&self, name: &str, tail: u32) -> Result<AppLogs, KubeError>;
-    async fn stop(&self, name: &str) -> Result<AppStatus, KubeError>;
-    async fn start(&self, name: &str) -> Result<AppStatus, KubeError>;
-    async fn restart(&self, name: &str) -> Result<AppStatus, KubeError>;
-    async fn remove(&self, name: &str) -> Result<Vec<String>, KubeError>;
+    async fn status(&self, app: &AppRef) -> Result<AppStatus, KubeError>;
+    /// Toutes les apps gérées ; `project` filtre sur un projet.
+    async fn list(&self, project: Option<&str>) -> Result<Vec<AppStatus>, KubeError>;
+    async fn logs(&self, app: &AppRef, tail: u32) -> Result<AppLogs, KubeError>;
+    async fn stop(&self, app: &AppRef) -> Result<AppStatus, KubeError>;
+    async fn start(&self, app: &AppRef) -> Result<AppStatus, KubeError>;
+    async fn restart(&self, app: &AppRef) -> Result<AppStatus, KubeError>;
+    async fn remove(&self, app: &AppRef) -> Result<Vec<String>, KubeError>;
 }
 
 pub struct KubeRuntime {
@@ -80,16 +81,10 @@ impl KubeRuntime {
         &self.client
     }
 
-    fn ns(&self) -> &str {
-        &self.defaults.namespace
-    }
-
-    fn check_name(name: &str) -> Result<(), KubeError> {
-        if crate::spec::is_dns_label(name) && name.len() <= crate::spec::MAX_NAME_LEN {
-            Ok(())
-        } else {
-            Err(KubeError::Invalid(format!("nom d'app invalide ({name})")))
-        }
+    /// Namespace d'une app (valide la référence).
+    pub fn namespace_of(&self, app: &AppRef) -> Result<String, KubeError> {
+        app.validate().map_err(KubeError::Invalid)?;
+        Ok(self.defaults.namespace_for(app.project.as_deref()))
     }
 
     /// Valide la spec puis rend les manifests (aucun appel réseau).
@@ -99,8 +94,73 @@ impl KubeRuntime {
         Ok(manifests::render(&spec, &self.defaults))
     }
 
-    async fn managed_deployment(&self, name: &str) -> Result<Option<Value>, KubeError> {
-        let dep = self.client.get(&paths::deployment(self.ns(), name)).await?;
+    /// Crée le namespace du projet s'il manque (mode `per-project`). Un namespace existant
+    /// non créé par DevForge n'est utilisé que s'il s'agit du namespace par défaut.
+    async fn ensure_namespace(&self, ns: &str, project: Option<&str>) -> Result<(), KubeError> {
+        let path = paths::namespace(ns);
+        match self.client.get(&path).await {
+            Ok(Some(obj)) => {
+                if is_managed(&obj) || ns == self.defaults.namespace {
+                    Ok(())
+                } else {
+                    Err(KubeError::Invalid(format!(
+                        "le namespace {ns} existe mais n'est pas géré par DevForge (label {LABEL_MANAGED_BY})"
+                    )))
+                }
+            }
+            Ok(None) => {
+                let m = manifests::namespace(ns, project, &self.defaults.pod_security);
+                self.client.apply(&path, &m).await?;
+                tracing::info!(namespace = %ns, "namespace de projet créé");
+                Ok(())
+            }
+            // RBAC sans droits sur les namespaces (mode `single`) : on suppose qu'il existe.
+            Err(KubeError::Api { status: 403, .. }) if ns == self.defaults.namespace => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Mode per-project : recopie le secret de pull par défaut (ex. GHCR) depuis le
+    /// namespace des apps vers celui du projet s'il n'y existe pas encore. Un secret
+    /// déjà présent (géré à la main ou par DevForge) n'est jamais écrasé.
+    async fn ensure_pull_secret(&self, ns: &str) -> Result<(), KubeError> {
+        let Some(name) = self.defaults.image_pull_secret.as_deref() else {
+            return Ok(());
+        };
+        if ns == self.defaults.namespace {
+            return Ok(());
+        }
+        let target = paths::secret(ns, name);
+        if self.client.get(&target).await?.is_some() {
+            return Ok(());
+        }
+        let Some(src) = self
+            .client
+            .get(&paths::secret(&self.defaults.namespace, name))
+            .await?
+        else {
+            tracing::warn!(secret = %name, source = %self.defaults.namespace,
+                "secret de pull introuvable : à créer dans le namespace des apps");
+            return Ok(());
+        };
+        let copy = json!({
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {
+                "name": name,
+                "namespace": ns,
+                "labels": { LABEL_MANAGED_BY: FIELD_MANAGER },
+            },
+            "type": src.get("type").cloned().unwrap_or(json!("kubernetes.io/dockerconfigjson")),
+            "data": src.get("data").cloned().unwrap_or(json!({})),
+        });
+        self.client.apply(&target, &copy).await?;
+        tracing::info!(secret = %name, namespace = %ns, "secret de pull recopié");
+        Ok(())
+    }
+
+    async fn managed_deployment(&self, ns: &str, name: &str) -> Result<Option<Value>, KubeError> {
+        let dep = self.client.get(&paths::deployment(ns, name)).await?;
         match dep {
             Some(d) if is_managed(&d) => Ok(Some(d)),
             Some(_) => Err(KubeError::Invalid(format!(
@@ -110,10 +170,19 @@ impl KubeRuntime {
         }
     }
 
-    async fn pods(&self, name: &str) -> Result<Vec<status::PodStatus>, KubeError> {
+    async fn require_deployment(&self, ns: &str, name: &str) -> Result<Value, KubeError> {
+        self.managed_deployment(ns, name)
+            .await?
+            .ok_or_else(|| KubeError::Api {
+                status: 404,
+                message: format!("app {name} introuvable (namespace {ns})"),
+            })
+    }
+
+    async fn pods(&self, ns: &str, name: &str) -> Result<Vec<status::PodStatus>, KubeError> {
         let path = format!(
             "{}?{}",
-            paths::pods(self.ns()),
+            paths::pods(ns),
             paths::label_selector(LABEL_APP, name)
         );
         let list = self.client.get(&path).await?.unwrap_or(Value::Null);
@@ -123,12 +192,12 @@ impl KubeRuntime {
     /// Attend la fin du rollout (comme `kubectl rollout status`), au plus `timeout`.
     pub async fn wait_rollout(
         &self,
-        name: &str,
+        app: &AppRef,
         timeout: Duration,
     ) -> Result<AppStatus, KubeError> {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
-            let st = self.status(name).await?;
+            let st = self.status(app).await?;
             if st.rollout_complete || st.phase == "degraded" || st.phase == "absent" {
                 return Ok(st);
             }
@@ -139,17 +208,13 @@ impl KubeRuntime {
         }
     }
 
-    async fn patch_deployment(&self, name: &str, patch: Value) -> Result<AppStatus, KubeError> {
-        if self.managed_deployment(name).await?.is_none() {
-            return Err(KubeError::Api {
-                status: 404,
-                message: format!("app {name} introuvable"),
-            });
-        }
+    async fn patch_deployment(&self, app: &AppRef, patch: Value) -> Result<AppStatus, KubeError> {
+        let ns = self.namespace_of(app)?;
+        self.require_deployment(&ns, &app.name).await?;
         self.client
-            .merge_patch(&paths::deployment(self.ns(), name), &patch)
+            .merge_patch(&paths::deployment(&ns, &app.name), &patch)
             .await?;
-        self.status(name).await
+        self.status(app).await
     }
 }
 
@@ -179,10 +244,12 @@ impl ImageRuntime for KubeRuntime {
     async fn deploy(&self, spec: &AppSpec) -> Result<DeployOutcome, KubeError> {
         let mut spec = spec.clone();
         spec.normalize().map_err(KubeError::Invalid)?;
+        let ns = self.defaults.namespace_for(spec.project.as_deref());
+        self.ensure_namespace(&ns, spec.project.as_deref()).await?;
+        self.ensure_pull_secret(&ns).await?;
         // Refuse d'écraser une ressource posée à la main / par un autre outil.
-        let _ = self.managed_deployment(&spec.name).await?;
+        let _ = self.managed_deployment(&ns, &spec.name).await?;
         let rendered = manifests::render(&spec, &self.defaults);
-        let ns = self.ns().to_string();
         let mut applied = Vec::new();
         for m in rendered.all() {
             let path = paths::for_manifest(&ns, m)
@@ -208,7 +275,7 @@ impl ImageRuntime for KubeRuntime {
             }
         }
         tracing::info!(app = %spec.name, namespace = %ns, image = %spec.image, "kube deploy appliqué");
-        let status = self.status(&spec.name).await?;
+        let status = self.status(&spec.app_ref()).await?;
         Ok(DeployOutcome {
             name: spec.name.clone(),
             namespace: ns,
@@ -218,24 +285,44 @@ impl ImageRuntime for KubeRuntime {
         })
     }
 
-    async fn status(&self, name: &str) -> Result<AppStatus, KubeError> {
-        Self::check_name(name)?;
-        let dep = self.managed_deployment(name).await?;
+    async fn status(&self, app: &AppRef) -> Result<AppStatus, KubeError> {
+        let ns = self.namespace_of(app)?;
+        let dep = self.managed_deployment(&ns, &app.name).await?;
         let pods = if dep.is_some() {
-            self.pods(name).await?
+            self.pods(&ns, &app.name).await?
         } else {
             Vec::new()
         };
-        Ok(status::app_status(name, self.ns(), dep.as_ref(), pods))
+        let mut st = status::app_status(&app.name, &ns, dep.as_ref(), pods);
+        if st.project.is_none() {
+            st.project = app.project.clone();
+        }
+        Ok(st)
     }
 
-    async fn list(&self) -> Result<Vec<AppStatus>, KubeError> {
-        let path = format!(
-            "{}?{}",
-            paths::deployments(self.ns()),
-            paths::label_selector(LABEL_MANAGED_BY, FIELD_MANAGER)
-        );
-        let list = self.client.get(&path).await?.unwrap_or(Value::Null);
+    async fn list(&self, project: Option<&str>) -> Result<Vec<AppStatus>, KubeError> {
+        crate::spec::validate_project(project).map_err(KubeError::Invalid)?;
+        let mut selector = paths::label_selector(LABEL_MANAGED_BY, FIELD_MANAGER);
+        if let Some(p) = project {
+            // `,` encodé : sélecteur ET.
+            selector.push_str("%2C");
+            selector.push_str(
+                paths::label_selector(manifests::LABEL_PROJECT_NAME, p)
+                    .trim_start_matches("labelSelector="),
+            );
+        }
+        let base = match (self.defaults.namespace_mode, project) {
+            (NamespaceMode::Single, _) => paths::deployments(&self.defaults.namespace),
+            (NamespaceMode::PerProject, Some(p)) => {
+                paths::deployments(&self.defaults.namespace_for(Some(p)))
+            }
+            (NamespaceMode::PerProject, None) => paths::all_deployments(),
+        };
+        let list = self
+            .client
+            .get(&format!("{base}?{selector}"))
+            .await?
+            .unwrap_or(Value::Null);
         let mut out = Vec::new();
         for dep in list
             .get("items")
@@ -243,33 +330,37 @@ impl ImageRuntime for KubeRuntime {
             .cloned()
             .unwrap_or_default()
         {
-            let name = dep
-                .pointer("/metadata/name")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
+            let meta = |k: &str| {
+                dep.pointer(&format!("/metadata/{k}"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string()
+            };
+            let (name, ns) = (meta("name"), meta("namespace"));
+            // Mode per-project : seuls les namespaces DevForge (préfixe ou défaut).
+            if self.defaults.namespace_mode == NamespaceMode::PerProject
+                && ns != self.defaults.namespace
+                && !ns.starts_with(&self.defaults.namespace_prefix)
+            {
+                continue;
+            }
             // Liste sans pods (un appel par app serait coûteux) ; détail via `status`.
-            out.push(status::app_status(&name, self.ns(), Some(&dep), Vec::new()));
+            out.push(status::app_status(&name, &ns, Some(&dep), Vec::new()));
         }
-        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out.sort_by(|a, b| (&a.namespace, &a.name).cmp(&(&b.namespace, &b.name)));
         Ok(out)
     }
 
-    async fn logs(&self, name: &str, tail: u32) -> Result<AppLogs, KubeError> {
-        Self::check_name(name)?;
-        if self.managed_deployment(name).await?.is_none() {
-            return Err(KubeError::Api {
-                status: 404,
-                message: format!("app {name} introuvable"),
-            });
-        }
+    async fn logs(&self, app: &AppRef, tail: u32) -> Result<AppLogs, KubeError> {
+        let ns = self.namespace_of(app)?;
+        self.require_deployment(&ns, &app.name).await?;
         let tail = tail.clamp(1, MAX_LOG_TAIL);
-        let pods = self.pods(name).await?;
+        let pods = self.pods(&ns, &app.name).await?;
         let mut names = Vec::new();
         let mut buf = String::new();
         for pod in pods.iter().take(MAX_LOG_PODS) {
             names.push(pod.name.clone());
-            let path = paths::pod_log(self.ns(), &pod.name, CONTAINER_NAME, tail);
+            let path = paths::pod_log(&ns, &pod.name, CONTAINER_NAME, tail);
             let text = match self.client.get_text(&path).await {
                 Ok(t) => t,
                 // Pod pas encore démarré (ContainerCreating, ImagePullBackOff…).
@@ -295,21 +386,16 @@ impl ImageRuntime for KubeRuntime {
             logs = logs[cut..].to_string();
         }
         Ok(AppLogs {
-            name: name.into(),
+            name: app.name.clone(),
             pods: names,
             logs,
             truncated,
         })
     }
 
-    async fn stop(&self, name: &str) -> Result<AppStatus, KubeError> {
-        Self::check_name(name)?;
-        let Some(dep) = self.managed_deployment(name).await? else {
-            return Err(KubeError::Api {
-                status: 404,
-                message: format!("app {name} introuvable"),
-            });
-        };
+    async fn stop(&self, app: &AppRef) -> Result<AppStatus, KubeError> {
+        let ns = self.namespace_of(app)?;
+        let dep = self.require_deployment(&ns, &app.name).await?;
         let current = dep
             .pointer("/spec/replicas")
             .and_then(Value::as_i64)
@@ -320,7 +406,7 @@ impl ImageRuntime for KubeRuntime {
             status::remembered_replicas(&dep)
         };
         self.patch_deployment(
-            name,
+            app,
             json!({
                 "metadata": { "annotations": { ANNOTATION_REPLICAS: remember.to_string() } },
                 "spec": { "replicas": 0 }
@@ -329,25 +415,19 @@ impl ImageRuntime for KubeRuntime {
         .await
     }
 
-    async fn start(&self, name: &str) -> Result<AppStatus, KubeError> {
-        Self::check_name(name)?;
-        let Some(dep) = self.managed_deployment(name).await? else {
-            return Err(KubeError::Api {
-                status: 404,
-                message: format!("app {name} introuvable"),
-            });
-        };
+    async fn start(&self, app: &AppRef) -> Result<AppStatus, KubeError> {
+        let ns = self.namespace_of(app)?;
+        let dep = self.require_deployment(&ns, &app.name).await?;
         let replicas = status::remembered_replicas(&dep);
-        self.patch_deployment(name, json!({ "spec": { "replicas": replicas } }))
+        self.patch_deployment(app, json!({ "spec": { "replicas": replicas } }))
             .await
     }
 
-    async fn restart(&self, name: &str) -> Result<AppStatus, KubeError> {
-        Self::check_name(name)?;
+    async fn restart(&self, app: &AppRef) -> Result<AppStatus, KubeError> {
         // Même mécanisme que `kubectl rollout restart` : rolling update sans coupure.
         let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         self.patch_deployment(
-            name,
+            app,
             json!({ "spec": { "template": { "metadata": { "annotations": {
                 ANNOTATION_RESTARTED_AT: now
             }}}}}),
@@ -355,9 +435,11 @@ impl ImageRuntime for KubeRuntime {
         .await
     }
 
-    async fn remove(&self, name: &str) -> Result<Vec<String>, KubeError> {
-        Self::check_name(name)?;
-        let ns = self.ns().to_string();
+    /// Supprime les ressources de l'app. Le namespace du projet est conservé (autres apps,
+    /// secrets de pull) : `kubectl delete ns` pour le retirer.
+    async fn remove(&self, app: &AppRef) -> Result<Vec<String>, KubeError> {
+        let ns = self.namespace_of(app)?;
+        let name = app.name.as_str();
         let mut removed = Vec::new();
         let targets = [
             ("Ingress", paths::ingress(&ns, name)),
