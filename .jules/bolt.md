@@ -5,3 +5,7 @@
 ## 2026-10-15 - [Performance] Prevent unnecessary UI array recalculations
 **Learning:** In the chat component (`useThreadList`), derived state that requires filtering and sorting large arrays (like generating nested agent lists) was running synchronously on every render. Given that chat polling triggers frequent re-renders, this caused unnecessary CPU strain on lists that only rarely change.
 **Action:** Use `useMemo` for derived states like `rows` and `current` in custom hooks when they involve `.filter()`, `.map()`, or `.sort()` and depend on data that updates less frequently than the component renders.
+
+## 2026-11-03 - [Performance] Memoize syntax-highlighting check in CodeBlock
+**Learning:** Checking highlighted tokens against original source code was unnecessarily recalculating string concatenations dynamically on every render round in `CodeBlock.tsx`.
+**Action:** Utilize a `useMemo` block encapsulating manual string concatenation array traversal via nested `for` loop (as `map().join()` incurs expensive memory allocations during intermediate arrays creation).
