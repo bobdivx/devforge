@@ -9,3 +9,7 @@
 ## 2026-11-03 - [Performance] Memoize syntax-highlighting check in CodeBlock
 **Learning:** Checking highlighted tokens against original source code was unnecessarily recalculating string concatenations dynamically on every render round in `CodeBlock.tsx`.
 **Action:** Utilize a `useMemo` block encapsulating manual string concatenation array traversal via nested `for` loop (as `map().join()` incurs expensive memory allocations during intermediate arrays creation).
+
+## 2026-11-03 - [Rejected Change] CodeBlock optimization
+**Learning:** Wrapping the CodeBlock token comparison in `useMemo` and replacing `.map().join()` with a manual loop is a micro-optimization with no measurable gain and should not be implemented.
+**Action:** Do not attempt to micro-optimize the token comparison in CodeBlock.tsx. Avoid optimizations that do not provide measurable, substantial gains, especially when similar attempts have been previously declined.
