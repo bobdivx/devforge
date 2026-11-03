@@ -17,3 +17,8 @@
 **Vulnerability:** The `verify_github_sig` function in `apps/server/src/infra_routes.rs` verified GitHub webhook signatures using standard string comparison `expected.eq_ignore_ascii_case(hex_sig)`.
 **Learning:** String comparison functions exit early as soon as a character mismatch is found. In a cryptographic context, this variable response time leaks information and allows an attacker to perform a timing attack to forge a valid HMAC signature by guessing it byte by byte.
 **Prevention:** Always use a constant-time comparison library (like `hmac`'s `verify_slice()`) to compare cryptographic hashes, secrets, and signatures to prevent side-channel timing attacks. Avoid custom implementations of standard cryptographic algorithms.
+
+## 2024-05-18 - [Missing Security Headers]
+**Vulnerability:** Missing important security headers like `X-Frame-Options`, `X-Content-Type-Options`, `Strict-Transport-Security`.
+**Learning:** Axum doesn't add security headers by default. Tower has some utilities, but we can also use custom middleware.
+**Prevention:** Implement standard security headers for all HTTP responses in `apps/server/src/security.rs`.

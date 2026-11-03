@@ -2,7 +2,7 @@
 
 use axum::{
     body::Body,
-    http::{header, HeaderValue, Method, Request, Response},
+    http::{header, HeaderName, HeaderValue, Method, Request, Response},
     middleware::Next,
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -51,6 +51,31 @@ pub fn cors_layer() -> CorsLayer {
 
 /// HTML / routes app : pas de cache (évite page blanche après MAJ Flatpak).
 /// Assets fingerprinted `/_astro/*` : cache long.
+/// Ajoute des en-têtes de sécurité standard à toutes les réponses HTTP.
+pub async fn security_headers(req: Request<Body>, next: Next) -> Response<Body> {
+    let mut res = next.run(req).await;
+    let headers = res.headers_mut();
+
+    headers.insert(
+        HeaderName::from_static("x-content-type-options"),
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        HeaderName::from_static("x-frame-options"),
+        HeaderValue::from_static("sameorigin"),
+    );
+    headers.insert(
+        HeaderName::from_static("strict-transport-security"),
+        HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+    );
+    headers.insert(
+        HeaderName::from_static("x-xss-protection"),
+        HeaderValue::from_static("1; mode=block"),
+    );
+
+    res
+}
+
 pub async fn static_cache_headers(req: Request<Body>, next: Next) -> Response<Body> {
     let path = req.uri().path().to_string();
     let mut res = next.run(req).await;
