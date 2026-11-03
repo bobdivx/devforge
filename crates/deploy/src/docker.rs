@@ -377,6 +377,9 @@ RUN npm run build \
  && cp -a "$src"/. /devforge-static/
 
 FROM nginx:alpine
+# Redirections relatives (`/apps/x` → `Location: /apps/x/`) : derrière le proxy
+# TLS, nginx reçoit du http et générerait sinon `http://hôte/apps/x/`.
+RUN printf 'absolute_redirect off;\n' > /etc/nginx/conf.d/00-devforge-redirect.conf
 COPY --from=build /devforge-static /usr/share/nginx/html
 EXPOSE 80
 "#,
@@ -1621,6 +1624,10 @@ mod tests {
         assert!(static_df.contains(".vercel/output/static"));
         assert!(static_df.contains("COPY --from=build /devforge-static"));
         assert!(!static_df.contains("COPY --from=build /app/dist"));
+        assert!(
+            static_df.contains("absolute_redirect off;"),
+            "redirections relatives attendues : {static_df}"
+        );
     }
 
     #[test]
