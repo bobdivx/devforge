@@ -236,7 +236,7 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
                 </label>
                 <button
                   type="button"
-                  class="justify-self-start text-sm text-[var(--muted)] underline-offset-2 hover:underline"
+                  class="justify-self-start text-sm text-[var(--muted)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] rounded px-1 -ml-1"
                   onClick={() => setShowBranding((v) => !v)}
                 >
                   {showBranding ? 'Masquer branding Pocket ID' : 'Branding Pocket ID (logo / fond)'}
@@ -307,7 +307,7 @@ export function SsoSettingsPanel({ isAdmin }: { isAdmin: boolean }) {
 
             <button
               type="button"
-              class="justify-self-start text-sm text-[var(--muted)] underline-offset-2 hover:underline"
+              class="justify-self-start text-sm text-[var(--muted)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] rounded px-1 -ml-1"
               onClick={() => setShowProxy((v) => !v)}
             >
               {showProxy ? 'Masquer ForwardAuth / Traefik' : 'ForwardAuth / Traefik (optionnel)'}

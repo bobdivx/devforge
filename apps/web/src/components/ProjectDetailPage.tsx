@@ -2851,7 +2851,7 @@ function EnvPanel({ uuid }: { uuid: string }) {
             <button
               type="button"
               onClick={() => setAdding(false)}
-              class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)] hover:text-white"
+              class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)] hover:text-white focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] rounded"
             >
               <span aria-hidden>←</span>
               Variables
@@ -3237,7 +3237,7 @@ function DomainsPanel({
           <button
             type="button"
             onClick={() => setDomainView(null)}
-            class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)] hover:text-white"
+            class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)] hover:text-white focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] rounded"
           >
             <span aria-hidden>←</span>
             Domaines
@@ -3928,7 +3928,7 @@ function ProjectSettingsPanel({
             }
             gotoSection(null);
           }}
-          class="mb-4 flex items-center gap-2 text-sm text-[var(--color-ink-muted)] hover:text-white"
+          class="mb-4 flex items-center gap-2 text-sm text-[var(--color-ink-muted)] hover:text-white focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] rounded"
         >
           <span aria-hidden>←</span>
           {(section === 'ports' && portView) ||
@@ -3979,7 +3979,7 @@ function ProjectSettingsPanel({
             <button
               type="button"
               onClick={() => gotoSection('branches')}
-              class="flex h-10 items-center justify-between gap-2 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 text-left max-lg:h-11"
+              class="flex h-10 items-center justify-between gap-2 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 text-left focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] max-lg:h-11"
             >
               <span class="truncate font-mono text-[13px]">{branch}</span>
               <span class="shrink-0 text-xs text-[var(--color-accent)]">Changer →</span>
@@ -5038,7 +5038,7 @@ function CronsPanel({ projectUuid }: { projectUuid: string }) {
                 {!showAdvanced && (
                   <button
                     type="button"
-                    class="text-xs text-[var(--color-ink-faint)] hover:underline"
+                    class="text-xs text-[var(--color-ink-faint)] hover:underline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] rounded"
                     onClick={() => setShowAdvanced(true)}
                   >
                     Avancé
