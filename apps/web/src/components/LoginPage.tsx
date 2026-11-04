@@ -372,7 +372,7 @@ export function LoginPage() {
                 bootstrap?.allow_register && (
                   <button
                     type="button"
-                    class="text-[var(--color-accent)] hover:underline"
+                    class="text-[var(--color-accent)] hover:underline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] rounded px-1"
                     onClick={() => {
                       setMode('register');
                       setError(null);
@@ -384,7 +384,7 @@ export function LoginPage() {
               ) : (
                 <button
                   type="button"
-                  class="text-[var(--color-accent)] hover:underline"
+                  class="text-[var(--color-accent)] hover:underline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] rounded px-1"
                   onClick={() => {
                     setMode('login');
                     setError(null);
