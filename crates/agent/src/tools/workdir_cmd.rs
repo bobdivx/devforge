@@ -105,6 +105,7 @@ fn validate_command(raw: &str) -> std::result::Result<Vec<String>, String> {
     if parts.is_empty() {
         return Err("command invalide".into());
     }
+
     let joined = parts.join(" ");
     let lower = joined.to_ascii_lowercase();
     for bad in BLOCKED_TOKENS {
@@ -112,6 +113,18 @@ fn validate_command(raw: &str) -> std::result::Result<Vec<String>, String> {
             return Err(format!("token interdit dans la commande : {bad}"));
         }
     }
+
+    // Validate individual tokenized arguments to prevent quotation/concatenation bypasses
+    for part in &parts {
+        let lower = part.to_ascii_lowercase();
+
+        // Exact match check to block bypasses like `npm run rm`
+        // where "rm " with space fails to match "rm" from the joined string.
+        if lower == "rm" {
+            return Err(format!("commande interdite : {lower}"));
+        }
+    }
+
     let bin = parts[0].as_str();
     let bin_base = Path::new(bin)
         .file_name()

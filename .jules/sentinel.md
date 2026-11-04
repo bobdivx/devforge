@@ -17,3 +17,8 @@
 **Vulnerability:** The `verify_github_sig` function in `apps/server/src/infra_routes.rs` verified GitHub webhook signatures using standard string comparison `expected.eq_ignore_ascii_case(hex_sig)`.
 **Learning:** String comparison functions exit early as soon as a character mismatch is found. In a cryptographic context, this variable response time leaks information and allows an attacker to perform a timing attack to forge a valid HMAC signature by guessing it byte by byte.
 **Prevention:** Always use a constant-time comparison library (like `hmac`'s `verify_slice()`) to compare cryptographic hashes, secrets, and signatures to prevent side-channel timing attacks. Avoid custom implementations of standard cryptographic algorithms.
+
+## 2024-11-04 - Fix command blocklist bypass via trailing spaces
+**Vulnerability:** The blocklist check in `crates/agent/src/tools/workdir_cmd.rs` used `.contains("rm ")` with a space to prevent false positives like "format". However, this failed to block "rm" if it was at the very end of the command string (e.g. `npm run rm`).
+**Learning:** Checking for substrings with spaces is fragile and easily bypassed if the string is the last token in a command without a trailing space.
+**Prevention:** Implement exact match token checking after shell word splitting, while keeping the main string match for multi-word blocks.
