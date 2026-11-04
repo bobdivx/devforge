@@ -105,11 +105,14 @@ fn validate_command(raw: &str) -> std::result::Result<Vec<String>, String> {
     if parts.is_empty() {
         return Err("command invalide".into());
     }
-    let joined = parts.join(" ");
-    let lower = joined.to_ascii_lowercase();
-    for bad in BLOCKED_TOKENS {
-        if lower.contains(bad) {
-            return Err(format!("token interdit dans la commande : {bad}"));
+    for part in &parts {
+        let lower = part.to_ascii_lowercase();
+        for bad in BLOCKED_TOKENS {
+            let bad_trimmed = bad.trim();
+            // Block if the token exactly matches the trimmed bad token OR if it contains the full bad token.
+            if lower == bad_trimmed || lower.contains(bad) {
+                return Err(format!("token interdit dans la commande : {bad_trimmed}"));
+            }
         }
     }
     let bin = parts[0].as_str();
