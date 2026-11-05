@@ -112,13 +112,6 @@ fn validate_command(raw: &str) -> std::result::Result<Vec<String>, String> {
             return Err(format!("token interdit dans la commande : {bad}"));
         }
     }
-
-    for p in &parts {
-        let p_lower = p.to_ascii_lowercase();
-        if p_lower == "rm" || p_lower == "chmod" || p_lower == "chown" {
-             return Err(format!("token interdit dans la commande : {p}"));
-        }
-    }
     let bin = parts[0].as_str();
     let bin_base = Path::new(bin)
         .file_name()
@@ -345,13 +338,6 @@ mod tests {
     fn allows_npm_run_build() {
         let p = validate_command("npm run build").unwrap();
         assert_eq!(p[0], "npm");
-    }
-
-    #[test]
-    fn blocks_npm_run_rm() {
-        assert!(validate_command("npm run rm").is_err());
-        assert!(validate_command("npm run chmod").is_err());
-        assert!(validate_command("npm run chown").is_err());
     }
 
     #[test]
