@@ -5,3 +5,7 @@
 ## 2026-10-15 - [Performance] Prevent unnecessary UI array recalculations
 **Learning:** In the chat component (`useThreadList`), derived state that requires filtering and sorting large arrays (like generating nested agent lists) was running synchronously on every render. Given that chat polling triggers frequent re-renders, this caused unnecessary CPU strain on lists that only rarely change.
 **Action:** Use `useMemo` for derived states like `rows` and `current` in custom hooks when they involve `.filter()`, `.map()`, or `.sort()` and depend on data that updates less frequently than the component renders.
+
+## 2025-02-23 - Optimizing Large Array Serialization in Preact Components
+**Learning:** In Preact components, deriving state on hot paths (like `CodeBlock`) using nested `.map().join()` operations creates unnecessary intermediate array allocations, causing memory pressure and CPU overhead from garbage collection when dealing with large datasets (e.g. string concatenation of large code blocks).
+**Action:** Wrap expensive derived states in `useMemo` and replace `.map().join()` with manual `for` loops. This prevents intermediate allocations and significantly reduces overhead during render loops.
