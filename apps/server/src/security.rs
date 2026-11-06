@@ -69,3 +69,19 @@ pub async fn static_cache_headers(req: Request<Body>, next: Next) -> Response<Bo
     }
     res
 }
+
+/// Security headers for all responses
+pub async fn security_headers(req: Request<Body>, next: Next) -> Response<Body> {
+    let mut res = next.run(req).await;
+
+    let headers = res.headers_mut();
+
+    // Memory instructions: passing a string literal to HeaderMap::insert
+    // requires the string to be exclusively lowercase
+    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    headers.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    headers.insert("referrer-policy", HeaderValue::from_static("strict-origin-when-cross-origin"));
+    headers.insert("strict-transport-security", HeaderValue::from_static("max-age=31536000; includeSubDomains"));
+
+    res
+}

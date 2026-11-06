@@ -17,3 +17,8 @@
 **Vulnerability:** The `verify_github_sig` function in `apps/server/src/infra_routes.rs` verified GitHub webhook signatures using standard string comparison `expected.eq_ignore_ascii_case(hex_sig)`.
 **Learning:** String comparison functions exit early as soon as a character mismatch is found. In a cryptographic context, this variable response time leaks information and allows an attacker to perform a timing attack to forge a valid HMAC signature by guessing it byte by byte.
 **Prevention:** Always use a constant-time comparison library (like `hmac`'s `verify_slice()`) to compare cryptographic hashes, secrets, and signatures to prevent side-channel timing attacks. Avoid custom implementations of standard cryptographic algorithms.
+
+## 2026-11-06 - [Axum Security Headers & HeaderMap Constraints]
+**Vulnerability:** The backend lacked common security headers (`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Strict-Transport-Security`), leaving it slightly more exposed to MIME sniffing and clickjacking, despite its primary role being an API and agent workspace.
+**Learning:** When using `HeaderMap::insert` with `HeaderValue::from_static` in Rust's `http` crate (which Axum uses), providing a string literal that contains uppercase letters (like `"X-Frame-Options"`) results in a type mismatch or runtime panic. The headers must be exclusively lower-case strings.
+**Prevention:** Always use strictly lower-case strings (e.g., `"x-frame-options"`) when constructing standard header names manually in Axum middleware to ensure type safety and prevent runtime panics.
