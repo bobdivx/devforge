@@ -17,3 +17,7 @@
 **Vulnerability:** The `verify_github_sig` function in `apps/server/src/infra_routes.rs` verified GitHub webhook signatures using standard string comparison `expected.eq_ignore_ascii_case(hex_sig)`.
 **Learning:** String comparison functions exit early as soon as a character mismatch is found. In a cryptographic context, this variable response time leaks information and allows an attacker to perform a timing attack to forge a valid HMAC signature by guessing it byte by byte.
 **Prevention:** Always use a constant-time comparison library (like `hmac`'s `verify_slice()`) to compare cryptographic hashes, secrets, and signatures to prevent side-channel timing attacks. Avoid custom implementations of standard cryptographic algorithms.
+## 2026-11-07 - [Strict Binary Enforcement in Shell Agent]
+**Vulnerability:** Shell agent validation only matched joined strings against the `BLOCKED_TOKENS` blocklist. If a blocked command token did not match whitespace boundaries correctly within the overall command string (e.g. `npm run rm` rather than `rm `), restricted binaries like `rm` could bypass validation.
+**Learning:** Checking a single joined command string for blocked tokens is insufficient because word boundaries might not line up cleanly when parsing complex subcommands. Multi-word checks or partial substring blocks require both full-string substring checks AND exact-word token matching.
+**Prevention:** Always perform tokenization and exact matching on word boundaries in addition to substring blocking.
