@@ -112,6 +112,20 @@ fn validate_command(raw: &str) -> std::result::Result<Vec<String>, String> {
             return Err(format!("token interdit dans la commande : {bad}"));
         }
     }
+    for part in &parts {
+        let p_lower = part.to_ascii_lowercase();
+        if p_lower == "rm"
+            || p_lower == "sudo"
+            || p_lower == "chmod"
+            || p_lower == "chown"
+            || p_lower == "curl"
+            || p_lower == "wget"
+            || p_lower == "ssh"
+            || p_lower == "scp"
+        {
+            return Err(format!("token exact interdit dans la commande : {}", part));
+        }
+    }
     let bin = parts[0].as_str();
     let bin_base = Path::new(bin)
         .file_name()
@@ -354,6 +368,7 @@ mod tests {
     fn blocks_obfuscated_commands() {
         assert!(validate_command("npm run \"s\"udo").is_err());
         assert!(validate_command("cat \"..\"/\"..\"/etc/passwd").is_err());
+        assert!(validate_command("npm run rm").is_err());
     }
 }
 
