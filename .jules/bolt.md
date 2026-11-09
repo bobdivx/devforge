@@ -9,3 +9,7 @@
 ## 2026-11-09 - [Performance] Avoid map().join() for code highlight validation
 **Learning:** In the `CodeBlock.tsx` component, verifying whether the syntax-highlighted tokens map back exactly to the original plain-text code was achieved by generating and comparing intermediate string arrays across all lines and tokens (`tokens.map(l => l.map(t => t.content).join('')).join('\n')`). This caused a 65% overhead versus basic `for` loop construction (3.7s vs 2.2s on benchmarks) because the `map()` approach requires many transient arrays and multiple garbage collector passes.
 **Action:** Replace functional array iteration chains with manual loops strings variables when evaluating string equality on hot/frequently-rendered components, wrapping with `useMemo`.
+
+## 2026-11-09 - [Performance] CodeBlock map().join() micro-optimization rejected
+**Learning:** While replacing `tokens.map(l => l.map(t => t.content).join('')).join('\n')` with a manual `for` loop in `CodeBlock.tsx` technically reduces array allocations, the PR was closed as a "micro-optimization with no measurable gain" (similar to previous closed PRs). The JS engine handles these small, short-lived string arrays efficiently enough that the optimization does not yield real-world performance benefits.
+**Action:** Do not optimize native `.map().join()` chains into manual `for` loops just to avoid allocations unless there is a proven, measurable bottleneck causing frame drops. Prioritize code readability for standard array transformations.
