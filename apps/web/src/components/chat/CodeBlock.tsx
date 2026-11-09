@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Check, Copy } from 'lucide-preact';
 import { copyText } from '../../lib/clipboard';
 import { highlightCode, normalizeLang, type CodeToken } from '../../lib/highlight';
@@ -26,7 +26,22 @@ export function CodeBlock({ code, lang }: { code: string; lang?: string }) {
       window.clearTimeout(t);
     };
   }, [code, lang]);
-  const shown = tokens && tokens.map((l) => l.map((t) => t.content).join('')).join('\n') === code ? tokens : null;
+
+  // Using a manual loop to validate tokens against the code string instead of
+  // nested map().join() chains to avoid excessive intermediate array allocations
+  // and reduce CPU/memory overhead on this hot path.
+  const shown = useMemo(() => {
+    if (!tokens) return null;
+    let s = '';
+    for (let i = 0; i < tokens.length; i++) {
+      const l = tokens[i];
+      for (let j = 0; j < l.length; j++) {
+        s += l[j].content;
+      }
+      if (i < tokens.length - 1) s += '\n';
+    }
+    return s === code ? tokens : null;
+  }, [tokens, code]);
 
   async function onCopy() {
     const ok = await copyText(code);
