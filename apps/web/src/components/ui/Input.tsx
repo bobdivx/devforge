@@ -13,7 +13,16 @@ export function Input({ label, hint, class: className, id, ...rest }: Props) {
   const inputId = id ?? (label ? label.toLowerCase().replace(/\s+/g, '-') : fallbackId);
   return (
     <label class="flex min-w-0 w-full flex-col gap-1.5 text-sm">
-      {label && <span class="font-medium text-[var(--color-ink)]">{label}</span>}
+      {label && (
+        <span class="font-medium text-[var(--color-ink)]">
+          {label}
+          {rest.required && (
+            <span class="ml-1 text-[var(--color-danger)]" aria-hidden="true">
+              *
+            </span>
+          )}
+        </span>
+      )}
       <input
         id={inputId}
         class={cn(
