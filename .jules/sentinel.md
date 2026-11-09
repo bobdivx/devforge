@@ -17,3 +17,8 @@
 **Vulnerability:** The `verify_github_sig` function in `apps/server/src/infra_routes.rs` verified GitHub webhook signatures using standard string comparison `expected.eq_ignore_ascii_case(hex_sig)`.
 **Learning:** String comparison functions exit early as soon as a character mismatch is found. In a cryptographic context, this variable response time leaks information and allows an attacker to perform a timing attack to forge a valid HMAC signature by guessing it byte by byte.
 **Prevention:** Always use a constant-time comparison library (like `hmac`'s `verify_slice()`) to compare cryptographic hashes, secrets, and signatures to prevent side-channel timing attacks. Avoid custom implementations of standard cryptographic algorithms.
+
+## 2024-05-30 - [Command Validation Bypass]
+**Vulnerability:** Command validation in `tools::workdir_cmd` checked for blocklist terms only on the joined command string. This allowed for bypasses like `npm run rm` because it bypassed the `"rm "` substring check, which was intended to block the `rm` command.
+**Learning:** Relying solely on a joined string for command validation breaks multi-word substring blocks or is fragile to spacing, while relying solely on individual token checks doesn't catch multi-word blocked phrases. Both must be checked.
+**Prevention:** Verify both the joined command string against multi-word or spacing blocklists AND individual tokenized arguments for exact matches of sensitive binaries (e.g., `part == "rm"`).

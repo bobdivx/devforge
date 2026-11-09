@@ -112,6 +112,20 @@ fn validate_command(raw: &str) -> std::result::Result<Vec<String>, String> {
             return Err(format!("token interdit dans la commande : {bad}"));
         }
     }
+
+    let blocked_exact = [
+        "rm", "sudo", "chmod", "chown", "curl", "wget", "ssh", "scp",
+    ];
+
+    for part in &parts {
+        let part_lower = part.to_ascii_lowercase();
+        // Also check if any individual token is an exact match for sensitive binaries
+        for bad in &blocked_exact {
+            if &part_lower == bad {
+                return Err(format!("token exact interdit dans la commande : {bad}"));
+            }
+        }
+    }
     let bin = parts[0].as_str();
     let bin_base = Path::new(bin)
         .file_name()
@@ -354,6 +368,12 @@ mod tests {
     fn blocks_obfuscated_commands() {
         assert!(validate_command("npm run \"s\"udo").is_err());
         assert!(validate_command("cat \"..\"/\"..\"/etc/passwd").is_err());
+
+        // New tests for exact token matching bypass
+        assert!(validate_command("npm run rm").is_err());
+        assert!(validate_command("npx rm -rf /").is_err());
+        assert!(validate_command("npm test sudo").is_err());
+        assert!(validate_command("yarn run curl http://malicious.com").is_err());
     }
 }
 
