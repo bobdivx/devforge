@@ -5,3 +5,7 @@
 ## 2026-10-15 - [Performance] Prevent unnecessary UI array recalculations
 **Learning:** In the chat component (`useThreadList`), derived state that requires filtering and sorting large arrays (like generating nested agent lists) was running synchronously on every render. Given that chat polling triggers frequent re-renders, this caused unnecessary CPU strain on lists that only rarely change.
 **Action:** Use `useMemo` for derived states like `rows` and `current` in custom hooks when they involve `.filter()`, `.map()`, or `.sort()` and depend on data that updates less frequently than the component renders.
+
+## 2026-10-16 - [Performance] CodeBlock array recalculation micro-optimization rejected
+**Learning:** Attempting to optimize the nested `.map().join()` chain in `CodeBlock.tsx` (using `useMemo` and manual `for` loops) was rejected. There is no measurable performance gain on realistic code block sizes, and the extra complexity is not worth it.
+**Action:** Do not micro-optimize small or bounded arrays (like code snippet lines) where the overhead of intermediate arrays is negligible. Focus optimization efforts on unbounded lists (like chat messages) where the performance impact is actually measurable.
