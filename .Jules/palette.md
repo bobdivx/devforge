@@ -7,3 +7,7 @@
 ## 2024-10-24 - Added Focus Styles to Button component
 **Learning:** The main `Button` component in `apps/web/src/components/ui/Button.tsx` lacked keyboard focus styles (`focus-visible:`). This makes keyboard navigation difficult as users cannot tell which button is currently focused.
 **Action:** Always ensure that base UI interactive components like Buttons have `focus-visible` styles using the app's accent color (`focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]`).
+
+## 2024-11-11 - QuestionCard accessibility focus states
+**Learning:** Found that custom interactive elements inside `QuestionCard` (specifically the "Autre..." and "Envoyer" buttons, and the text input field) were missing proper focus styles for keyboard navigation, as they did not use the base UI components (`Button`, `Input`).
+**Action:** Always ensure that custom interactive elements receive the standard `focus-visible` styles (`focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]`) for buttons and `focus:ring-2 focus:ring-[var(--color-accent-soft)]` for inputs to maintain accessibility and consistency with the rest of the application.
