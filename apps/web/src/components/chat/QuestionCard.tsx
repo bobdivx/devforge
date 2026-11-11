@@ -104,7 +104,7 @@ export function QuestionCard({ q, state, answer, busy, hideQuestion, onAnswer }:
             {q.allowFreeText && interactive && !other && (
               <button
                 type="button"
-                class="df-tap-skip inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)] sm:min-h-9"
+                class="df-tap-skip inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-[var(--color-ink-muted)] hover:bg-white/5 hover:text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] sm:min-h-9"
                 onClick={() => setOther(true)}
               >
                 <MessageSquare size={14} aria-hidden />
@@ -127,9 +127,9 @@ export function QuestionCard({ q, state, answer, busy, hideQuestion, onAnswer }:
                 onInput={(e) => setText(e.currentTarget.value)}
                 placeholder="Ta réponse…"
                 aria-label="Ta réponse"
-                class="min-h-11 min-w-0 flex-1 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 text-base text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]/50 sm:min-h-9 sm:text-sm"
+                class="min-h-11 min-w-0 flex-1 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 text-base text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]/50 focus:ring-2 focus:ring-[var(--color-accent-soft)] sm:min-h-9 sm:text-sm"
               />
-              <button type="submit" disabled={!text.trim()} class="df-tap-skip min-h-11 rounded-lg bg-[var(--color-accent)] px-3 text-sm font-medium text-zinc-950 disabled:opacity-50 sm:min-h-9">
+              <button type="submit" disabled={!text.trim()} class="df-tap-skip min-h-11 rounded-lg bg-[var(--color-accent)] px-3 text-sm font-medium text-zinc-950 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] sm:min-h-9">
                 Envoyer
               </button>
             </form>
