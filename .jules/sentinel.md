@@ -17,3 +17,8 @@
 **Vulnerability:** The `verify_github_sig` function in `apps/server/src/infra_routes.rs` verified GitHub webhook signatures using standard string comparison `expected.eq_ignore_ascii_case(hex_sig)`.
 **Learning:** String comparison functions exit early as soon as a character mismatch is found. In a cryptographic context, this variable response time leaks information and allows an attacker to perform a timing attack to forge a valid HMAC signature by guessing it byte by byte.
 **Prevention:** Always use a constant-time comparison library (like `hmac`'s `verify_slice()`) to compare cryptographic hashes, secrets, and signatures to prevent side-channel timing attacks. Avoid custom implementations of standard cryptographic algorithms.
+
+## 2026-11-11 - [Bypass Command Parsing - rm]
+**Vulnerability:** The `validate_command` function in `crates/agent/src/tools/workdir_cmd.rs` used a trailing space in the `BLOCKED_TOKENS` list for `rm ` and `rm\t` to prevent matching prefixes like `arm` or `chmod`. This logic, however, did not block exact uses of `rm` at the end of a command string, such as `npm run rm`. It also relied primarily on the joined command string without checking the individual parsed tokens for exact matches of these sensitive binaries.
+**Learning:** Checking for substrings against joined command strings can be bypassed if the restricted token happens at the end of the string where a space is not appended, or if the tokenizer fails to match exact words.
+**Prevention:** Validation for string tokens should run not just against the joined command but also check for exact token matches over the tokenized arguments (e.g. iterate over tokens and verify `token.to_ascii_lowercase() == "rm"`).
