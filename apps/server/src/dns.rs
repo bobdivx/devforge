@@ -172,6 +172,9 @@ pub async fn provision_node(state: &AppState, server_id: &str) {
                     Ok((id, token)) => {
                         let host = CloudflareClient::tunnel_hostname(&id);
                         set_ingress_host(state, &sid, &host).await;
+                        // Le connecteur de CE nœud seulement. ClusterAwareExecutor
+                        // n'exécute `default` en local que sur le nœud d'origine :
+                        // un worker ou un intérim ne doit pas joindre le tunnel du leader.
                         if let Err(e) = state.proxy.ensure_cloudflared(&sid, &token).await {
                             tracing::warn!(node = %sid, error = %e, "cloudflared");
                         }

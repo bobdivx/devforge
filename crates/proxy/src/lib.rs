@@ -439,7 +439,7 @@ impl ProxyFacade {
         let mark: String = token.chars().rev().take(12).collect();
         let name = "devforge-cloudflared";
         let check = format!(
-            r#"docker inspect {name} --format '{{{{index .Config.Labels "devforge.cf_mark"}}}} {{{{.State.Status}}}}' 2>/dev/null || echo 'missing'"#
+            r#"docker inspect {name} --format '{{{{index .Config.Labels "devforge.cf_mark"}}}} {{{{index .Config.Labels "devforge.cf_node"}}}} {{{{.State.Status}}}}' 2>/dev/null || echo 'missing'"#
         );
         let cur = executor.exec(server_id, "", &check, 20).await?;
         let line = cur.output.trim();
@@ -455,11 +455,7 @@ impl ProxyFacade {
             .await
             .map(|r| r.output)
             .unwrap_or_default();
-        if line.starts_with(&mark)
-            && line.contains("running")
-            && net.contains("devforge")
-            && !net.contains("host")
-        {
+        if cloudflared_healthy(line, net.trim(), &mark, server_id) {
             return Ok(json!({"ok": true, "status": "already_running", "container": name}));
         }
         let _ = executor
@@ -480,9 +476,10 @@ impl ProxyFacade {
             .await;
         let run = format!(
             r#"docker run -d --name {name} --restart unless-stopped --network devforge \
-  --label devforge.managed=true --label devforge.cf_mark={} --label devforge.cf_net=devforge \
+  --label devforge.managed=true --label devforge.cf_mark={} --label devforge.cf_node={} --label devforge.cf_net=devforge \
   cloudflare/cloudflared:latest tunnel --no-autoupdate run --token {}"#,
             shell_escape(&mark),
+            shell_escape(server_id),
             shell_escape(token)
         );
         let created = executor.exec(server_id, "", &run, 60).await?;
@@ -758,6 +755,26 @@ impl ProxyFacade {
     }
 }
 
+/// Connecteur déjà bon : même jeton (marque), même nœud, réseau `devforge`, en cours.
+/// Une marque sans `devforge.cf_node` (conteneur d'avant) force la recréation.
+pub(crate) fn cloudflared_healthy(
+    inspect_line: &str,
+    net_line: &str,
+    mark: &str,
+    node_id: &str,
+) -> bool {
+    let node = if node_id.trim().is_empty() {
+        "default"
+    } else {
+        node_id.trim()
+    };
+    let expect = format!("{mark} {node} ");
+    inspect_line.starts_with(&expect)
+        && inspect_line.contains("running")
+        && net_line.contains("devforge")
+        && !net_line.contains("host")
+}
+
 fn shell_escape(s: &str) -> String {
     if s.chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '='))
@@ -805,6 +822,40 @@ fn traefik_labels_match(current: &str, wanted: &serde_json::Map<String, Value>) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cloudflared_without_node_label_is_recreated() {
+        assert!(cloudflared_healthy(
+            "abcnode default running",
+            "devforge devforge",
+            "abcnode",
+            "default"
+        ));
+        assert!(!cloudflared_healthy(
+            "abcnode running",
+            "devforge devforge",
+            "abcnode",
+            "default"
+        ));
+        assert!(!cloudflared_healthy(
+            "abcnode default exited",
+            "devforge devforge",
+            "abcnode",
+            "default"
+        ));
+        assert!(!cloudflared_healthy(
+            "abcnode node_5658218ef601 running",
+            "devforge devforge",
+            "abcnode",
+            "default"
+        ));
+        assert!(!cloudflared_healthy(
+            "abcnode default running",
+            "host devforge",
+            "abcnode",
+            "default"
+        ));
+    }
+
     #[test]
     fn traefik_labels_match_detects_changes() {
         let mut want = serde_json::Map::new();

@@ -30,6 +30,12 @@ Le gateway ZimaOS occupe l'hôte `:80`. Publier `80:80` laisse `devforge-traefik
 
 DevForge publie 80/443 seulement s'ils sont libres. Sinon Traefik écoute uniquement sur le réseau Docker `devforge`, et le tunnel Cloudflare vise `http://devforge-traefik:80` (plus `127.0.0.1:80`). `devforge-cloudflared` est sur ce réseau, pas en `network_mode: host`.
 
+## Plusieurs nœuds, un seul tunnel
+
+Chaque nœud a son tunnel `devforge-{id}`. Le CNAME d’une app pointe vers le tunnel du nœud qui l’héberge. Deux connecteurs sur le même tunnel font répondre le mauvais Traefik (`404 page not found` environ une fois sur deux).
+
+DevForge refuse de lancer le connecteur du leader sur un autre nœud. En secours, il écrit `devforge-peer-forward.yaml` (file provider, priorité 1, `Host` de chaque nom distant, en-tête `X-DevForge-Forwarded` pour ne pas boucler) et retire l’ancien secours manuel `zz-fallback-nas.yml`. Détail : [[Cluster]].
+
 ## Labels Traefik
 
 Au deploy, DevForge applique des labels (`docker update` / recreate) pour que Traefik route vers le conteneur `df-<uuid>`.

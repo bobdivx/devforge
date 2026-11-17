@@ -1,13 +1,14 @@
 use crate::crypto::hash_secret;
-use crate::models::{ClusterNode, ExecBody, NodeRole, NodeStatus, LEADER_NODE_ID};
+use crate::models::{ExecBody, NodeStatus, LEADER_NODE_ID};
 use crate::store::ClusterStore;
 use async_trait::async_trait;
 use devforge_deploy::{ExecResult, RemoteExecutor};
 use devforge_shared::{DevForgeError, Result};
 use std::sync::Arc;
 
-/// Dispatch `server_id` : leader/default → inner (local ou SSH Settings) ;
-/// worker → HTTP `POST {advertise_url}/internal/exec`.
+/// Dispatch `server_id` : ce process (son `node_id`, ou `default` s'il EST
+/// le nœud d'origine) → inner (local ou SSH Settings) ;
+/// autre nœud → HTTP `POST {advertise_url}/internal/exec`.
 pub struct ClusterAwareExecutor {
     inner: Arc<dyn RemoteExecutor>,
     store: Arc<dyn ClusterStore>,
@@ -26,12 +27,18 @@ impl ClusterAwareExecutor {
         }
     }
 
-    fn is_local(server_id: &str, node: Option<&ClusterNode>) -> bool {
+    /// `default` / vide / `*` n'est local que si CE process est le nœud d'origine.
+    /// Un worker ou un leader intérimaire (`node_…`) ne doit pas exécuter chez lui
+    /// les commandes du leader : sinon il démarre le `cloudflared` du tunnel du
+    /// leader et Cloudflare répartit le trafic entre les deux connecteurs.
+    fn runs_here(server_id: &str, local_node_id: &str) -> bool {
         let id = server_id.trim();
-        if id.is_empty() || id == LEADER_NODE_ID || id == "*" {
+        let me = local_node_id.trim();
+        if !me.is_empty() && id == me {
             return true;
         }
-        matches!(node.map(|n| n.role), Some(NodeRole::Leader))
+        let i_am_origin = me.is_empty() || me == LEADER_NODE_ID;
+        id.is_empty() || id == "*" || (id == LEADER_NODE_ID && i_am_origin)
     }
 }
 
@@ -44,23 +51,19 @@ impl RemoteExecutor for ClusterAwareExecutor {
         command: &str,
         timeout_secs: u64,
     ) -> Result<ExecResult> {
-        let local = self.store.get_local().await.ok();
-        if local
-            .as_ref()
-            .is_some_and(|l| l.node_id == server_id.trim() && !l.node_id.is_empty())
-        {
+        let local_id = self
+            .store
+            .get_local()
+            .await
+            .map(|l| l.node_id)
+            .unwrap_or_default();
+        if Self::runs_here(server_id, &local_id) {
             return self
                 .inner
                 .exec(server_id, workdir, command, timeout_secs)
                 .await;
         }
         let node = self.store.get_node(server_id).await?;
-        if Self::is_local(server_id, node.as_ref()) {
-            return self
-                .inner
-                .exec(server_id, workdir, command, timeout_secs)
-                .await;
-        }
 
         let node =
             node.ok_or_else(|| DevForgeError::Message(format!("Nœud inconnu: {server_id}")))?;
@@ -129,7 +132,7 @@ pub fn verify_node_secret(provided: &str, stored_plain: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::NodeRole;
+    use crate::models::{ClusterNode, NodeRole};
     use crate::store::MemoryClusterStore;
     use chrono::Utc;
     use devforge_deploy::StubRemoteExecutor;
@@ -155,7 +158,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn leader_role_is_local() {
+    async fn other_leader_role_is_not_this_machine() {
         let store = Arc::new(MemoryClusterStore::new());
         let now = Utc::now().to_rfc3339();
         store
@@ -183,8 +186,35 @@ mod tests {
             .unwrap();
         let inner = Arc::new(StubRemoteExecutor::new());
         let exec = ClusterAwareExecutor::new(inner, store);
-        let r = exec.exec("other", "", "true", 5).await.unwrap();
-        assert!(r.ok);
+        let err = exec.exec("other", "", "true", 5).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("URL") || msg.contains("secret"),
+            "un autre nœud leader ne s'exécute pas en local : {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn interim_does_not_run_origin_commands_locally() {
+        let store = Arc::new(MemoryClusterStore::new());
+        store.seed_leader("NAS", "http://10.1.0.58:8000").await;
+        let mut local = store.get_local().await.unwrap();
+        local.node_id = "node_5658218ef601".into();
+        local.role = NodeRole::Leader;
+        local.acting_leader = true;
+        store.set_local(&local).await.unwrap();
+        let exec = ClusterAwareExecutor::new(Arc::new(StubRemoteExecutor::new()), store);
+        let err = exec.exec("default", "", "echo hi", 5).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("secret") || msg.contains("URL"),
+            "le tunnel du leader ne doit pas partir sur l'intérim : {msg}"
+        );
+        let own = exec
+            .exec("node_5658218ef601", "", "echo hi", 5)
+            .await
+            .unwrap();
+        assert!(own.ok);
     }
 
     #[tokio::test]

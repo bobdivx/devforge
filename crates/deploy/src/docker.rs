@@ -261,9 +261,12 @@ pub fn docker_network_attach(network: &str, container: &str, alias: Option<&str>
 }
 
 pub fn docker_compose_up(compose_file: &str) -> String {
+    let f = shell_escape(compose_file);
     format!(
-        "docker compose -f {} up -d --build",
-        shell_escape(compose_file)
+        "docker compose -f {f} up -d --build\n\
+         docker compose -f {f} ps -aq | while read -r id; do\n\
+           [ -n \"$id\" ] && docker update --restart=unless-stopped \"$id\" >/dev/null 2>&1 || true\n\
+         done"
     )
 }
 
@@ -1776,6 +1779,14 @@ mod tests {
         assert!(cmd.contains("--health-start-period 2m"));
         assert!(cmd.contains("-e HOST=0.0.0.0"));
         assert!(cmd.contains("-e PORT=3000"));
+        assert!(cmd.contains("--restart unless-stopped"));
+    }
+
+    #[test]
+    fn compose_up_sets_restart_policy() {
+        let cmd = docker_compose_up("docker-compose.yml");
+        assert!(cmd.contains("docker compose -f docker-compose.yml up -d --build"));
+        assert!(cmd.contains("docker update --restart=unless-stopped"));
     }
 
     #[test]
