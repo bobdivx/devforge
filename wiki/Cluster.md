@@ -57,8 +57,12 @@ Si le **leader** tombe : après ~1 min sans heartbeat, le worker au plus petit `
 
 Un tunnel Cloudflare **uniquement sur le leader** est un point unique : les domaines publics meurent avec lui. Settings → Domaine → **Entrée publique** : un token (et le domaine si besoin).
 
-- **Cloudflare** — un tunnel `devforge-{nœud}` par machine, CNAME proxied vers `{tunnel_id}.cfargotunnel.com`. Pas de 80/443 à ouvrir.
+- **Cloudflare** — un tunnel `devforge-{nœud}` par machine, CNAME proxied vers `{tunnel_id}.cfargotunnel.com`. Pas de 80/443 à ouvrir. Le connecteur `devforge-cloudflared` de chaque nœud ne rejoint que **son** tunnel. Un worker ou un leader intérimaire n’exécute pas en local les commandes du nœud `default` (sinon les deux connecteurs se partagent le tunnel du NAS et Cloudflare envoie ~50 % des requêtes au mauvais Traefik, qui répond `404 page not found`).
+- **Secours si le tunnel est quand même partagé** — chaque nœud écrit `/traefik/dynamic/devforge-peer-forward.yaml` (priorité 1, un `Host` par nom qu’il n’héberge pas) vers `http://{IP d’annonce du nœud propriétaire}:80`, ou vers le leader si cette adresse manque. L’en-tête `X-DevForge-Forwarded` empêche une seconde transmission ; un nœud ne se renvoie pas à lui-même. Le fichier est recalculé toutes les minutes (changement d’élection compris).
+- **`zz-fallback-nas.yml`** (secours manuel `PathPrefix(/)` vers le NAS) est supprimé par cette synchro. Après mise à jour, on peut aussi l’effacer à la main : `docker exec devforge-traefik rm -f /traefik/dynamic/zz-fallback-nas.yml`.
 - **Porkbun** — record A vers l’IP publique du nœud. Ports 80/443 + HTTP-01.
+
+Au démarrage, et toutes les minutes, DevForge pose `unless-stopped` sur les conteneurs qu’il gère (apps `df-*`, dev, previews de PR, sidecars, Postgres de projet, runners, `devforge-sso-*`, `devforge-keeper`) et relance ceux qui sont arrêtés. Un projet `stopped` ou `paused` n’est pas relancé, ni une app `draft` ou en cours de déploiement. La base Postgres du projet et une preview de PR déjà prête, elles, reviennent : l’action stop ne concerne que le conteneur d’app.
 
 Traefik écoute sur **chaque nœud**. Cluster → Infos montre la cible auto (surcharge possible).
 

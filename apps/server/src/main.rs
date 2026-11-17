@@ -54,6 +54,7 @@ mod page_watch_routes;
 #[cfg(test)]
 mod page_watch_tests;
 mod paths;
+mod peer_forward;
 mod platform_sso;
 #[cfg(test)]
 mod platform_sso_tests;
@@ -67,6 +68,7 @@ mod project_oidc_routes;
 mod project_pg;
 mod project_pg_routes;
 mod receipts;
+mod restart_policy;
 mod rich_chat;
 mod routes;
 mod run_events;
@@ -277,6 +279,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     crate::dns::spawn_dns_loop(state.clone());
     crate::dns_failover::spawn_loop(state.clone());
+    crate::restart_policy::spawn_loop(state.clone());
+    crate::peer_forward::spawn_loop(state.clone());
     if !kube_runtime {
         crate::docker_gc_routes::spawn_loop(state.clone());
     }
