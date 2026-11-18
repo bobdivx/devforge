@@ -337,6 +337,32 @@ fn normalize_repo_rel(rel: &str) -> String {
         .to_string()
 }
 
+/// Argument `docker run --env-file`.
+///
+/// `project_env` est le `.env` absolu écrit à la racine du workdir. Il ne doit
+/// pas être copié dans `base_directory` : ce sous-dossier est le contexte de
+/// `docker build`. S'il existe, c'est ce chemin qui est injecté. Sinon, repli
+/// sur `.env` relatif au répertoire d'exécution (`build_dir`).
+fn container_env_file_arg(
+    project_env: Option<&std::path::Path>,
+    project_env_exists: bool,
+    build_dir_env_exists: bool,
+) -> Option<String> {
+    if project_env_exists {
+        if let Some(path) = project_env {
+            let raw = path.to_string_lossy();
+            if !raw.is_empty() {
+                return Some(raw.into_owned());
+            }
+        }
+    }
+    if build_dir_env_exists {
+        Some(".env".to_string())
+    } else {
+        None
+    }
+}
+
 /// Path of `abs` relative to `workdir`, or `.` when equal. Falls back to `abs`.
 fn path_relative_to(abs: &str, workdir: &str) -> String {
     let abs = abs.trim_end_matches('/');
@@ -1047,37 +1073,38 @@ impl DeployFacade {
         }
 
         // Clone env projet → workdir `.env` (source de vérité = DB / req.env_file).
+        // Reste à la racine du clone : ne pas le copier dans `base_directory`,
+        // sinon il entre dans le contexte `docker build`.
         // Si aucune var : supprimer un éventuel leftover (évite mélange entre projets).
+        let project_env_path = std::path::PathBuf::from(&workdir).join(".env");
+        match req
+            .env_file
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
         {
-            let env_path = std::path::PathBuf::from(&workdir).join(".env");
-            match req
-                .env_file
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-            {
-                Some(env_body) => {
-                    if std::fs::write(&env_path, env_body).is_ok() {
-                        logs.push_str("[env] cloned project env → .env\n");
-                    } else {
-                        let escaped = env_body.replace('\'', "'\\''");
-                        let write_cmd = format!("printf '%s' '{escaped}' > .env");
-                        match self.executor.exec(server, &workdir, &write_cmd, 30).await {
-                            Ok(r) => {
-                                logs.push_str(&format!("[env] remote clone exit={}\n", r.exit_code))
-                            }
-                            Err(e) => logs.push_str(&format!("[env] write error: {e}\n")),
+            Some(env_body) => {
+                if std::fs::write(&project_env_path, env_body).is_ok() {
+                    logs.push_str("[env] cloned project env → .env\n");
+                } else {
+                    let escaped = env_body.replace('\'', "'\\''");
+                    let write_cmd = format!("printf '%s' '{escaped}' > .env");
+                    match self.executor.exec(server, &workdir, &write_cmd, 30).await {
+                        Ok(r) => {
+                            logs.push_str(&format!("[env] remote clone exit={}\n", r.exit_code))
                         }
+                        Err(e) => logs.push_str(&format!("[env] write error: {e}\n")),
                     }
                 }
-                None => {
-                    let _ = std::fs::remove_file(&env_path);
-                    let rm = "rm -f .env 2>/dev/null; true";
-                    let _ = self.executor.exec(server, &workdir, rm, 15).await;
-                    logs.push_str("[env] no project env — cleared stale .env\n");
-                }
+            }
+            None => {
+                let _ = std::fs::remove_file(&project_env_path);
+                let rm = "rm -f .env 2>/dev/null; true";
+                let _ = self.executor.exec(server, &workdir, rm, 15).await;
+                logs.push_str("[env] no project env — cleared stale .env\n");
             }
         }
+        let project_env = Some(project_env_path.as_path());
 
         let build_dir = {
             let base = req.base_directory.trim();
@@ -1145,6 +1172,7 @@ impl DeployFacade {
                 req.proxy_labels.as_ref(),
                 &mut logs,
                 &extras,
+                project_env,
             )
             .await
         } else {
@@ -1238,6 +1266,7 @@ impl DeployFacade {
                                     req.proxy_labels.as_ref(),
                                     &mut logs,
                                     &extras,
+                                    project_env,
                                 )
                                 .await
                             } else {
@@ -1316,6 +1345,7 @@ impl DeployFacade {
                                     req.proxy_labels.as_ref(),
                                     &mut logs,
                                     &extras,
+                                    project_env,
                                 )
                                 .await
                             } else {
@@ -1365,6 +1395,7 @@ impl DeployFacade {
                                 req.proxy_labels.as_ref(),
                                 &mut logs,
                                 &extras,
+                                project_env,
                             )
                             .await
                         }
@@ -1405,6 +1436,7 @@ impl DeployFacade {
                                             req.proxy_labels.as_ref(),
                                             &mut logs,
                                             &extras,
+                                            project_env,
                                         )
                                         .await
                                     } else {
@@ -1450,6 +1482,7 @@ impl DeployFacade {
                                             req.proxy_labels.as_ref(),
                                             &mut logs,
                                             &extras,
+                                            project_env,
                                         )
                                         .await
                                     } else {
@@ -1558,6 +1591,7 @@ impl DeployFacade {
         proxy_labels: Option<&serde_json::Value>,
         logs: &mut LogBuffer,
         extras: &ContainerExtras,
+        project_env: Option<&std::path::Path>,
     ) -> bool {
         logs.push_str(
             "[nitro] serveur Node (TanStack Start / Nitro) — image node_server, pas nginx/dist\n",
@@ -1593,6 +1627,7 @@ impl DeployFacade {
                         proxy_labels,
                         logs,
                         extras,
+                        project_env,
                     )
                     .await
                 } else {
@@ -1730,6 +1765,56 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         false
     }
 
+    /// Chemin `--env-file` : `.env` absolu du workdir s'il est présent, sinon
+    /// `.env` dans `build_dir` (comportement historique).
+    async fn resolve_container_env_file(
+        &self,
+        server: &str,
+        build_dir: &str,
+        project_env: Option<&std::path::Path>,
+    ) -> Option<String> {
+        let project_exists = match project_env {
+            Some(path) => {
+                let owned = path.to_string_lossy();
+                if owned.is_empty() {
+                    false
+                } else {
+                    self.host_path_exists(server, owned.as_ref()).await
+                }
+            }
+            None => false,
+        };
+        let build_exists = if project_exists {
+            false
+        } else {
+            self.build_dir_dotenv_exists(server, build_dir).await
+        };
+        container_env_file_arg(project_env, project_exists, build_exists)
+    }
+
+    /// Fichier présent sur le FS local, ou sur l'hôte distant (chemin absolu).
+    async fn host_path_exists(&self, server: &str, path: &str) -> bool {
+        if std::path::Path::new(path).exists() {
+            return true;
+        }
+        let cmd = format!("test -f {}", docker::shell_escape(path));
+        matches!(
+            self.executor.exec(server, "/", &cmd, 10).await,
+            Ok(r) if r.ok
+        )
+    }
+
+    /// `.env` dans le répertoire d'exécution (souvent `base_directory`).
+    async fn build_dir_dotenv_exists(&self, server: &str, build_dir: &str) -> bool {
+        if std::path::Path::new(&format!("{build_dir}/.env")).exists() {
+            return true;
+        }
+        matches!(
+            self.executor.exec(server, build_dir, "test -f .env", 10).await,
+            Ok(r) if r.ok
+        )
+    }
+
     async fn docker_restart_container(
         &self,
         server: &str,
@@ -1741,6 +1826,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
         proxy_labels: Option<&serde_json::Value>,
         logs: &mut LogBuffer,
         extras: &ContainerExtras,
+        project_env: Option<&std::path::Path>,
     ) -> bool {
         // BLUE/GREEN DEPLOY STRATEGY:
         // 1. Check if old container exists and is healthy → keep as fallback
@@ -1790,22 +1876,16 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             }
         }
 
-        // Vérifier `.env` via l’executor (local ou remote), pas seulement le FS local.
-        let env_file = {
-            let local = std::path::Path::new(&format!("{workdir}/.env")).exists();
-            if local {
-                Some(".env")
-            } else {
-                match self
-                    .executor
-                    .exec(server, workdir, "test -f .env", 10)
-                    .await
-                {
-                    Ok(r) if r.ok => Some(".env"),
-                    _ => None,
-                }
-            }
-        };
+        // `.env` du workdir (absolu, hors contexte de build) s'il existe.
+        // Sinon, repli : `.env` relatif à `workdir` (ici le build_dir).
+        // On ne journalise que le chemin, jamais le contenu.
+        let env_file = self
+            .resolve_container_env_file(server, workdir, project_env)
+            .await;
+        match env_file.as_deref() {
+            Some(path) => logs.push_str(&format!("[env] --env-file {path}\n")),
+            None => logs.push_str("[env] aucun .env pour le conteneur\n"),
+        }
 
         // Try to get network from env, then auto-detect if Traefik labels are present
         let mut network = std::env::var("DEVFORGE_DOCKER_NETWORK")
@@ -1921,7 +2001,7 @@ if (-not $candidates) { Write-Error 'docker missing'; exit 1 }
             &new_name,
             image,
             &ports,
-            env_file,
+            env_file.as_deref(),
             network.as_deref(),
             None, // NO proxy labels yet
             extras.gpu_nvidia,
@@ -2514,6 +2594,99 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn env_file_with_base_directory_uses_workdir_dotenv() {
+        let workdir = "/srv/devforge/applications/proj";
+        let build_dir = resolve_repo_subdir(workdir, "site");
+        assert_eq!(build_dir, "/srv/devforge/applications/proj/site");
+
+        let project_env = std::path::PathBuf::from(workdir).join(".env");
+        assert_eq!(
+            project_env,
+            std::path::PathBuf::from("/srv/devforge/applications/proj/.env")
+        );
+        assert!(!project_env.starts_with(&build_dir));
+
+        let arg = container_env_file_arg(Some(&project_env), true, false);
+        assert_eq!(arg.as_deref(), Some("/srv/devforge/applications/proj/.env"));
+
+        let cmd = docker::docker_run_ex(
+            "app",
+            "img",
+            &[(3000, 3000)],
+            arg.as_deref(),
+            None,
+            None,
+            false,
+            false,
+            &[],
+            &crate::runtime::RunTune::default(),
+            Some(3000),
+        );
+        assert!(cmd.contains("--env-file /srv/devforge/applications/proj/.env"));
+        assert!(!cmd.contains("site/.env"));
+
+        // Repli : le .env du workdir est absent, celui de base_directory reste utilisé.
+        assert_eq!(
+            container_env_file_arg(Some(&project_env), false, true).as_deref(),
+            Some(".env")
+        );
+        assert!(container_env_file_arg(Some(&project_env), false, false).is_none());
+        assert!(container_env_file_arg(None, false, false).is_none());
+
+        // Sans base_directory le fichier du workdir est quand même passé en absolu.
+        assert_eq!(
+            container_env_file_arg(Some(&project_env), true, true).as_deref(),
+            Some("/srv/devforge/applications/proj/.env")
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_env_file_with_base_directory_reads_workdir_dotenv() {
+        let root = std::env::temp_dir().join(format!(
+            "df-envfile-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let workdir = root.join("repo");
+        let build_dir = workdir.join("site");
+        std::fs::create_dir_all(&build_dir).unwrap();
+        let env_path = workdir.join(".env");
+        std::fs::write(&env_path, "API_TOKEN=super-secret-value\n").unwrap();
+
+        let facade = DeployFacade::new(Arc::new(LocalShellExecutor));
+        let build = build_dir.to_string_lossy().into_owned();
+        let got = facade
+            .resolve_container_env_file("local", &build, Some(&env_path))
+            .await
+            .expect("workdir .env");
+        assert_eq!(got, env_path.to_string_lossy());
+        assert!(std::path::Path::new(&got).is_absolute());
+        assert!(!got.contains("super-secret-value"));
+        assert!(
+            !build_dir.join(".env").exists(),
+            ".env ne doit pas être copié dans le contexte de build"
+        );
+
+        std::fs::remove_file(&env_path).unwrap();
+        std::fs::write(build_dir.join(".env"), "ONLY_IN_SITE=1\n").unwrap();
+        let got = facade
+            .resolve_container_env_file("local", &build, Some(&env_path))
+            .await;
+        assert_eq!(got.as_deref(), Some(".env"));
+
+        std::fs::remove_file(build_dir.join(".env")).unwrap();
+        let got = facade
+            .resolve_container_env_file("local", &build, Some(&env_path))
+            .await;
+        assert!(got.is_none());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn trim_out_keeps_short_output() {
