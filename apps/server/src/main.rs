@@ -45,6 +45,7 @@ mod infra_routes;
 mod infra_sqlite;
 mod kube_routes;
 mod llm_routes;
+mod mcp_brand;
 mod mcp_oauth;
 mod mcp_routes;
 mod memory_routes;
@@ -438,6 +439,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(llm_routes::router())
         .merge(mcp_routes::router())
         .merge(mcp_oauth::router())
+        .merge(mcp_brand::router())
         .merge(runner_routes::router())
         .merge(actions_routes::router())
         .merge(git_routes::router())

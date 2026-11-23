@@ -573,10 +573,13 @@ async fn mcp_jsonrpc(
         }
     };
 
+    let base = resolve_public_base_url(&state, &headers)
+        .await
+        .unwrap_or_default();
     if let Value::Array(items) = parsed {
         let mut out = Vec::new();
         for item in items {
-            if let Some(resp) = mcp_handle_one(&state, &abilities, &workspace, item).await {
+            if let Some(resp) = mcp_handle_one(&state, &abilities, &workspace, &base, item).await {
                 out.push(resp);
             }
         }
@@ -585,7 +588,7 @@ async fn mcp_jsonrpc(
         }
         return Json(Value::Array(out)).into_response();
     }
-    match mcp_handle_one(&state, &abilities, &workspace, parsed).await {
+    match mcp_handle_one(&state, &abilities, &workspace, &base, parsed).await {
         Some(resp) => Json(resp).into_response(),
         None => axum::http::StatusCode::ACCEPTED.into_response(),
     }
@@ -596,6 +599,7 @@ async fn mcp_handle_one(
     state: &AppState,
     abilities: &[String],
     workspace: &str,
+    public_base: &str,
     raw: Value,
 ) -> Option<Value> {
     let body: JsonRpcRequest = match serde_json::from_value(raw) {
@@ -637,11 +641,7 @@ async fn mcp_handle_one(
             rpc_ok(json!({
                 "protocolVersion": negotiate_protocol_version(requested),
                 "capabilities": { "tools": { "listChanged": false } },
-                "serverInfo": {
-                    "name": "devforge",
-                    "title": "DevForge",
-                    "version": env!("CARGO_PKG_VERSION"),
-                },
+                "serverInfo": crate::mcp_brand::server_info(public_base),
                 "instructions": "DevForge : PaaS auto-hébergé. Outils pour lister les projets, lire/écrire des fichiers, déployer, lire les logs et vérifier la santé des applications.",
             }))
         }
@@ -1655,7 +1655,7 @@ async fn oauth_client_metadata(
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],
         "client_uri": app_url,
-        "logo_uri": format!("{}/favicon.ico", app_url),
+        "logo_uri": crate::mcp_brand::logo_uri(&app_url),
     })))
 }
 

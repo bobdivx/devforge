@@ -45,6 +45,10 @@ fn metadata_documents_use_public_https_base() {
     );
     assert_eq!(asm["code_challenge_methods_supported"], json!(["S256"]));
     assert_eq!(asm["client_id_metadata_document_supported"], true);
+    let logo = "https://web.jeser.app/icons/devforge-512.png";
+    assert_eq!(prm["logo_uri"], logo);
+    assert_eq!(asm["logo_uri"], logo);
+    assert_eq!(asm["client_uri"], BASE);
 }
 
 #[test]
