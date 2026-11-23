@@ -235,6 +235,7 @@ pub fn protected_resource_doc(base: &str, mcp_path: &str) -> Value {
         "bearer_methods_supported": ["header"],
         "resource_name": "DevForge",
         "resource_documentation": base,
+        "logo_uri": crate::mcp_brand::logo_uri(base),
     })
 }
 
@@ -255,6 +256,8 @@ pub fn authorization_server_doc(base: &str) -> Value {
         "client_id_metadata_document_supported": true,
         "authorization_response_iss_parameter_supported": true,
         "service_documentation": base,
+        "client_uri": base,
+        "logo_uri": crate::mcp_brand::logo_uri(base),
     })
 }
 
